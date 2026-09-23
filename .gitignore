@@ -1,0 +1,32 @@
+# Xcode / generated
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+build/
+build-apple/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+
+# XcodeGen output is generated in CI, never committed
+!project.yml
+
+# Vendored binaries are built in CI, never committed
+Vendor/
+*.xcframework/
+*.ipa
+*.dSYM/
+
+# Artifacts
+artifacts/
+snapshots/
+*.bin
+
+# macOS / Windows noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc

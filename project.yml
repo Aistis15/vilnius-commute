@@ -1,0 +1,234 @@
+name: VilniusCommute
+
+options:
+  bundleIdPrefix: com.vilniuscommute
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: false
+  minimumXcodeGenVersion: "2.42.0"
+
+# ---------------------------------------------------------------------------
+# Project-wide settings.
+#
+# Code signing is OFF by default: every build produced here is unsigned and
+# re-signed later by Sideloadly with a free Apple ID. CI never has a
+# provisioning profile, so nothing may depend on one.
+# ---------------------------------------------------------------------------
+settings:
+  base:
+    BUNDLE_ID_PREFIX: com.vilniuscommute.app
+    # Empty on purpose. The App Groups probe build overrides this on the
+    # xcodebuild command line together with CODE_SIGN_ENTITLEMENTS.
+    VC_APP_GROUP: ""
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY: YES
+
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    TARGETED_DEVICE_FAMILY: "1"          # iPhone only
+    SUPPORTS_MACCATALYST: NO
+    SUPPORTS_XR_DESIGNED_FOR_IPHONE: NO
+
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGNING_ALLOWED: NO
+    DEVELOPMENT_TEAM: ""
+
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    ENABLE_MODULE_VERIFIER: NO
+    GCC_WARN_UNDECLARED_SELECTOR: YES
+    CLANG_WARN_DOCUMENTATION_COMMENTS: NO
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    Release:
+      SWIFT_COMPILATION_MODE: wholemodule
+      VALIDATE_PRODUCT: YES
+
+configs:
+  Debug: debug
+  Release: release
+
+# ---------------------------------------------------------------------------
+# Targets
+# ---------------------------------------------------------------------------
+targets:
+
+  # Shared code: models, design system, Live Activity attributes AND the
+  # SwiftUI views for every Live Activity state.
+  #
+  # Views live here (not in the widget extension) for one concrete reason:
+  # a unit-test bundle cannot import an app extension, so anything that has
+  # to be snapshot-tested in CI must be reachable from a linkable framework.
+  # The widget extension stays a thin shell that wires these views up.
+  #
+  # Built as a STATIC framework (MACH_O_TYPE=staticlib) so neither the app
+  # nor the extension has to embed a dylib.
+  Core:
+    type: framework
+    platform: iOS
+    sources:
+      - path: Core/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).core
+        PRODUCT_NAME: Core
+        MACH_O_TYPE: staticlib
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        GENERATE_INFOPLIST_FILE: YES
+
+  VilniusCommute:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/Sources
+      - path: App/Resources
+        buildPhase: resources
+    dependencies:
+      - target: Core
+        embed: false
+      - target: VilniusCommuteWidgets
+      # Built in CI by Tools/whisper/build_whisper_xcframework.sh.
+      # Absent from the repo on purpose (binary, ~100 MB).
+      - framework: Vendor/whisper.xcframework
+        embed: true
+        codeSign: false
+      - sdk: Accelerate.framework
+      - sdk: Metal.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX)
+        PRODUCT_NAME: VilniusCommute
+        INFOPLIST_KEY_CFBundleDisplayName: Vilnius
+        OTHER_LDFLAGS: "$(inherited) -ObjC"
+    info:
+      path: App/Supporting/Info.plist
+      properties:
+        CFBundleDisplayName: Vilnius
+        CFBundleDevelopmentRegion: lt
+        CFBundleLocalizations: [lt]
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSupportsIndirectInputEvents: true
+        # Live Activities. Verified requirement for ActivityKit.
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        # Read by CapabilityProbe. Empty in the default build.
+        VCAppGroupIdentifier: $(VC_APP_GROUP)
+        # Usage strings shown by iOS. Lithuanian, because the UI is Lithuanian.
+        NSMicrophoneUsageDescription: >-
+          Mikrofonas reikalingas kelionei suplanuoti balsu.
+        NSLocationWhenInUseUsageDescription: >-
+          Vieta reikalinga maršrutui nuo tavo buvimo vietos suplanuoti.
+        NSLocationAlwaysAndWhenInUseUsageDescription: >-
+          Vieta fone reikalinga sekti, ar spėji į autobusą, kai ekranas užrakintas.
+        # Verified required by AlarmKit (developer.apple.com, iOS 26.0+).
+        # Without it the alarm is never scheduled.
+        NSAlarmKitUsageDescription: >-
+          Žadintuvas primena, kada laikas išeiti į stotelę.
+        UIBackgroundModes:
+          - location
+          - audio
+          - processing
+    entitlements:
+      path: App/Supporting/VilniusCommute.entitlements
+      properties:
+        # Deliberately minimal. App Groups are NOT here: a free Apple ID
+        # cannot provision them, and an unprovisionable entitlement makes the
+        # install fail outright. The App Groups variant is a separate build,
+        # see Tools/ci/build_ipa.sh and docs/capability-probe.md.
+        com.apple.developer.usernotifications.time-sensitive: true
+
+  VilniusCommuteWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets/Sources
+    dependencies:
+      - target: Core
+        embed: false
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).widgets
+        PRODUCT_NAME: VilniusCommuteWidgets
+        SKIP_INSTALL: YES
+    info:
+      path: Widgets/Supporting/Info.plist
+      properties:
+        CFBundleDisplayName: Vilnius
+        CFBundleDevelopmentRegion: lt
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        VCAppGroupIdentifier: $(VC_APP_GROUP)
+        NSMicrophoneUsageDescription: >-
+          Mikrofonas reikalingas kelionei suplanuoti balsu iš užrakto ekrano.
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Widgets/Supporting/VilniusCommuteWidgets.entitlements
+      properties: {}
+
+  # Pure logic tests. No app host -> fast, and they run even if the app
+  # target is broken.
+  CoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/CoreTests
+    dependencies:
+      - target: Core
+
+  # Renders every view to PNG via ImageRenderer. Hosted in the app so it can
+  # reach app-level screens as well as Core's Live Activity views.
+  SnapshotTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/SnapshotTests
+    dependencies:
+      - target: Core
+      - target: VilniusCommute
+    settings:
+      base:
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/VilniusCommute.app/VilniusCommute
+        BUNDLE_LOADER: $(TEST_HOST)
+
+schemes:
+  VilniusCommute:
+    build:
+      targets:
+        VilniusCommute: all
+      parallelizeBuild: true
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - CoreTests
+        - SnapshotTests
+    archive:
+      config: Release
+
+  Core:
+    build:
+      targets:
+        Core: all
+    test:
+      config: Debug
+      targets:
+        - CoreTests

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  App Groups probe build ONLY.
+
+	  A free Apple ID is not expected to be able to provision an App Group,
+	  and an unprovisionable entitlement makes the install fail outright —
+	  which would take the whole build down with it. So this is never the
+	  default: it is passed explicitly via CODE_SIGN_ENTITLEMENTS to produce a
+	  second, clearly-labelled IPA whose only job is to find out.
+	-->
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(VC_APP_GROUP)</string>
+	</array>
+</dict>
+</plist>

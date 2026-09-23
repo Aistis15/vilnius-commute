@@ -1,0 +1,118 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned rather than "latest": the deployment target is iOS 26.0 and the
+  # runner carries several Xcode 26.x versions, so leaving it to the default
+  # would make builds drift as the image is updated.
+  XCODE_APP: /Applications/Xcode_26.6.app
+  SIMULATOR: platform=iOS Simulator,name=iPhone 17,OS=26.5
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "${XCODE_APP}"
+          xcodebuild -version
+          echo "--- iOS SDKs ---"
+          xcodebuild -showsdks | grep -i ios || true
+
+      # whisper.cpp has no Swift package and ships no prebuilt binaries, so the
+      # framework is compiled from source. It only has to happen once per
+      # pinned version — after that this restores in seconds.
+      - name: Cache whisper.xcframework
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: Vendor/whisper.xcframework
+          key: whisper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Tools/whisper/whisper-version.txt', 'Tools/whisper/ios_only_patch.py', 'Tools/whisper/build_whisper_xcframework.sh') }}
+
+      - name: Build whisper.xcframework
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        run: |
+          chmod +x Tools/whisper/build_whisper_xcframework.sh
+          ./Tools/whisper/build_whisper_xcframework.sh
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate --spec project.yml
+          xcodebuild -list -project VilniusCommute.xcodeproj
+
+      # Pure logic first: it is fast and it fails for reasons unrelated to
+      # simulators, so a failure here is unambiguous.
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project VilniusCommute.xcodeproj \
+            -scheme Core \
+            -destination "${SIMULATOR}" \
+            -derivedDataPath build/dd-coretests \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --quieter
+
+      - name: Snapshots
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project VilniusCommute.xcodeproj \
+            -scheme VilniusCommute \
+            -destination "${SIMULATOR}" \
+            -derivedDataPath build/dd-snapshots \
+            -only-testing:SnapshotTests \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --quieter
+          echo "--- rendered ---"
+          ls -la artifacts/snapshots || echo "no snapshots produced"
+
+      - name: Build unsigned .ipa
+        run: |
+          chmod +x Tools/ci/build_ipa.sh
+          ./Tools/ci/build_ipa.sh default
+
+      - name: Build unsigned .ipa (App Groups probe)
+        run: ./Tools/ci/build_ipa.sh appgroups
+
+      - name: Upload .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: artifacts/*.ipa
+          if-no-files-found: error
+
+      - name: Upload snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots
+          path: artifacts/snapshots/
+          if-no-files-found: warn
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            build/**/Logs/**
+          if-no-files-found: ignore
