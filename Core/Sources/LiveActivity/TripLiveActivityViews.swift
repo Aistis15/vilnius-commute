@@ -37,13 +37,7 @@ public struct TripLockScreenView: View {
                     Text("Liko")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(timerInterval: state.countdownRange(),
-                         countsDown: true,
-                         showsHours: false)
-                        .font(.system(.largeTitle, weight: .semibold))
-                        .monospacedDigit()
-                        .multilineTextAlignment(.trailing)
-                        .frame(minWidth: 84, alignment: .trailing)
+                    CountdownWithUnit(state: state, font: .largeTitle)
                 }
             }
 
@@ -59,6 +53,55 @@ public struct TripLockScreenView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+}
+
+/// A live countdown that cannot be mistaken for a clock time.
+///
+/// The problem this solves: the banner shows "Iseik 13:43" next to a bare
+/// "12:04". Two numbers, same size, same monospaced face, one a wall clock and
+/// one a duration — nothing distinguishes them, so the countdown reads as a
+/// time of day.
+///
+/// The format itself is forced. Only `Text(timerInterval:)` keeps ticking once
+/// the app is backgrounded; a computed "12 min" string would freeze at
+/// whatever it said when the app was last awake, which is worse than
+/// ambiguous — it would be quietly wrong. `.relative` is too verbose for the
+/// banner ("2 hours, 23 minutes") and `.timer` has the same mm:ss shape.
+///
+/// So the fix is the unit, not the format: a trailing `min` marks it as a
+/// duration, which is also how the spec's own copy reads ("Liko 12 min").
+public struct CountdownWithUnit: View {
+    private let state: TripContentState
+    private let font: Font.TextStyle
+    private let minWidth: CGFloat
+
+    public init(
+        state: TripContentState,
+        font: Font.TextStyle = .largeTitle,
+        minWidth: CGFloat = 78
+    ) {
+        self.state = state
+        self.font = font
+        self.minWidth = minWidth
+    }
+
+    public var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(timerInterval: state.countdownRange(),
+                 countsDown: true,
+                 showsHours: false)
+                .font(.system(font, weight: .semibold))
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: minWidth, alignment: .trailing)
+
+            Text("min")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Liko \(TimeFormat.minutesUntil(state.leaveAt)) min")
     }
 }
 
@@ -174,10 +217,9 @@ public struct TripIslandExpandedBottom: View {
         HStack(spacing: 8) {
             RouteSummary(routes: state.routes, size: .regular)
             Spacer(minLength: 8)
-            Text(timerInterval: state.countdownRange(), countsDown: true, showsHours: false)
-                .font(.system(.title3, weight: .semibold))
-                .monospacedDigit()
-                .frame(maxWidth: 72, alignment: .trailing)
+            // Same reasoning as the banner: the arrival clock time sits
+            // directly above this, so the countdown needs its unit.
+            CountdownWithUnit(state: state, font: .title3, minWidth: 58)
         }
         .padding(.top, 4)
     }
