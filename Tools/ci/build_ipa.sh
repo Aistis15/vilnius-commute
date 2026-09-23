@@ -37,12 +37,15 @@ app_group="group.com.vilniuscommute.app"
 derived="${repo_root}/build/dd-${variant}"
 output="${repo_root}/artifacts"
 
-extra_args=()
+# Never leave this array empty. macOS ships bash 3.2, where expanding an empty
+# array as "${arr[@]}" is an unbound-variable error under `set -u`. Giving the
+# default variant an explicit no-op override keeps it non-empty.
 case "${variant}" in
     default)
+        extra_args=( "VC_APP_GROUP=" )
         ;;
     appgroups)
-        extra_args+=(
+        extra_args=(
             "VC_APP_GROUP=${app_group}"
             "CODE_SIGN_ENTITLEMENTS=Config/AppGroups-App.entitlements"
         )

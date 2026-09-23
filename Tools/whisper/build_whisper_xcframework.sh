@@ -64,13 +64,18 @@ cp -R "${built}" "${vendor_dir}/whisper.xcframework"
 # Fail here rather than deep inside the app link step if the slices are wrong.
 echo "==> Verifying slices"
 plist="${vendor_dir}/whisper.xcframework/Info.plist"
-identifiers="$(/usr/libexec/PlistBuddy -c 'Print :AvailableLibraries' "${plist}" | grep -o 'ios-[a-zA-Z0-9_]*' || true)"
+# Read the identifiers whole. A character-class grep truncates
+# `ios-arm64_x86_64-simulator` at the hyphen and makes the simulator slice look
+# missing when it is present.
+identifiers="$(/usr/libexec/PlistBuddy -c 'Print :AvailableLibraries' "${plist}" \
+    | awk '/LibraryIdentifier/ { print $3 }')"
 echo "${identifiers}"
-if ! grep -q 'ios-arm64' <<< "${identifiers}"; then
+
+if ! grep -qx 'ios-arm64' <<< "${identifiers}"; then
     echo "error: no ios-arm64 device slice in the built xcframework" >&2
     exit 1
 fi
-if ! grep -q 'simulator' <<< "${identifiers}"; then
+if ! grep -q -- '-simulator$' <<< "${identifiers}"; then
     echo "error: no iOS simulator slice in the built xcframework" >&2
     exit 1
 fi
