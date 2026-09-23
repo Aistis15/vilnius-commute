@@ -34,7 +34,9 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("island", "Dynamic Island", ["island-compact", "island-expanded", "island-minimal"]),
     ("badges", "Maršrutų ženkliukai", [
         "badges-small", "badges-regular", "badges-large",
-        "badges-vibrant", "badges-accented", "badges-accessibility",
+        "badges-vibrant-window", "badges-vibrant-swiftui",
+        "badges-accented-window", "badges-accented-swiftui",
+        "badges-accessibility",
         "route-summary",
     ]),
 ]
@@ -54,8 +56,10 @@ CAPTIONS = {
     "badges-small": "Mažas — valdikliams",
     "badges-regular": "Normalus — sąrašams",
     "badges-large": "Didelis — gyvajai veiklai",
-    "badges-vibrant": "Vibrant — skaičius iškirstas",
-    "badges-accented": "Accented — skaičius iškirstas",
+    "badges-vibrant-window": "Vibrant (UIWindow)",
+    "badges-vibrant-swiftui": "Vibrant (ImageRenderer)",
+    "badges-accented-window": "Accented (UIWindow)",
+    "badges-accented-swiftui": "Accented (ImageRenderer)",
     "badges-accessibility": "Didelis šriftas (AX3)",
     "route-summary": "Maršrutų seka su persėdimu",
 }
@@ -65,6 +69,38 @@ def png_size(path: Path) -> tuple[int, int]:
     """Width and height straight from the IHDR chunk."""
     header = path.read_bytes()[:24]
     return struct.unpack(">II", header[16:24])
+
+
+def flatten(src: Path, dest: Path, theme: str) -> None:
+    """Copy a snapshot, compositing it onto an opaque backdrop if it has alpha.
+
+    `ImageRenderer` draws onto transparency, so the snapshots it produces have
+    a fully transparent background. On a white page they look fine by accident;
+    on this gallery's dark theme the backdrop would show through, and a
+    knocked-out badge number — which is transparency, by design — would come
+    out the colour of the page instead of the colour of the lock screen.
+
+    Compositing here keeps the gallery honest whatever the renderer did.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        shutil.copy2(src, dest)
+        return
+
+    image = Image.open(src)
+    if image.mode != "RGBA":
+        shutil.copy2(src, dest)
+        return
+
+    alpha = image.getchannel("A")
+    if alpha.getextrema() == (255, 255):      # already fully opaque
+        shutil.copy2(src, dest)
+        return
+
+    backdrop_colour = (0, 0, 0, 255) if theme == "dark" else (255, 255, 255, 255)
+    backdrop = Image.new("RGBA", image.size, backdrop_colour)
+    Image.alpha_composite(backdrop, image).convert("RGB").save(dest, "PNG")
 
 
 def collect(snapshots: Path) -> list[dict]:

@@ -15,7 +15,10 @@ env:
   # runner carries several Xcode 26.x versions, so leaving it to the default
   # would make builds drift as the image is updated.
   XCODE_APP: /Applications/Xcode_26.6.app
-  SIMULATOR: platform=iOS Simulator,name=iPhone 17,OS=26.5
+  # SIMULATOR is deliberately NOT pinned here. It used to be
+  # "name=iPhone 17,OS=26.5", which stopped resolving the moment the runner
+  # image rolled and failed the build for a reason unrelated to the code.
+  # The "Pick a simulator" step discovers one by UDID instead.
 
 jobs:
   build:
@@ -31,6 +34,11 @@ jobs:
           xcodebuild -version
           echo "--- iOS SDKs ---"
           xcodebuild -showsdks | grep -i ios || true
+
+      - name: Pick a simulator
+        run: |
+          chmod +x Tools/ci/pick_simulator.sh
+          echo "SIMULATOR=$(./Tools/ci/pick_simulator.sh)" >> "$GITHUB_ENV"
 
       # whisper.cpp has no Swift package and ships no prebuilt binaries, so the
       # framework is compiled from source. It only has to happen once per
