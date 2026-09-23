@@ -148,6 +148,10 @@ night-bus entry as stale.
 
 ## Open, not decided
 
+- **App icon.** There is no asset catalog yet, so the app shows a blank icon on
+  the home screen. Deliberate: Phase 1 ships no invented artwork, and an empty
+  `AppIcon` set would produce the same blank icon with extra ceremony.
+
 - Which whisper model is accurate enough for Lithuanian. Needs a device.
 - Whether transcription can complete while the phone is locked. Needs Phase 5.
 - Every route category, colour and `route_id` prefix in the live feed. Phase 2.

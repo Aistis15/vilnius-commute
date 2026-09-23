@@ -34,7 +34,12 @@ actor WhisperTranscriber {
         let duration: TimeInterval
     }
 
-    private var context: OpaquePointer?
+    /// `nonisolated(unsafe)` so `deinit` can free the context. A `deinit` is
+    /// never actor-isolated, and `OpaquePointer` is not `Sendable`, so without
+    /// this the compiler refuses the cleanup — and leaking a whisper context
+    /// leaks hundreds of megabytes. Every other access goes through this
+    /// actor's methods, so it stays serialised in practice.
+    private nonisolated(unsafe) var context: OpaquePointer?
     private var loadedModelPath: String?
 
     var isLoaded: Bool { context != nil }

@@ -90,8 +90,8 @@ targets:
     platform: iOS
     sources:
       - path: App/Sources
-      - path: App/Resources
-        buildPhase: resources
+      # No App/Resources yet: Phase 1 ships no asset catalog, and an empty
+      # directory is not tracked by git, so listing one fails spec validation.
     dependencies:
       - target: Core
         embed: false
