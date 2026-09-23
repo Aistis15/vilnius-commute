@@ -1,0 +1,141 @@
+name: GTFS data
+
+# The Vilnius feed's licence requires keeping the data current, and parsing a
+# 3.7 MB zip into 34 MB of CSV on an iPhone every launch would be wasteful. So
+# the database is built here, daily, and published as a release asset the app
+# downloads when the digest changes.
+
+on:
+  schedule:
+    # 03:20 UTC. The feed's Last-Modified has been in the evening (Vilnius
+    # time), so this picks up the previous day's publication without racing it.
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish even if the feed digest is unchanged"
+        type: boolean
+        default: false
+  push:
+    # Rebuild when the build or verification logic itself changes, so a bug in
+    # them is caught on the commit that introduced it rather than at 03:20.
+    paths:
+      - "Tools/gtfs/**"
+      - ".github/workflows/gtfs.yml"
+
+concurrency:
+  group: gtfs-data
+  cancel-in-progress: false
+
+permissions:
+  contents: write        # needed to create/update the release
+
+env:
+  FEED_URL: https://www.stops.lt/vilnius/vilnius/gtfs.zip
+  RELEASE_TAG: data-latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download the feed
+        run: |
+          mkdir -p build
+          curl -sSL --fail --max-time 300 -o build/gtfs.zip "${FEED_URL}" -D build/headers.txt
+          echo "--- server said ---"
+          grep -iE '^HTTP|^last-modified|^content-length' build/headers.txt | tr -d '\r'
+          echo "FEED_SHA=$(sha256sum build/gtfs.zip | cut -c1-16)" >> "$GITHUB_ENV"
+          echo "bytes: $(stat -c%s build/gtfs.zip)"
+
+      - name: Has the feed actually changed?
+        id: changed
+        run: |
+          published=$(gh release view "${RELEASE_TAG}" --json body -q .body 2>/dev/null \
+                        | grep -oE 'feed_digest: [0-9a-f]+' | cut -d' ' -f2 || true)
+          echo "published digest: ${published:-<none>}"
+          echo "current digest:   ${FEED_SHA}"
+          if [ "${published}" = "${FEED_SHA}" ] && [ "${{ inputs.force }}" != "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Unchanged — nothing to publish."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build the database
+        if: steps.changed.outputs.skip != 'true'
+        run: python Tools/gtfs/build_db.py build/gtfs.zip build/vilnius.sqlite
+
+      # A daily job that silently publishes a broken database is worse than one
+      # that fails: the app would download it and route people wrongly.
+      - name: Verify the database
+        if: steps.changed.outputs.skip != 'true'
+        run: python Tools/gtfs/verify_db.py build/vilnius.sqlite
+
+      - name: Compress and describe
+        if: steps.changed.outputs.skip != 'true'
+        run: |
+          gzip -9 -k -f build/vilnius.sqlite
+          raw=$(stat -c%s build/vilnius.sqlite)
+          gz=$(stat -c%s build/vilnius.sqlite.gz)
+          sha=$(sha256sum build/vilnius.sqlite.gz | cut -d' ' -f1)
+          echo "raw ${raw} bytes, gz ${gz} bytes"
+
+          python - <<'PY' > build/manifest.json
+          import json, os, sqlite3, hashlib, datetime
+          db = sqlite3.connect("build/vilnius.sqlite")
+          meta = dict(db.execute("SELECT key, value FROM meta").fetchall())
+          blob = open("build/vilnius.sqlite.gz", "rb").read()
+          print(json.dumps({
+              "schema_version": int(meta["schema_version"]),
+              "feed_digest": meta["feed_digest"],
+              "built_at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+              "compressed_bytes": len(blob),
+              "raw_bytes": os.path.getsize("build/vilnius.sqlite"),
+              "sha256": hashlib.sha256(blob).hexdigest(),
+              "stops": int(meta["stops"]),
+              "patterns": int(meta["patterns"]),
+              "trips": int(meta["trips"]),
+          }, indent=2))
+          PY
+          cat build/manifest.json
+
+      - name: Publish
+        if: steps.changed.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(printf 'Built from the live Vilnius GTFS feed.\n\nfeed_digest: %s\n\n```json\n%s\n```\n' \
+                    "${FEED_SHA}" "$(cat build/manifest.json)")
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" --notes "${notes}"
+          else
+            gh release create "${RELEASE_TAG}" \
+              --title "Vilnius schedule data" \
+              --notes "${notes}"
+          fi
+          gh release upload "${RELEASE_TAG}" \
+            build/vilnius.sqlite.gz build/manifest.json --clobber
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### GTFS data"
+            if [ "${{ steps.changed.outputs.skip }}" = "true" ]; then
+              echo "Feed unchanged (\`${FEED_SHA}\`) — nothing published."
+            else
+              echo '```json'
+              cat build/manifest.json 2>/dev/null || echo "(build did not complete)"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
