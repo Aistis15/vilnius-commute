@@ -59,18 +59,22 @@ struct SnapshotTests {
         #expect(!captured.isEmpty)
     }
 
-    /// The lock screen renders accessory widgets in a vibrant mode that strips
-    /// colour. This is the variant that has to stay legible without it.
-    @Test("Live Activity lock screen, accessory rendering")
-    func liveActivityAccessory() {
-        let captured = SnapshotHarness.capture(
-            "liveactivity-countdown-accessory",
-            size: CGSize(width: 393, height: 140)
-        ) {
-            TripLockScreenView(attributes: .sample, state: sampleState)
-                .environment(\.widgetRenderingMode, .accessory)
+    /// The lock screen strips colour. `WidgetRenderingMode` has exactly three
+    /// cases — `fullColor`, `vibrant` and `accented` — and both non-colour
+    /// modes have to stay legible, so both are rendered.
+    @Test("Live Activity lock screen, vibrant and accented rendering")
+    func liveActivityMonochrome() {
+        for (name, mode) in [("vibrant", WidgetRenderingMode.vibrant),
+                             ("accented", WidgetRenderingMode.accented)] {
+            let captured = SnapshotHarness.capture(
+                "liveactivity-countdown-\(name)",
+                size: CGSize(width: 393, height: 140)
+            ) {
+                TripLockScreenView(attributes: .sample, state: sampleState)
+                    .environment(\.widgetRenderingMode, mode)
+            }
+            #expect(!captured.isEmpty)
         }
-        #expect(!captured.isEmpty)
     }
 
     @Test("Live Activity, single leg")
@@ -145,13 +149,16 @@ struct SnapshotTests {
             }.isEmpty)
         }
 
-        #expect(!SnapshotHarness.capture("badges-accessory", size: nil) {
-            HStack(spacing: 8) {
-                ForEach(routes) { RouteBadge($0, size: .regular) }
-            }
-            .padding(12)
-            .environment(\.widgetRenderingMode, .accessory)
-        }.isEmpty)
+        for (name, mode) in [("vibrant", WidgetRenderingMode.vibrant),
+                             ("accented", WidgetRenderingMode.accented)] {
+            #expect(!SnapshotHarness.capture("badges-\(name)", size: nil) {
+                HStack(spacing: 8) {
+                    ForEach(routes) { RouteBadge($0, size: .regular) }
+                }
+                .padding(12)
+                .environment(\.widgetRenderingMode, mode)
+            }.isEmpty)
+        }
 
         // Badges have to survive accessibility type without clipping the
         // route number, which is the one thing on them that must stay legible.

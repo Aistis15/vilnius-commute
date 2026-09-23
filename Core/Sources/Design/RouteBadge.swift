@@ -4,10 +4,11 @@ import WidgetKit
 /// The signature element: a route number in its transit colour.
 ///
 /// Colour is what separates bus 1 from trolleybus 1, so a badge is never drawn
-/// without it — except on the lock screen, where iOS renders accessory widgets
-/// in a vibrant/tinted mode that strips colour entirely. There the badge falls
-/// back to a filled shape with the number knocked out of it, which survives
-/// tinting and stays legible.
+/// without it — except on the lock screen. `WidgetRenderingMode` has exactly
+/// three cases: `fullColor`, `vibrant` and `accented`. The latter two strip or
+/// flatten colour, so anything that is not `fullColor` falls back to a filled
+/// shape with the number knocked out of it, which survives tinting and stays
+/// legible.
 public struct RouteBadge: View {
 
     public enum Size: Sendable {
@@ -81,7 +82,7 @@ public struct RouteBadge: View {
             )
     }
 
-    // MARK: - Accessory / tinted (lock screen)
+    // MARK: - Vibrant / accented (lock screen)
 
     /// The number is punched out of a solid shape rather than drawn on top of
     /// it. In vibrant rendering the system tints whatever is opaque, so a
