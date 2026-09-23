@@ -49,6 +49,10 @@ struct LiveActivityDemoView: View {
         }
         .navigationTitle("Gyvoji veikla")
         .navigationBarTitleDisplayMode(.inline)
+        // A Live Activity outlives the app process, so on returning to this
+        // screen there may already be one running that this controller has
+        // never seen.
+        .task { controller.adoptRunningActivity() }
     }
 }
 

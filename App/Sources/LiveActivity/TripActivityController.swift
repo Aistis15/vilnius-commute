@@ -9,6 +9,20 @@ import Observation
 /// build signed with a free Apple ID and installed with Sideloadly? So every
 /// failure is captured and surfaced verbatim rather than swallowed — an error
 /// string here is the probe result.
+///
+/// ## Why only the id is stored
+///
+/// `ActivityKit.Activity` is a class that conforms to `Identifiable` and
+/// nothing else — in particular it is **not** `Sendable` — while `update` and
+/// `end` are `nonisolated async`. Holding one in main-actor state and awaiting
+/// a method on it therefore sends main-actor-isolated state out of its
+/// isolation domain, which Swift 6 rejects outright.
+///
+/// Keeping only the `id` (a `String`) and re-finding the activity inside a
+/// `nonisolated` function sidesteps that: the value is obtained locally and is
+/// visibly unshared, so it may cross. It also happens to be more correct — a
+/// Live Activity outlives the app process, so looking it up by id is what
+/// survives a relaunch, whereas a stored reference would not.
 @MainActor
 @Observable
 final class TripActivityController {
@@ -20,7 +34,7 @@ final class TripActivityController {
     }
 
     private(set) var status: Status = .idle
-    private var activity: Activity<TripActivityAttributes>?
+    private(set) var activityID: String?
 
     /// Whether the system currently permits Live Activities for this app.
     /// Flips to `false` if the user turns them off in Settings.
@@ -28,11 +42,9 @@ final class TripActivityController {
         ActivityAuthorizationInfo().areActivitiesEnabled
     }
 
-    var activityID: String? { activity?.id }
-
     /// Requests a countdown Live Activity with sample data.
     func start(destination: String = "ISM") {
-        guard activity == nil else { return }
+        guard activityID == nil else { return }
 
         guard activitiesEnabled else {
             status = .failed("Gyvosios veiklos išjungtos sistemoje.")
@@ -49,11 +61,12 @@ final class TripActivityController {
         )
 
         do {
-            activity = try Activity.request(
+            let activity = try Activity.request(
                 attributes: attributes,
                 content: content,
                 pushType: nil          // Phase 1 updates locally only.
             )
+            activityID = activity.id
             status = .running
         } catch {
             // Surfaced in the UI on purpose: this is the go/no-go signal.
@@ -64,19 +77,53 @@ final class TripActivityController {
     /// Pushes a fresh countdown without tearing the Activity down, to prove
     /// local updates reach the lock screen.
     func bumpCountdown(byMinutes minutes: Int = 5) async {
-        guard let activity else { return }
+        guard let activityID else { return }
+        await Self.bump(activityID: activityID, byMinutes: minutes)
+    }
+
+    func end() async {
+        guard let activityID else { return }
+        await Self.end(activityID: activityID)
+        self.activityID = nil
+        status = .idle
+    }
+
+    /// Re-attaches to an Activity that outlived a previous launch.
+    func adoptRunningActivity() {
+        guard activityID == nil,
+              let existing = Self.runningActivityID() else { return }
+        activityID = existing
+        status = .running
+    }
+
+    // MARK: - Nonisolated work
+    //
+    // These run outside the main actor so the non-Sendable `Activity` never
+    // has to cross an isolation boundary. See the note on the type.
+
+    private nonisolated static func find(_ id: String) -> Activity<TripActivityAttributes>? {
+        Activity<TripActivityAttributes>.activities.first { $0.id == id }
+    }
+
+    private nonisolated static func runningActivityID() -> String? {
+        Activity<TripActivityAttributes>.activities.first?.id
+    }
+
+    private nonisolated static func bump(activityID: String, byMinutes minutes: Int) async {
+        guard let activity = find(activityID) else { return }
+
         var state = activity.content.state
-        state.leaveAt = state.leaveAt.addingTimeInterval(Double(minutes) * 60)
-        state.arriveBy = state.arriveBy.addingTimeInterval(Double(minutes) * 60)
+        let shift = Double(minutes) * 60
+        state.leaveAt = state.leaveAt.addingTimeInterval(shift)
+        state.arriveBy = state.arriveBy.addingTimeInterval(shift)
+
         await activity.update(
             ActivityContent(state: state, staleDate: state.leaveAt.addingTimeInterval(60))
         )
     }
 
-    func end() async {
-        guard let activity else { return }
+    private nonisolated static func end(activityID: String) async {
+        guard let activity = find(activityID) else { return }
         await activity.end(nil, dismissalPolicy: .immediate)
-        self.activity = nil
-        status = .idle
     }
 }

@@ -146,6 +146,28 @@ night-bus entry as stale.
 
 ---
 
+## D9 · The Live Activity is tracked by id, not by holding the object
+
+`ActivityKit.Activity` is a class conforming to `Identifiable` and nothing
+else — it is **not** `Sendable` — while `update` and `end` are `nonisolated
+async`. Holding one in main-actor state and awaiting a method on it sends
+main-actor-isolated state out of its isolation domain, and Swift 6 rejects it:
+
+```
+error: sending 'activity' risks causing data races
+    await activity.update(...)
+```
+
+So `TripActivityController` stores only the activity's `id` and re-finds it
+from `Activity.activities` inside `nonisolated` helpers, where the value is
+local and visibly unshared.
+
+This is also the more correct design independently of the compiler: a Live
+Activity outlives the app process, so an id survives a relaunch and a stored
+reference does not. `adoptRunningActivity()` uses that to re-attach.
+
+---
+
 ## Open, not decided
 
 - **App icon.** There is no asset catalog yet, so the app shows a blank icon on
