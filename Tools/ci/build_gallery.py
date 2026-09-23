@@ -423,7 +423,7 @@ def main() -> None:
     shots_out = out_dir / "snapshots"
     shots_out.mkdir(parents=True, exist_ok=True)
     for item in items:
-        shutil.copy2(snapshots / item["file"], shots_out / item["file"])
+        flatten(snapshots / item["file"], shots_out / item["file"], item["theme"])
 
     (out_dir / "index.html").write_text(build_html(items, run_id), encoding="utf-8")
 

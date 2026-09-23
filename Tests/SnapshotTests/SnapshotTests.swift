@@ -158,25 +158,21 @@ struct SnapshotTests {
             }.isEmpty)
         }
 
-        // Rendered BOTH ways on purpose. The badge knocks the number out of a
-        // filled shape with `blendMode(.destinationOut)`, and the window path
-        // flattens CALayer compositing filters, so it cannot draw that. Until
-        // both are compared side by side there is no way to tell whether a
-        // blank badge means broken code or a broken harness.
+        // Must go through SwiftUI's renderer: the badge knocks the number out
+        // of a filled shape with `blendMode(.destinationOut)`, and the window
+        // path flattens CALayer compositing filters, so it draws a blank blob.
+        // Confirmed by rendering both ways side by side — see decisions.md D10.
         for (name, mode) in [("vibrant", WidgetRenderingMode.vibrant),
                              ("accented", WidgetRenderingMode.accented)] {
-            for (suffix, renderer) in [("-window", SnapshotHarness.Renderer.window),
-                                       ("-swiftui", SnapshotHarness.Renderer.swiftUI)] {
-                #expect(!SnapshotHarness.capture(
-                    "badges-\(name)\(suffix)", size: nil, renderer: renderer
-                ) {
-                    HStack(spacing: 8) {
-                        ForEach(routes) { RouteBadge($0, size: .regular) }
-                    }
-                    .padding(12)
-                    .environment(\.widgetRenderingMode, mode)
-                }.isEmpty)
-            }
+            #expect(!SnapshotHarness.capture(
+                "badges-\(name)", size: nil, renderer: .swiftUI
+            ) {
+                HStack(spacing: 8) {
+                    ForEach(routes) { RouteBadge($0, size: .regular) }
+                }
+                .padding(12)
+                .environment(\.widgetRenderingMode, mode)
+            }.isEmpty)
         }
 
         // Badges have to survive accessibility type without clipping the

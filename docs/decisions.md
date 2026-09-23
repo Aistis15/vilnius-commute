@@ -218,6 +218,37 @@ changes.
 
 ---
 
+## D10 · Snapshots pick a renderer; neither one is correct for everything
+
+D6 said snapshots go through a real `UIWindow`. That is still right for app
+screens, but it is not right for everything, and finding that out cost two
+wrong "fixes" to code that was never broken.
+
+The route badge knocks its number out of a filled shape with
+`blendMode(.destinationOut)` inside a `compositingGroup`. SwiftUI implements
+both as CALayer compositing filters, and `drawHierarchy(_:afterScreenUpdates:)`
+flattens them. So every vibrant badge rendered as a featureless white blob —
+and the badge code was correct the whole time.
+
+Rendering the same view through both renderers settled it in one run:
+
+| Renderer | Knocked-out badge | `List` / `NavigationStack` |
+|---|---|---|
+| `drawHierarchy` (window) | blank blob | correct |
+| `ImageRenderer` (SwiftUI) | correct | draws nothing |
+
+So `SnapshotHarness.Renderer` is a parameter and the caller chooses: app
+screens use `.window`, anything with a blend mode uses `.swiftUI`.
+
+`ImageRenderer` draws onto transparency, so that path composites an explicit
+black or white backdrop — for a knocked-out glyph the backdrop is the point,
+since it is what shows through the number.
+
+**The lesson worth keeping:** when a render looks wrong, the harness is a
+suspect too. Changing the code first, twice, was the wrong order.
+
+---
+
 ## Open, not decided
 
 - **App icon.** There is no asset catalog yet, so the app shows a blank icon on

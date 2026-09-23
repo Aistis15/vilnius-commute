@@ -114,7 +114,13 @@ enum SnapshotHarness {
         size: CGSize?,
         variant: Variant
     ) -> UIImage {
-        let renderer = ImageRenderer(content: view)
+        // ImageRenderer draws onto transparency. Without an explicit backdrop a
+        // dark-mode render is white-on-nothing and unreviewable — and for a
+        // knocked-out badge the backdrop is the whole point, since it is what
+        // shows through the number.
+        let backed = view.background(variant.colorScheme == .dark ? Color.black : Color.white)
+
+        let renderer = ImageRenderer(content: backed)
         // Match the window path, which captures at the simulator's screen scale.
         renderer.scale = 3
         if let size {
