@@ -74,27 +74,27 @@ public struct TripLockScreenView: View {
 public struct CountdownWithUnit: View {
     private let state: TripContentState
     private let font: Font.TextStyle
-    private let minWidth: CGFloat
 
-    public init(
-        state: TripContentState,
-        font: Font.TextStyle = .largeTitle,
-        minWidth: CGFloat = 78
-    ) {
+    public init(state: TripContentState, font: Font.TextStyle = .largeTitle) {
         self.state = state
         self.font = font
-        self.minWidth = minWidth
     }
 
     public var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 3) {
+            // `fixedSize` rather than a `minWidth` frame. A fixed minimum
+            // starved this at default type and the timer truncated to "12:…",
+            // while the same layout was fine at XXL — `Text(timerInterval:)`
+            // does not report a dependable ideal width, so it has to be
+            // allowed to size itself and given priority over the unit label.
             Text(timerInterval: state.countdownRange(),
                  countsDown: true,
                  showsHours: false)
                 .font(.system(font, weight: .semibold))
                 .monospacedDigit()
-                .multilineTextAlignment(.trailing)
-                .frame(minWidth: minWidth, alignment: .trailing)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
 
             Text("min")
                 .font(.caption)
@@ -219,7 +219,7 @@ public struct TripIslandExpandedBottom: View {
             Spacer(minLength: 8)
             // Same reasoning as the banner: the arrival clock time sits
             // directly above this, so the countdown needs its unit.
-            CountdownWithUnit(state: state, font: .title3, minWidth: 58)
+            CountdownWithUnit(state: state, font: .title3)
         }
         .padding(.top, 4)
     }
