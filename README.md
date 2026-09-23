@@ -8,8 +8,11 @@ UI is in Lithuanian. Code and comments are in English.
 
 ## Status
 
-**Phase 1 — go/no-go.** App shell, widget extension, one countdown Live
-Activity, a capability probe, and a Lithuanian speech-to-text test screen.
+**Phase 1 — go/no-go. Build green, awaiting device results.**
+
+App shell, widget extension, one countdown Live Activity, a capability probe,
+and a Lithuanian speech-to-text test screen. CI is green end to end: unit
+tests, snapshot renders, and two unsigned `.ipa`s.
 
 The probe results are **not collected yet** — they need a physical iPhone. See
 [docs/capability-probe.md](docs/capability-probe.md).

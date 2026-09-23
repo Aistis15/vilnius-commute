@@ -168,6 +168,34 @@ reference does not. `adoptRunningActivity()` uses that to re-attach.
 
 ---
 
+## D10 · What the snapshots do and do not prove
+
+The rendered PNGs caught two real defects on first review, which is the whole
+reason the loop exists:
+
+- Every non-full-screen render was clipped. The `UIWindow` inherits a
+  status-bar-sized top safe-area inset, which pushed content down and out of
+  frame — badges lost their numbers entirely. Fixed by setting
+  `safeAreaRegions = []` for anything smaller than a full screen, *before*
+  measuring, since the inset also changes the fitting size.
+- Every countdown drew `Liko 00:00`. The pinned epoch used for determinism was
+  in the past, and `Text(timerInterval:)` renders against the real clock, so
+  every range clamped. The clamp is correct — it is what stops the range
+  inverting and trapping — but it made the picture worthless. Sample times are
+  now relative to `Date.now`.
+
+Two limits to keep in mind when reading them:
+
+- **Vibrant and accented renders are a simulation.** Setting
+  `\.widgetRenderingMode` makes our own view take the monochrome path, which
+  is what needs checking. It does not reproduce the system's own tinting of an
+  accessory widget. Only a device shows that.
+- **Navigation titles render washed out.** The nav bar's scroll-edge
+  appearance has not resolved at capture time. An artifact of the harness, not
+  of the app.
+
+---
+
 ## Open, not decided
 
 - **App icon.** There is no asset catalog yet, so the app shows a blank icon on

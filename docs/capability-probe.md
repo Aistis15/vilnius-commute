@@ -11,13 +11,31 @@ detection, voice from the lock screen — depends on the answers.
 
 | | |
 |---|---|
-| Probe app | Written, builds in CI |
+| Probe app | Built and green in CI |
+| Last green run | [35867135126](https://github.com/Aistis15/vilnius-commute/actions/runs/35867135126) |
 | Probe results | **Not yet collected** |
 
 The results cannot be produced from a Windows machine or from CI. They require
 installing the `.ipa` on a physical iPhone with a free Apple ID and reading the
 **Patikra** screen. The table at the bottom is deliberately empty rather than
 filled with plausible-looking guesses.
+
+### What the simulator already showed
+
+The probe runs on launch, so the CI snapshot of the Patikra screen is itself a
+result — for the simulator, which is *not* a free-signed device and therefore
+answers a different question:
+
+| Capability | In the simulator | Means |
+|---|---|---|
+| App Groups | "App Group nenustatytas" | Correct: the default build has none configured |
+| Live Activities | "Sistema leidžia" | ActivityKit is available and permitted |
+| AlarmKit | "Dar neklausta" | API present and callable; authorization not yet requested |
+| Background location | "Dar neklausta" | Same |
+| Lock-screen recording | "Dar nebandyta" | Needs a real locked device |
+
+This proves the probe code runs and reports correctly. It says nothing about
+what a free Apple ID permits — only the device can.
 
 ## What was verified without a device
 
