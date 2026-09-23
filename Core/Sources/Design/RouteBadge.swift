@@ -74,39 +74,52 @@ public struct RouteBadge: View {
     // MARK: - Full colour (app, Live Activity, Dynamic Island, home screen)
 
     private var colored: some View {
-        label
-            .foregroundStyle(route.foreground)
-            .background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(route.background)
-            )
+        boxed(number.foregroundStyle(route.foreground))
+            .background(shape.fill(route.background))
     }
 
     // MARK: - Vibrant / accented (lock screen)
 
     /// The number is punched out of a solid shape rather than drawn on top of
     /// it. In vibrant rendering the system tints whatever is opaque, so a
-    /// knocked-out glyph keeps its contrast no matter what the tint is.
+    /// knocked-out glyph keeps its contrast whatever the tint turns out to be.
+    ///
+    /// The knock-out has to be a `ZStack` inside a single `compositingGroup`.
+    /// An earlier version used `.blendMode(.destinationOut)` with
+    /// `.background(…)`, which does **not** composite — the shape and the text
+    /// end up in different layers, so the blend had nothing to erase and every
+    /// badge rendered as a featureless white blob with no number on it.
     private var monochrome: some View {
-        label
-            .foregroundStyle(.black)
-            .blendMode(.destinationOut)
-            .background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(.primary)
-            )
-            .compositingGroup()
+        // A hidden copy of the number establishes the exact same geometry the
+        // colour variant uses; the overlay then draws the real composite into
+        // that frame.
+        boxed(number.hidden())
+            .overlay {
+                ZStack {
+                    shape.fill(.primary)
+                    number.blendMode(.destinationOut)
+                }
+                .compositingGroup()
+            }
     }
 
-    private var label: some View {
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+    }
+
+    private var number: some View {
         Text(route.shortName)
             .font(.system(size: size.fontSize * scale, weight: .bold))
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+    }
+
+    /// The padded box the number sits in. Minimum width equals height, so a
+    /// single digit is a square and longer numbers grow sideways only.
+    private func boxed(_ content: some View) -> some View {
+        content
             .padding(.horizontal, size.horizontalPadding * scale)
-            // Minimum width equals height, so a single digit is a square and
-            // longer numbers grow sideways only.
             .frame(minWidth: height, minHeight: height)
     }
 
