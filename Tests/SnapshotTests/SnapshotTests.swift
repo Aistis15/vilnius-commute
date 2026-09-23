@@ -15,14 +15,22 @@ import WidgetKit
 @Suite("Snapshots", .serialized)
 struct SnapshotTests {
 
-    /// A fixed clock. Without it every run differs in the countdown digits and
-    /// the images are impossible to compare between builds.
-    private static let fixedNow = Date(timeIntervalSince1970: 1_790_000_000)
+    /// Base time for the sample trips, relative to the real clock on purpose.
+    ///
+    /// A pinned epoch was tried first and was wrong: `Text(timerInterval:)`
+    /// renders against the actual current time, so a base in the past made
+    /// every countdown draw as `00:00`. Correct behaviour — the range clamps
+    /// rather than inverting — but a useless picture of it.
+    ///
+    /// These snapshots are reviewed by eye and never byte-compared, so a live
+    /// base that renders a real countdown beats a stable one that renders
+    /// zeros. The clock times shift between runs as a result.
+    private static let base = Date.now
 
     private var sampleState: TripContentState {
         TripContentState(
-            leaveAt: Self.fixedNow.addingTimeInterval(12 * 60),
-            arriveBy: Self.fixedNow.addingTimeInterval(36 * 60),
+            leaveAt: Self.base.addingTimeInterval(12 * 60),
+            arriveBy: Self.base.addingTimeInterval(36 * 60),
             routes: [.previewExpress, .previewTrolley]
         )
     }
@@ -80,8 +88,8 @@ struct SnapshotTests {
     @Test("Live Activity, single leg")
     func liveActivitySingleLeg() {
         let state = TripContentState(
-            leaveAt: Self.fixedNow.addingTimeInterval(5 * 60),
-            arriveBy: Self.fixedNow.addingTimeInterval(24 * 60),
+            leaveAt: Self.base.addingTimeInterval(5 * 60),
+            arriveBy: Self.base.addingTimeInterval(24 * 60),
             routes: [.previewBus]
         )
         #expect(!SnapshotHarness.capture(

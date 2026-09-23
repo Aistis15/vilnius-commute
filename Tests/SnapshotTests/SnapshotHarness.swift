@@ -101,6 +101,16 @@ enum SnapshotHarness {
         let controller = UIHostingController(rootView: configured)
         controller.view.backgroundColor = .systemBackground
 
+        // A full-screen capture keeps the safe area, so it looks like a real
+        // screen with room for the status bar. Anything smaller must not: the
+        // window inherits a status-bar-sized top inset, which pushes the
+        // content down and clips it straight out of the frame. That is what
+        // decapitated every badge and Live Activity banner in the first run.
+        //
+        // Set before measuring — the inset changes the fitting size too.
+        let isFullScreen = (size == phone)
+        controller.safeAreaRegions = isFullScreen ? .all : []
+
         let target: CGSize
         if let size {
             target = size
