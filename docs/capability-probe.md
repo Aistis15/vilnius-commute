@@ -12,7 +12,7 @@ detection, voice from the lock screen — depends on the answers.
 | | |
 |---|---|
 | Probe app | Built and green in CI |
-| Last green run | [35867135126](https://github.com/Aistis15/vilnius-commute/actions/runs/35867135126) |
+| Last green run | [35872596608](https://github.com/Aistis15/vilnius-commute/actions/runs/35872596608) |
 | Probe results | **Not yet collected** |
 
 The results cannot be produced from a Windows machine or from CI. They require

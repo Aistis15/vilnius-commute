@@ -249,6 +249,23 @@ suspect too. Changing the code first, twice, was the wrong order.
 
 ---
 
+## D11 · The CI simulator is discovered per run, never pinned
+
+A pinned `name=iPhone 17,OS=26.5` destination failed the build the moment the
+GitHub runner image rolled — and the replacement image shipped **no**
+pre-created simulators at all, only placeholder destinations, so matching on
+name alone would not have helped either.
+
+`Tools/ci/pick_simulator.sh` picks the newest iOS runtime with an available
+iPhone and addresses it by UDID. If the image has no devices it creates one;
+if it cannot, it fails with the device-type listing attached so the next
+failure explains itself.
+
+It is a script rather than inline YAML because the first attempt embedded
+Python in a `run:` block and broke the workflow parse.
+
+---
+
 ## Open, not decided
 
 - **App icon.** There is no asset catalog yet, so the app shows a blank icon on
