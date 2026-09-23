@@ -196,6 +196,28 @@ Two limits to keep in mind when reading them:
 
 ---
 
+## D11 · Dark mode uses a dark grey page, not pure black
+
+iOS draws grouped content on pure black in dark mode — `#000000` page with
+`#1C1C1E` cards, which is what Settings.app looks like. This app moves both up
+one step on iOS's own grouped-background ladder:
+
+| | light | iOS dark | here |
+|---|---|---|---|
+| page | `#F2F2F7` | `#000000` | `#1C1C1E` |
+| card | `#FFFFFF` | `#1C1C1E` | `#2C2C2E` |
+
+Light mode is unchanged. These stay system colours rather than hardcoded hex,
+so they still track Increase Contrast and any future OS adjustment.
+
+`Color.pageBackground` / `Color.cardBackground` and the `commuteListChrome()`
+modifier in `Core/Sources/Design/Backgrounds.swift` are the single place this
+is expressed. The modifier has to hide the scroll content background first —
+otherwise `List` paints its own system background over the top and nothing
+changes.
+
+---
+
 ## Open, not decided
 
 - **App icon.** There is no asset catalog yet, so the app shows a blank icon on

@@ -41,6 +41,7 @@ struct ProbeView: View {
                 }
             }
         }
+        .commuteListChrome()
         .navigationTitle("Patikra")
         .navigationBarTitleDisplayMode(.inline)
         .task { await probe.runAll() }

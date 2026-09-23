@@ -47,6 +47,7 @@ struct LiveActivityDemoView: View {
                     .listRowInsets(EdgeInsets())
             }
         }
+        .commuteListChrome()
         .navigationTitle("Gyvoji veikla")
         .navigationBarTitleDisplayMode(.inline)
         // A Live Activity outlives the app process, so on returning to this

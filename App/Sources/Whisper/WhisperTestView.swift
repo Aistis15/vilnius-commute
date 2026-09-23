@@ -35,6 +35,7 @@ struct WhisperTestView: View {
             resultSection
             phrasesSection
         }
+        .commuteListChrome()
         .navigationTitle("Balsas")
         .navigationBarTitleDisplayMode(.inline)
     }
