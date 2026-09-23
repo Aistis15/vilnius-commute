@@ -19,6 +19,9 @@ Vendor/
 
 # Artifacts
 artifacts/
+# Where CI artifacts get downloaded for review. Ignoring only *.ipa is not
+# enough: unzipping one puts loose Mach-O binaries here.
+artifacts-dl/
 snapshots/
 *.bin
 

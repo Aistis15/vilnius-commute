@@ -22,6 +22,7 @@ struct ProbeView: View {
                         .monospacedDigit()
                 }
             }
+            .commuteCard()
 
             Section("Prašyti leidimų") {
                 Button("Žadintuvai (AlarmKit)") {
@@ -31,6 +32,7 @@ struct ProbeView: View {
                     probe.requestLocationAuthorization()
                 }
             }
+            .commuteCard()
 
             Section {
                 Button("Tikrinti iš naujo") {
@@ -40,6 +42,7 @@ struct ProbeView: View {
                     Task { await probe.clearLockScreenMarker() }
                 }
             }
+            .commuteCard()
         }
         .commuteListChrome()
         .navigationTitle("Patikra")

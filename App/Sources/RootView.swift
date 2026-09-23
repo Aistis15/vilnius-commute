@@ -29,6 +29,7 @@ struct RootView: View {
                 } footer: {
                     Text("1 etapas: tikrinama, ką leidžia nemokama Apple paskyra.")
                 }
+                .commuteCard()
             }
             .commuteListChrome()
             .navigationTitle("Vilnius")

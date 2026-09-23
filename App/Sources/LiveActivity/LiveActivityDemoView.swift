@@ -41,11 +41,13 @@ struct LiveActivityDemoView: View {
                     Text("Sistemoje gyvosios veiklos išjungtos.")
                 }
             }
+            .commuteCard()
 
             Section("Kaip atrodo") {
                 TripLockScreenView(attributes: sampleAttributes, state: sampleState)
                     .listRowInsets(EdgeInsets())
             }
+            .commuteCard()
         }
         .commuteListChrome()
         .navigationTitle("Gyvoji veikla")

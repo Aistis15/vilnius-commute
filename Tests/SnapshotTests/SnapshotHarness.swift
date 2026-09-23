@@ -57,6 +57,22 @@ enum SnapshotHarness {
         ]
     }
 
+    /// Which renderer draws the view.
+    ///
+    /// Neither one is correct for everything, so the caller picks:
+    ///
+    /// - `.window` hosts the view in a real `UIWindow` and captures the
+    ///   hierarchy. Required for `List` and `NavigationStack`, which are
+    ///   UIKit-backed and draw nothing through SwiftUI's own renderer.
+    /// - `.swiftUI` uses `ImageRenderer`. Required for anything using
+    ///   `blendMode` or `compositingGroup`: SwiftUI implements those as
+    ///   CALayer compositing filters, and `drawHierarchy(_:afterScreenUpdates:)`
+    ///   flattens them — a knocked-out glyph silently disappears.
+    enum Renderer {
+        case window
+        case swiftUI
+    }
+
     /// Renders one view across a set of variants.
     ///
     /// - Parameter size: fixed canvas, or `nil` to size to the view's content
@@ -67,13 +83,14 @@ enum SnapshotHarness {
         _ name: String,
         size: CGSize? = phone,
         variants: [Variant] = Variant.all,
+        renderer: Renderer = .window,
         @ViewBuilder content: () -> some View
     ) -> [URL] {
         var written: [URL] = []
         let view = content()
 
         for variant in variants {
-            let image = render(view, size: size, variant: variant)
+            let image = render(view, size: size, variant: variant, renderer: renderer)
             guard let data = image.pngData() else { continue }
             let url = outputDirectory.appendingPathComponent("\(name)_\(variant.suffix).png")
             do {
@@ -88,15 +105,38 @@ enum SnapshotHarness {
         return written
     }
 
+    /// SwiftUI's own renderer. Honours blend modes and compositing groups,
+    /// which the window path flattens — but draws nothing for UIKit-backed
+    /// containers like `List`, so it is not a general replacement.
     @MainActor
-    private static func render(
+    private static func renderWithSwiftUI(
         _ view: some View,
         size: CGSize?,
         variant: Variant
     ) -> UIImage {
+        let renderer = ImageRenderer(content: view)
+        // Match the window path, which captures at the simulator's screen scale.
+        renderer.scale = 3
+        if let size {
+            renderer.proposedSize = ProposedViewSize(size)
+        }
+        return renderer.uiImage ?? UIImage()
+    }
+
+    @MainActor
+    private static func render(
+        _ view: some View,
+        size: CGSize?,
+        variant: Variant,
+        renderer: Renderer
+    ) -> UIImage {
         let configured = view
             .environment(\.colorScheme, variant.colorScheme)
             .environment(\.dynamicTypeSize, variant.dynamicType)
+
+        if renderer == .swiftUI {
+            return renderWithSwiftUI(configured, size: size, variant: variant)
+        }
 
         let controller = UIHostingController(rootView: configured)
         controller.view.backgroundColor = .systemBackground

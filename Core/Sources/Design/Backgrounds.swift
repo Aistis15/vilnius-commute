@@ -35,15 +35,26 @@ public extension Color {
 
 public extension View {
 
-    /// Applies the app's list chrome: dark-grey page, lighter cards.
+    /// Page chrome for a `List`.
     ///
-    /// `scrollContentBackground(.hidden)` is what allows the page colour to
-    /// show through — without it the `List` paints its own system background
-    /// over the top and nothing changes.
+    /// `scrollContentBackground(.hidden)` is what lets the page colour show
+    /// through — without it the `List` paints its own system background over
+    /// the top and nothing changes. It also removes the grouped *card*
+    /// surfaces, so every `Section` has to restore its own with
+    /// ``commuteCard()``.
     func commuteListChrome() -> some View {
         self
             .scrollContentBackground(.hidden)
             .background(Color.pageBackground)
-            .listRowBackground(Color.cardBackground)
+    }
+
+    /// Card surface for a `Section`.
+    ///
+    /// Applied per section on purpose: `listRowBackground` set on the `List`
+    /// does **not** propagate down to the rows. Doing that left every screen a
+    /// single flat sheet of `#1C1C1E` with the grouped cards gone entirely,
+    /// which the snapshots caught.
+    func commuteCard() -> some View {
+        listRowBackground(Color.cardBackground)
     }
 }

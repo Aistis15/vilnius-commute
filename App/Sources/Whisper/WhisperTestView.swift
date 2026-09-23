@@ -59,6 +59,7 @@ struct WhisperTestView: View {
         } footer: {
             Text("Modeliai atsisiunčiami vieną kartą ir lieka telefone.")
         }
+        .commuteCard()
     }
 
     // MARK: - Record
@@ -95,6 +96,7 @@ struct WhisperTestView: View {
                 }
             }
         }
+        .commuteCard()
     }
 
     // MARK: - Result
@@ -120,6 +122,7 @@ struct WhisperTestView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .commuteCard()
         }
     }
 
@@ -134,6 +137,7 @@ struct WhisperTestView: View {
         } footer: {
             Text("Perskaityk garsiai ir palygink su rezultatu.")
         }
+        .commuteCard()
     }
 
     // MARK: - Work
