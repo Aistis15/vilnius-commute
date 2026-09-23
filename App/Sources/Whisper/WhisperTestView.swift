@@ -138,13 +138,13 @@ struct WhisperTestView: View {
     // MARK: - Work
 
     private var isModelReady: Bool {
-        if case .ready = store.status[selected] { return true }
+        if case .ready? = store.status[selected] { return true }
         return false
     }
 
     private func stopAndTranscribe() async {
         guard let url = recorder.stop() else { return }
-        guard case .ready(let modelURL) = store.status[selected] else {
+        guard case .ready(let modelURL)? = store.status[selected] else {
             problem = "Modelis neparuoštas."
             return
         }

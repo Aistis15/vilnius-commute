@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI          // Color(hex:) is an extension on SwiftUI.Color
 import Testing
 
 @testable import Core

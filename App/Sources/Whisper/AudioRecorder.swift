@@ -26,11 +26,17 @@ final class AudioRecorder {
     private var startedAt: Date?
 
     /// whisper.cpp expects exactly this rate; anything else has to be resampled.
-    static let sampleRate: Double = 16_000
+    ///
+    /// `nonisolated` because `samples(from:)` is nonisolated and reads it. The
+    /// class is `@MainActor`, which would otherwise isolate this static too.
+    /// Safe: `Double` is `Sendable` and this never changes.
+    nonisolated static let sampleRate: Double = 16_000
 
+    // Stays main-actor isolated: `[String: Any]` is not Sendable, and only
+    // `start()` uses it.
     private static let settings: [String: Any] = [
         AVFormatIDKey: Int(kAudioFormatLinearPCM),
-        AVSampleRateKey: sampleRate,
+        AVSampleRateKey: AudioRecorder.sampleRate,
         AVNumberOfChannelsKey: 1,
         AVLinearPCMBitDepthKey: 16,
         AVLinearPCMIsFloatKey: false,

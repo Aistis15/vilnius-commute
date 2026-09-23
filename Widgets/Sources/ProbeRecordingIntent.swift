@@ -16,13 +16,20 @@ import Foundation
 struct ProbeRecordingIntent: AppIntent, AudioRecordingIntent {
 
     static let title: LocalizedStringResource = "Įrašyti kelionės prašymą"
-    static let description = IntentDescription(
+
+    // The protocol requirement is `IntentDescription?`, so the type has to be
+    // spelled out — an inferred `IntentDescription` does not satisfy it.
+    static let description: IntentDescription? = IntentDescription(
         "Patikrina, ar iš užrakto ekrano galima įrašyti garsą."
     )
 
     /// Stay out of the app: the whole point is to prove recording works
     /// *without* unlocking and foregrounding.
-    static let openAppWhenRun = false
+    ///
+    /// `supportedModes` rather than `openAppWhenRun`, which is deprecated and
+    /// errors outright when an intent runs in an app extension — which this
+    /// one does, since it is driven by a Control.
+    static let supportedModes: IntentModes = .background
 
     private static let probeSeconds: TimeInterval = 3
 
