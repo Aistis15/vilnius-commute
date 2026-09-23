@@ -143,8 +143,11 @@ struct SnapshotTests {
     /// colour context and the monochrome one.
     @Test("Route badges")
     func routeBadges() {
+        // Real routes from the live feed, one per category, plus the longest
+        // short name in it (`3G-A`) so clipping shows up in the render.
         let routes: [RouteRef] = [
-            .previewBus, .previewExpress, .previewTrolley, .previewNight,
+            .previewBus, .previewExpress, .previewTrolley,
+            .previewNight, .previewFerry, .previewLongest,
         ]
 
         for (label, size) in [("small", RouteBadge.Size.small),

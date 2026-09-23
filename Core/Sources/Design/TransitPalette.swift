@@ -11,7 +11,34 @@ public enum TransitCategory: String, Sendable, Hashable, Codable, CaseIterable {
     case expressBus
     case nightBus
     case trolleybus
+    case ferry
     case other
+
+    /// Maps a GTFS `route_id` to a category.
+    ///
+    /// Vilnius `route_id`s have the shape `vilnius_<category>_<name>`, verified
+    /// across all 115 routes in the feed. Anything unrecognised becomes
+    /// `.other` rather than being forced into a neighbouring case — the feed
+    /// publishes only current service, so seasonal or event categories can
+    /// appear that were not there when this was written.
+    public static func from(routeID: String) -> TransitCategory {
+        switch routeID.rsplit_prefix() {
+        case "vilnius_bus":         .bus
+        case "vilnius_expressbus":  .expressBus
+        case "vilnius_nightbus":    .nightBus
+        case "vilnius_trol":        .trolleybus
+        case "vilnius_ferry":       .ferry
+        default:                    .other
+        }
+    }
+}
+
+private extension String {
+    /// Everything up to the last underscore: `vilnius_bus_12` -> `vilnius_bus`.
+    func rsplit_prefix() -> String {
+        guard let index = lastIndex(of: "_") else { return self }
+        return String(self[startIndex..<index])
+    }
 }
 
 /// Fallback route colours.
@@ -19,22 +46,23 @@ public enum TransitCategory: String, Sendable, Hashable, Codable, CaseIterable {
 /// **These are a fallback, not the source of truth.** The real colours come
 /// from the GTFS feed (`routes.txt` -> `route_color` / `route_text_color`) and
 /// are read at runtime. This table exists only for the case where the feed is
-/// missing a colour, and it holds exactly the values recorded in the spec from
-/// a snapshot of github.com/vilnius/transportas.
+/// missing a colour.
 ///
-/// - Warning: The snapshot these came from may be outdated — the spec itself
-///   flags the night-bus entry as stale. Phase 2 replaces this by inventorying
-///   the live feed. Nothing here has been verified against the current data.
+/// Verified against the live feed on 2026-09-23, across all 115 routes. Two
+/// values from the spec's snapshot were wrong and are corrected here:
+/// night buses are black rather than blue, and a ferry category exists that
+/// the spec did not list at all. See `docs/data-formats.md`.
 public enum TransitPalette {
 
-    /// Hex values exactly as recorded in the spec snapshot.
+    /// Hex values as published by the feed for every route in that category.
     public static func fallbackBackgroundHex(for category: TransitCategory) -> String {
         switch category {
         case .bus:         "0073AC"
         case .expressBus:  "008000"
-        case .nightBus:    "0073AC"
+        case .nightBus:    "000000"   // spec said 0073AC; the feed says black
         case .trolleybus:  "DC3131"
-        case .other:       "0073AC"
+        case .ferry:       "00A59B"   // absent from the spec entirely
+        case .other:       "0073AC"   // unknown category: fall back to bus blue
         }
     }
 

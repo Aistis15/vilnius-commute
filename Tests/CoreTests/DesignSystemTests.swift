@@ -89,14 +89,58 @@ struct RouteRefTests {
         #expect(TransitPalette.normalizeHex(TransitPalette.fallbackForegroundHex) != nil)
     }
 
-    @Test("Fallback values match the snapshot recorded in the spec")
-    func fallbackMatchesSpecSnapshot() {
-        // These are provisional: Phase 2 replaces them by inventorying the
-        // live feed. The test pins them so a change has to be deliberate.
+    @Test("Fallback values match the live feed, inventoried 2026-09-23")
+    func fallbackMatchesLiveFeed() {
+        // Read off all 115 routes in routes.txt. Two of these correct the
+        // spec's snapshot table — see docs/data-formats.md.
         #expect(TransitPalette.fallbackBackgroundHex(for: .bus) == "0073AC")
         #expect(TransitPalette.fallbackBackgroundHex(for: .expressBus) == "008000")
-        #expect(TransitPalette.fallbackBackgroundHex(for: .nightBus) == "0073AC")
         #expect(TransitPalette.fallbackBackgroundHex(for: .trolleybus) == "DC3131")
+        // The spec said 0073AC. The feed says black, for all 9 night routes.
+        #expect(TransitPalette.fallbackBackgroundHex(for: .nightBus) == "000000")
+        // A category the spec did not list at all.
+        #expect(TransitPalette.fallbackBackgroundHex(for: .ferry) == "00A59B")
+        // FFFFFF on every one of the 115 routes.
         #expect(TransitPalette.fallbackForegroundHex == "FFFFFF")
+    }
+}
+
+@Suite("Category from route_id")
+struct TransitCategoryTests {
+
+    @Test("Every prefix in the live feed maps to its category")
+    func mapsLiveFeedPrefixes() {
+        #expect(TransitCategory.from(routeID: "vilnius_bus_12") == .bus)
+        #expect(TransitCategory.from(routeID: "vilnius_trol_2") == .trolleybus)
+        #expect(TransitCategory.from(routeID: "vilnius_expressbus_3G") == .expressBus)
+        #expect(TransitCategory.from(routeID: "vilnius_nightbus_N1") == .nightBus)
+        #expect(TransitCategory.from(routeID: "vilnius_ferry_L1") == .ferry)
+    }
+
+    /// `3G-A` is a real route and contains a hyphen, so splitting on the last
+    /// underscore has to survive it.
+    @Test("Names containing punctuation still resolve")
+    func handlesPunctuatedNames() {
+        #expect(TransitCategory.from(routeID: "vilnius_expressbus_3G-A") == .expressBus)
+    }
+
+    /// The feed publishes only current service, so event and seasonal
+    /// categories can appear that did not exist when this was written. They
+    /// must render, not crash.
+    @Test("An unknown category degrades to .other instead of guessing")
+    func unknownBecomesOther() {
+        #expect(TransitCategory.from(routeID: "vilnius_tram_7") == .other)
+        #expect(TransitCategory.from(routeID: "kaunas_bus_1") == .other)
+        #expect(TransitCategory.from(routeID: "nounderscores") == .other)
+        #expect(TransitCategory.from(routeID: "") == .other)
+    }
+
+    @Test("Every category still has a usable colour, including .other")
+    func everyCategoryRenders() {
+        for category in TransitCategory.allCases {
+            #expect(TransitPalette.normalizeHex(
+                TransitPalette.fallbackBackgroundHex(for: category)
+            ) != nil)
+        }
     }
 }

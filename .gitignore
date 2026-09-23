@@ -33,3 +33,6 @@ desktop.ini
 # Python
 __pycache__/
 *.pyc
+
+# Local scratch (GTFS downloads, whisper source)
+.build/

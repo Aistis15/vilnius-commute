@@ -129,6 +129,7 @@ public struct RouteBadge: View {
         case .expressBus: "Greitasis autobusas \(route.shortName)"
         case .nightBus:   "Naktinis autobusas \(route.shortName)"
         case .trolleybus: "Troleibusas \(route.shortName)"
+        case .ferry:      "Keltas \(route.shortName)"
         case .other:      "Maršrutas \(route.shortName)"
         }
     }
@@ -159,11 +160,17 @@ public struct RouteBadge: View {
 }
 
 public extension RouteRef {
-    // Sample values for previews and snapshots. Colours are the spec's
-    // fallback table, NOT verified against the live feed — Phase 2 replaces
-    // these with real rows from routes.txt.
-    static let previewBus     = RouteRef(routeID: "preview_bus_1",      shortName: "1",   category: .bus)
-    static let previewExpress = RouteRef(routeID: "preview_express_3G", shortName: "3G",  category: .expressBus)
-    static let previewTrolley = RouteRef(routeID: "preview_trol_2",     shortName: "2",   category: .trolleybus)
-    static let previewNight   = RouteRef(routeID: "preview_night_101N", shortName: "101N", category: .nightBus)
+    // Real rows from the live feed, inventoried 2026-09-23. Route ids and
+    // short names are the actual ones, so a sample can never drift from
+    // something the router could really return.
+    //
+    // `101N` was used here before and does not exist: Vilnius night routes are
+    // N1-N9, with the N as a prefix. See docs/data-formats.md.
+    static let previewBus     = RouteRef(routeID: "vilnius_bus_1",         shortName: "1",    category: .bus)
+    static let previewExpress = RouteRef(routeID: "vilnius_expressbus_3G", shortName: "3G",   category: .expressBus)
+    static let previewTrolley = RouteRef(routeID: "vilnius_trol_2",        shortName: "2",    category: .trolleybus)
+    static let previewNight   = RouteRef(routeID: "vilnius_nightbus_N1",   shortName: "N1",   category: .nightBus)
+    static let previewFerry   = RouteRef(routeID: "vilnius_ferry_L1",      shortName: "L1",   category: .ferry)
+    /// Longest short name in the feed — the badge has to fit it.
+    static let previewLongest = RouteRef(routeID: "vilnius_expressbus_3G-A", shortName: "3G-A", category: .expressBus)
 }
