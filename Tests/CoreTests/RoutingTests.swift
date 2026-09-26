@@ -15,43 +15,41 @@ import Testing
 /// The strongest of them is `neverWorseThanTheBestDirectTrip`: RAPTOR is
 /// allowed to find something better by transferring, but it must never do
 /// worse than simply staying on one vehicle.
+// Resolved at file scope, not as members of `RoutingTests`. A `@Suite`
+// attribute cannot reference a static member of the very type it is attached
+// to — the macro has nothing to resolve against yet and fails to expand, which
+// the compiler reports as the confusing "unknown attribute 'Suite'".
+
+/// Built in CI by `Tools/gtfs/build_db.py` and fetched before the tests run.
+/// Located from `#filePath` so it resolves the same on a runner and locally.
+private let scheduleDatabaseURL: URL = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()   // CoreTests
+    .deletingLastPathComponent()   // Tests
+    .deletingLastPathComponent()   // repo root
+    .appendingPathComponent(".build")
+    .appendingPathComponent("vilnius.sqlite")
+
+private let scheduleDatabaseExists =
+    FileManager.default.fileExists(atPath: scheduleDatabaseURL.path)
+
+private let sharedTimetable: Timetable? = {
+    guard scheduleDatabaseExists else { return nil }
+    return try? TimetableLoader.load(from: scheduleDatabaseURL)
+}()
+
 @Suite(
     "Routing on real Vilnius data",
     .serialized,
-    // A genuine skip. The database is a build artifact, not source, so its
-    // absence locally is not a routing failure — but when it IS present, a
-    // load failure below is a real bug and must fail loudly.
-    .enabled(if: RoutingTests.databaseExists, "no schedule database present")
+    .enabled(if: scheduleDatabaseExists, "no schedule database present")
 )
 struct RoutingTests {
-
-    /// Built in CI by `Tools/gtfs/build_db.py` and fetched before the tests
-    /// run. Located from `#filePath` so it works the same on a runner and on a
-    /// developer machine.
-    static let databaseURL: URL = {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // CoreTests
-            .deletingLastPathComponent()   // Tests
-            .deletingLastPathComponent()   // repo root
-            .appendingPathComponent(".build")
-            .appendingPathComponent("vilnius.sqlite")
-    }()
-
-    static var databaseExists: Bool {
-        FileManager.default.fileExists(atPath: databaseURL.path)
-    }
-
-    static let timetable: Timetable? = {
-        guard FileManager.default.fileExists(atPath: databaseURL.path) else { return nil }
-        return try? TimetableLoader.load(from: databaseURL)
-    }()
 
     /// The suite only runs when the database exists, so reaching here with a
     /// nil timetable means the file is present and failed to load — a real bug.
     private func requireTimetable() throws -> Timetable {
         try #require(
-            Self.timetable,
-            "Database exists at \(Self.databaseURL.path) but failed to load."
+            sharedTimetable,
+            "Database exists at \(scheduleDatabaseURL.path) but failed to load."
         )
     }
 
