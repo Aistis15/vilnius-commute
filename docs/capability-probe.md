@@ -166,10 +166,15 @@ So it is lost at install time. Two candidates, untested:
 1. **The sideloading tool is stripping app extensions.** Several strip them by
    default, because each extension needs its own provisioning profile and they
    often break installs.
-2. **The free Apple ID App ID limit.** A free account allows 10 App IDs per 7
-   days, and this app needs two (app + extension). Several reinstalls in one
-   day can exhaust it, after which the app provisions and the extension does
-   not.
+2. **The extension is not being signed correctly.** It needs its own
+   provisioning profile matching its own bundle id; one left unsigned, or
+   signed against the wrong id, installs and is then ignored by iOS.
+
+   Originally recorded here as the free account's "10 App IDs per 7 days"
+   limit being exhausted by repeated installs. That was wrong: the limit
+   counts *distinct* bundle identifiers, and reinstalling the same app reuses
+   the same two, so reinstalls do not consume it. The 7-day expiry applies to
+   the signing certificate, not to App IDs.
 
 Neither is confirmed. If the extension still fails to register once both are
 ruled out, that is a genuine free-account limit and the banner has to be

@@ -91,18 +91,24 @@ is being removed on the way in.
 
 ### P1-B · Present but unregistered
 
-Most likely the free Apple ID's App ID budget: **10 App IDs per 7 days**, and
-this app consumes **two** (app + extension). Several reinstalls in a day can
-exhaust it, after which the app provisions and the extension does not — exactly
-this symptom.
+A free Apple ID does allow app extensions, so this is not automatically a
+dead end.
 
-1. Reboot once. Registration sometimes settles on the next launch.
-2. Delete the app completely, then install once. A clean install asks for
-   fewer new IDs than repeated overwrites.
-3. If it still fails, wait for the 7-day window to roll over and install once.
-4. If it fails after a clean install on a fresh window, treat it as a genuine
-   free-account limit and say so — that changes Phase 4's design rather than
-   being something to keep retrying.
+**Not** the App ID budget, despite the temptation to blame it. That limit — 10
+App IDs per 7 days — counts **distinct** bundle identifiers. Reinstalling the
+same app reuses the same two (`…app` and `…app.widgets`) and consumes nothing
+further, so repeated installs in one day do not exhaust it. What does expire
+after 7 days is the signing certificate, which needs re-signing, not a new ID.
+
+1. Reboot once. Extension registration sometimes settles on the next launch.
+2. Delete the app completely, then install once. This costs the downloaded
+   whisper models, which live in Application Support and go with it.
+3. Verify the signing step actually covered the `.appex`. An extension left
+   unsigned, or signed with a profile that does not match its bundle id, is
+   installed and then ignored by iOS.
+4. If it still fails after a clean install, treat it as a genuine free-account
+   limit and record it — that changes Phase 4's design rather than being
+   something to keep retrying.
 
 ---
 
