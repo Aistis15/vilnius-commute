@@ -13,7 +13,7 @@ detection, voice from the lock screen — depends on the answers.
 |---|---|
 | Probe app | Built and green in CI |
 | Last green run | [35872596608](https://github.com/Aistis15/vilnius-commute/actions/runs/35872596608) |
-| Probe results | **Not yet collected** |
+| Probe results | **Collected 2026-09-26** — see below |
 
 The results cannot be produced from a Windows machine or from CI. They require
 installing the `.ipa` on a physical iPhone with a free Apple ID and reading the
@@ -109,17 +109,56 @@ to add `group.com.vilniuscommute.app`.
 
 ## Results
 
-To be filled in from an actual device. No row is to be marked from reasoning.
+Collected 2026-09-26 on a physical iPhone running iOS 26, sideloaded with
+Sideloadly and a free Apple ID.
 
-| Capability | Result | Notes |
+### Verdict: GO
+
+The three capabilities the rest of the spec depends on all work on a free
+Apple ID. Phases 3 and 4 can be built as designed.
+
+| Capability | Result | Evidence |
 |---|---|---|
-| App Groups | — | |
-| Live Activities | — | |
-| AlarmKit | — | |
-| Background location (Always) | — | |
-| `AudioRecordingIntent` from the lock screen | — | |
-| Whisper Lithuanian, `base` model | — | accuracy + seconds per utterance |
-| Whisper Lithuanian, `small` model | — | accuracy + seconds per utterance |
+| **Live Activities** | ✅ **Works** | Probe reported "Sistema leidžia. Šiuo metu veikia: 1" — `Activity.request` succeeded and ActivityKit held a live instance |
+| **AlarmKit** | ✅ **Works** | Authorization granted. A free Apple ID *can* schedule alarms that ring through silent mode |
+| **Background location** | ✅ **Works** | "Always" granted, so boarding detection in the background is possible |
+| Microphone | ✅ Granted | |
+| App Groups | ⏭️ Not tested | Deliberately skipped — optional, and there is a fallback. See D5 |
+| `AudioRecordingIntent` from the lock screen | ⏳ Pending | Control not yet pressed on a locked device |
+
+The most consequential of these is AlarmKit. It was the biggest single risk in
+the whole plan: without it there is no way to wake someone through silent mode,
+and the "get ready" alarm is the feature the app exists for.
+
+### Display note, not a capability limit
+
+The banner did not appear on the lock screen on first attempt, but the probe
+showed an Activity *was* running. That separates the two possible causes: the
+app created it successfully and iOS declined to display it, which is a Settings
+matter (`Settings → <app> → Live Activities`, and `Settings → Face ID &
+Passcode → Allow Access When Locked → Live Activities`) rather than anything
+free signing prevents.
+
+### Whisper, Lithuanian
+
+| Model | Result |
+|---|---|
+| `base` (57 MB) | Inaccurate |
+| `small` (181 MB) | Better, but still wrong enough to be unusable |
+
+Not yet diagnosed. Two candidate causes, and they need different fixes, so the
+transcript text is required before changing anything:
+
+1. **The model genuinely cannot do short Lithuanian utterances**, particularly
+   proper nouns like ISM and OZAS. Then Phase 5 needs a different approach —
+   a constrained grammar, or `medium`, or rethinking voice entry.
+2. **The audio pipeline is feeding whisper poor input.** `AVAudioSession` mode
+   `.measurement` is a live suspect: it disables input gain processing, which
+   can leave the recording too quiet for whisper to work with.
+
+Distinguishing them is cheap: plausible-but-wrong Lithuanian words mean the
+audio is fine and the model is weak; silence markers, gibberish or another
+language suggest the audio is wrong.
 
 ## Known unknown, carried into Phase 5
 
