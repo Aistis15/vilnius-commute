@@ -9,6 +9,7 @@ import SwiftUI
 /// rather than something to navigate to.
 struct RootView: View {
     @State private var controller = TripActivityController()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -19,6 +20,11 @@ struct RootView: View {
             .commuteListChrome()
             .navigationTitle("Vilnius")
             .task { controller.adoptRunningActivity() }
+            // A banner started from the lock-screen control, or dismissed
+            // there, changed while the app was not looking.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { controller.adoptRunningActivity() }
+            }
         }
     }
 

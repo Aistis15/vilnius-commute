@@ -94,6 +94,11 @@ targets:
     platform: iOS
     sources:
       - path: App/Sources
+      # App Intents the widget extension's controls trigger. Compiled into
+      # BOTH targets: the extension needs the types to build its controls,
+      # the app needs them because LiveActivityIntent and AudioRecordingIntent
+      # are performed in the app's process.
+      - path: Shared/Intents
       # No App/Resources yet: Phase 1 ships no asset catalog, and an empty
       # directory is not tracked by git, so listing one fails spec validation.
     dependencies:
@@ -161,6 +166,7 @@ targets:
     platform: iOS
     sources:
       - path: Widgets/Sources
+      - path: Shared/Intents
     dependencies:
       - target: Core
         embed: false

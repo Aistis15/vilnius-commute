@@ -7,6 +7,7 @@ import WidgetKit
 struct VilniusCommuteWidgetsBundle: WidgetBundle {
     var body: some Widget {
         TripLiveActivityWidget()
+        StartBannerControl()
         VoiceCaptureControl()
         AskWidget()
     }

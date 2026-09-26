@@ -110,9 +110,9 @@ the vision is not buildable as described.
 
 | Wanted | How |
 |---|---|
-| Lock-screen button that starts the banner | `ControlWidget` + `LiveActivityStartingIntent` (iOS 16.1+) |
+| Lock-screen button that starts the banner | `ControlWidget` + `LiveActivityIntent` (iOS 17+). Apple: *"people might place a control in Control Center that performs a LiveActivityIntent and starts the activity without opening your app"* |
 | Buttons **in** the banner — "Dabar" / "Planuoti" / "Atvykau" | Apple: *"Live Activities can contain SwiftUI buttons and toggles"* |
-| Speaking from the lock screen | `AudioRecordingIntent` (iOS 18+) on the control, then whisper |
+| Speaking from the lock screen | `AudioRecordingIntent` (iOS 18+) on the control, then whisper. Apple requires it: *"you must start a Live Activity when you begin the audio recording… If you don't start a Live Activity, the audio recording stops"* — so the banner asking "Kur keliausime šiandien?" while listening is not just the design, it is mandatory |
 | Banner content changing through the trip | An Activity is updated; each stage renders differently |
 | Tapping the banner to open the app | Deep link from the Activity |
 | More detail without opening the app | Dynamic Island expanded view |

@@ -26,14 +26,29 @@ struct ProbeRecordingIntent: AppIntent, AudioRecordingIntent {
     /// Stay out of the app: the whole point is to prove recording works
     /// *without* unlocking and foregrounding.
     ///
-    /// `supportedModes` rather than `openAppWhenRun`, which is deprecated and
-    /// errors outright when an intent runs in an app extension — which this
-    /// one does, since it is driven by a Control.
+    /// `supportedModes` rather than `openAppWhenRun`, which is deprecated.
     static let supportedModes: IntentModes = .background
 
     private static let probeSeconds: TimeInterval = 3
 
     func perform() async throws -> some IntentResult {
+        // Not optional. Apple (developer.apple.com, AudioRecordingIntent):
+        // "you must start a Live Activity when you begin the audio recording
+        // and keep it active as long as you record audio. If you don't start
+        // a Live Activity, the audio recording stops." The first version of
+        // this probe did not, so it could only ever have failed. The banner
+        // is left up afterwards: that is where the answer will appear.
+        do {
+            try TripActivityLauncher.start()
+        } catch {
+            LockScreenRecordingMarker.write(
+                succeeded: false,
+                seconds: 0,
+                message: "baneris nepasileido: \(error)"
+            )
+            return .result()
+        }
+
         do {
             let seconds = try await record(for: Self.probeSeconds)
             LockScreenRecordingMarker.write(
@@ -58,7 +73,7 @@ struct ProbeRecordingIntent: AppIntent, AudioRecordingIntent {
     /// the evidence.
     private func record(for duration: TimeInterval) async throws -> Double {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: [])
+        try session.setCategory(.record, mode: .default, options: [])
         try session.setActive(true, options: [])
         defer { try? session.setActive(false, options: [.notifyOthersOnDeactivation]) }
 

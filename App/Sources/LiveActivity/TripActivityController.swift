@@ -62,23 +62,12 @@ final class TripActivityController {
             return
         }
 
-        let attributes = TripActivityAttributes(destinationName: destination)
-        let state = TripContentState.sample()
-        let content = ActivityContent(
-            state: state,
-            // Go stale a minute after departure: after that the countdown is
-            // meaningless and iOS should grey the banner out.
-            staleDate: state.leaveAt.addingTimeInterval(60)
-        )
-
         do {
-            let activity = try Activity.request(
-                attributes: attributes,
-                content: content,
-                pushType: nil          // Phase 1 updates locally only.
-            )
-            activityID = activity.id
-            liveState = state
+            // The same launcher the lock-screen control uses, so both put up
+            // the same banner and neither stacks a second one.
+            let id = try TripActivityLauncher.start(destination: destination)
+            activityID = id
+            liveState = Self.state(of: id)
             status = .running
             lastAction = "Paleista \(TimeFormat.clock(.now))"
         } catch {
