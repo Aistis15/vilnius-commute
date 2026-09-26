@@ -40,16 +40,16 @@ Priority: composition → typography → spacing → colour → motion → micro
 
 ## Backlog (top = next)
 
-- [ ] 1. Place accuracy: "ISM universitetą" must never become Vilniaus
+- [x] 1. Place accuracy: "ISM universitetą" must never become Vilniaus
       universitetas; letter-spelled abbreviations ("i s m"); ambiguous → the
       banner offers the two best matches as buttons.
-- [ ] 2. More cities: Kaunas, Klaipėda, Šiauliai, Panevėžys + Vilnius in one
+- [x] 2. More cities: Kaunas, Klaipėda, Šiauliai, Panevėžys + Vilnius in one
       database (stops.lt feeds, same format). Search biased to where you are.
-- [ ] 3. Location that works on a PC and says why when it does not.
-- [ ] 4. Banner pages, flipped by tapping: trip / direction (arrow, bearing,
+- [x] 3. Location that works on a PC and says why when it does not.
+- [x] 4. Banner pages, flipped by tapping: trip / direction (arrow, bearing,
       distance) / whole trip.
-- [ ] 5. Start on the lock screen: the banner is the product.
-- [ ] 6. Motion system: push/pop, banner stage changes, countdown roll, island
+- [x] 5. Start on the lock screen: the banner is the product.
+- [x] 6. Motion system (first pass; the critic loop refines it): push/pop, banner stage changes, countdown roll, island
       spring, sheets, press feedback — varied timing, reduced-motion aware.
 - [ ] 7. Critic loop on every screen until no top-priority discrepancy remains.
 - [ ] 8. Wrap-up: `docs/iphone-plan.md` — developer account, TestFlight from CI,
@@ -58,3 +58,13 @@ Priority: composition → typography → spacing → colour → motion → micro
 ## Log
 
 (one line per iteration: what the critic ranked first, what was fixed, commit)
+
+- Round 1 (00:00–00:45): three parallel implementers. Five cities in one
+  database (4,165 stops; published, Kaunas trips verified); "i s m
+  universitetą" → ISM with high confidence, ambiguity flag; banner pages
+  (Dabar / Kryptis / Visa kelionė), lock-first start, location help, motion
+  system with a change-only DOM patcher. 59 tests pass. Commit 6010772.
+- Round 2 (started 01:20): screenshots via prototype/tools/capture_flow.py
+  (51 states, 0 console errors) → independent critic → frontend fixer on its
+  top items; backend fixer in parallel: arrive-by never offers trips that
+  already left ("late" response), aikštė↔a. variants, intercity routing.
