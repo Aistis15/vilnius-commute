@@ -277,7 +277,7 @@ Python in a `run:` block and broke the workflow parse.
 - Every route category, colour and `route_id` prefix in the live feed. Phase 2.
 - Real badge geometry against Trafi reference screenshots. Phase 2.
 
-## D12 — Install with AltStore, not Sideloadly (2026-09-26)
+## D12 · Install with AltStore, not Sideloadly
 
 **Finding, measured on the phone** (Diagnostics → Pasirašymas, Sideloadly
 v0.60, free Apple ID, iOS 27.0):
