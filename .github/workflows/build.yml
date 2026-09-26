@@ -56,6 +56,23 @@ jobs:
           chmod +x Tools/whisper/build_whisper_xcframework.sh
           ./Tools/whisper/build_whisper_xcframework.sh
 
+      # The routing tests run against the real network, so they need the
+      # database the GTFS workflow publishes. Fetched rather than rebuilt here:
+      # it is the same artifact the app downloads, so the tests exercise what
+      # ships. If it is unavailable the tests skip rather than fail.
+      - name: Fetch the schedule database
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .build
+          if gh release download data-latest --pattern 'vilnius.sqlite.gz'                --dir .build --clobber; then
+            gunzip -f .build/vilnius.sqlite.gz
+            ls -lh .build/vilnius.sqlite
+          else
+            echo "No published database yet - routing tests will skip."
+          fi
+
       - name: Install XcodeGen
         run: |
           brew install xcodegen

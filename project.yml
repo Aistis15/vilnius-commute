@@ -76,6 +76,10 @@ targets:
     platform: iOS
     sources:
       - path: Core/Sources
+    dependencies:
+      # The schedule database is read with the system SQLite. No package
+      # needed - libsqlite3 ships with iOS.
+      - sdk: libsqlite3.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).core
@@ -103,6 +107,7 @@ targets:
         codeSign: false
       - sdk: Accelerate.framework
       - sdk: Metal.framework
+      - sdk: libsqlite3.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX)
