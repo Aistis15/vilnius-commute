@@ -8,5 +8,6 @@ struct VilniusCommuteWidgetsBundle: WidgetBundle {
     var body: some Widget {
         TripLiveActivityWidget()
         VoiceCaptureControl()
+        AskWidget()
     }
 }

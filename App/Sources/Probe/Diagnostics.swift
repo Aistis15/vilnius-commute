@@ -161,97 +161,145 @@ struct Diagnostics {
     // MARK: - Provisioning
     //
     // The decisive check when the extension is on disk but iOS will not run
-    // it. An app extension needs its OWN provisioning profile, whose
-    // application-identifier matches its own bundle id. A sideloader that
-    // rewrites bundle ids for a free account has to re-sign the extension too
-    // — if it only re-signs the app, the extension installs and is then
-    // ignored, which looks exactly like a missing extension.
+    // it. Two things have to agree with each bundle's own id:
+    //
+    // - the SIGNATURE in the binary — the identity and entitlements the
+    //   bundle claims;
+    // - the PROFILE next to it — what Apple has allowed that identity.
+    //
+    // An app extension needs its own of both. A sideloader that rewrites
+    // bundle ids for a free account has to sign the extension separately; if
+    // it reuses the app's identity or profile, the extension installs and is
+    // then silently ignored — which looks exactly like a missing extension.
 
     private static func provisioning() -> Section {
         var lines: [Line] = []
 
-        func describe(_ label: String, bundle: Bundle?, expectedID: String?) {
-            guard let bundle else {
-                lines.append(Line(label: label, value: "bundle neprieinamas", ok: false))
-                return
-            }
-            guard let url = bundle.url(forResource: "embedded", withExtension: "mobileprovision"),
-                  let raw = try? Data(contentsOf: url)
-            else {
-                lines.append(Line(
-                    label: label,
-                    value: "NĖRA profilio — nepasirašyta, todėl iOS jo nepaleis",
-                    ok: false
-                ))
-                return
-            }
-
-            guard let profile = parseProfile(raw) else {
-                lines.append(Line(label: label, value: "profilis yra, bet neperskaitomas", ok: nil))
-                return
-            }
-
-            let appID = profile.applicationIdentifier ?? "?"
-            // The profile id is prefixed with the team id, so compare on the
-            // suffix rather than demanding an exact match.
-            let matches = expectedID.map { appID.hasSuffix($0) } ?? true
-            lines.append(Line(
-                label: label,
-                value: appID + (matches ? "" : "  ← NESUTAMPA su bundle id"),
-                ok: matches
-            ))
-
-            if let expiry = profile.expirationDate {
-                let days = Int(expiry.timeIntervalSinceNow / 86_400)
-                lines.append(Line(
-                    label: "  galioja iki",
-                    value: "\(ISO8601DateFormatter().string(from: expiry)) (\(days) d.)",
-                    ok: days >= 0
-                ))
-            }
-        }
-
-        let appID = Bundle.main.bundleIdentifier
-        describe("Programėlės profilis", bundle: .main, expectedID: appID)
+        let appProfile = audit("Programėlė", bundle: .main, appProfileUUID: nil, into: &lines)
 
         let appexes: [URL] = Bundle.main.builtInPlugInsURL.flatMap {
             try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)
         }?.filter { $0.pathExtension == "appex" } ?? []
 
         for appex in appexes {
-            let bundle = Bundle(url: appex)
-            describe("Plėtinio profilis", bundle: bundle,
-                     expectedID: bundle?.bundleIdentifier)
+            audit("Plėtinys", bundle: Bundle(url: appex),
+                  appProfileUUID: appProfile?.uuid, into: &lines)
         }
         if appexes.isEmpty {
-            lines.append(Line(label: "Plėtinio profilis", value: "plėtinio nėra", ok: false))
+            lines.append(Line(label: "Plėtinys", value: "plėtinio nėra", ok: false))
         }
 
         return Section(title: "Pasirašymas", lines: lines)
     }
 
-    private struct Profile {
-        let applicationIdentifier: String?
-        let expirationDate: Date?
+    /// Adds one bundle's signature and profile lines; returns its profile so
+    /// the extension can be compared against the app's.
+    @discardableResult
+    private static func audit(
+        _ label: String,
+        bundle: Bundle?,
+        appProfileUUID: String?,
+        into lines: inout [Line]
+    ) -> ProvisioningProfile? {
+        guard let bundle, let bundleID = bundle.bundleIdentifier else {
+            lines.append(Line(label: label, value: "bundle neprieinamas", ok: false))
+            return nil
+        }
+        lines.append(Line(label: label, value: bundleID, ok: nil))
+
+        // 1. What the binary was signed as.
+        var signedKeys: Set<String>?
+        do {
+            guard let executable = bundle.executableURL else { throw CodeSignature.ReadError.notMachO }
+            let entitlements = try CodeSignature.entitlements(ofMachO: Data(contentsOf: executable))
+            signedKeys = Set(entitlements.keys)
+
+            let signedID = entitlements["application-identifier"] as? String
+            let covers = signedID.map {
+                SigningIdentity.applicationIdentifier($0, covers: bundleID)
+            } ?? false
+            lines.append(Line(
+                label: "  parašas",
+                value: (signedID ?? "be application-identifier")
+                    + (covers ? "" : "  ← NESUTAMPA su bundle id"),
+                ok: covers
+            ))
+            lines.append(Line(
+                label: "  parašo teisės",
+                value: entitlements.keys.sorted().joined(separator: ", "),
+                ok: nil
+            ))
+        } catch let error as CodeSignature.ReadError {
+            lines.append(Line(label: "  parašas", value: describe(error), ok: false))
+        } catch {
+            lines.append(Line(label: "  parašas", value: "neperskaitomas: \(error)", ok: false))
+        }
+
+        // 2. What Apple allows it.
+        guard let url = bundle.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let raw = try? Data(contentsOf: url)
+        else {
+            lines.append(Line(label: "  profilis",
+                              value: "NĖRA — iOS tokio bundle nepaleis", ok: false))
+            return nil
+        }
+        guard let profile = ProvisioningProfile.parse(raw) else {
+            lines.append(Line(label: "  profilis", value: "yra, bet neperskaitomas", ok: nil))
+            return nil
+        }
+
+        let profileID = profile.applicationIdentifier ?? "?"
+        let covers = SigningIdentity.applicationIdentifier(profileID, covers: bundleID)
+        lines.append(Line(
+            label: "  profilis",
+            value: profileID + (covers ? "" : "  ← NESUTAMPA su bundle id"),
+            ok: covers
+        ))
+        lines.append(Line(
+            label: "  profilio vardas",
+            value: "\(profile.name ?? "?") · \(profile.uuid.map { String($0.prefix(8)) } ?? "?")",
+            ok: nil
+        ))
+
+        if let appProfileUUID, let uuid = profile.uuid {
+            let shared = appProfileUUID == uuid
+            lines.append(Line(
+                label: "  atskiras profilis",
+                value: shared ? "NE — naudoja programėlės profilį" : "taip",
+                ok: !shared
+            ))
+        }
+
+        // A signature claiming an entitlement the profile does not grant is
+        // exactly what makes iOS refuse to launch a bundle.
+        if let signedKeys {
+            let ungranted = signedKeys.subtracting(profile.entitlementKeys).sorted()
+            lines.append(Line(
+                label: "  profilis leidžia parašą",
+                value: ungranted.isEmpty ? "taip" : "NE: " + ungranted.joined(separator: ", "),
+                ok: ungranted.isEmpty
+            ))
+        }
+
+        if let expiry = profile.expirationDate {
+            let days = Int(expiry.timeIntervalSinceNow / 86_400)
+            lines.append(Line(
+                label: "  galioja iki",
+                value: "\(ISO8601DateFormatter().string(from: expiry)) (\(days) d.)",
+                ok: days >= 0
+            ))
+        }
+        return profile
     }
 
-    /// A `.mobileprovision` is CMS-wrapped, but the plist inside is plain
-    /// text, so it can be sliced out without any crypto.
-    private static func parseProfile(_ data: Data) -> Profile? {
-        guard let start = data.range(of: Data("<?xml".utf8)),
-              let end = data.range(of: Data("</plist>".utf8))
-        else { return nil }
-
-        let slice = data[start.lowerBound..<end.upperBound]
-        guard let plist = try? PropertyListSerialization.propertyList(
-            from: slice, options: [], format: nil
-        ) as? [String: Any] else { return nil }
-
-        let entitlements = plist["Entitlements"] as? [String: Any]
-        return Profile(
-            applicationIdentifier: entitlements?["application-identifier"] as? String,
-            expirationDate: plist["ExpirationDate"] as? Date
-        )
+    private static func describe(_ error: CodeSignature.ReadError) -> String {
+        switch error {
+        case .unsigned: "NEPASIRAŠYTA — iOS tokio bundle nepaleis"
+        case .noEntitlements: "pasirašyta be teisių (entitlements)"
+        case .universal: "netikėtas universalus binaris"
+        case .notMachO: "ne Mach-O failas"
+        case .malformed(let detail): "sugadintas: \(detail)"
+        }
     }
 
     // MARK: - Live Activities

@@ -201,4 +201,21 @@ struct SnapshotTests {
                 .padding(12)
         }.isEmpty)
     }
+
+    // MARK: - Widgets
+
+    /// Canvas sizes approximate the small home-screen widget and the
+    /// lock-screen rectangular slot. The exact slots vary by device; these
+    /// are for reviewing by eye, not for pixel parity.
+    @Test("Ask widget")
+    func askWidget() {
+        #expect(!SnapshotHarness.capture("widget-ask-small", size: CGSize(width: 170, height: 170)) {
+            AskWidgetView(family: .systemSmall)
+                .padding(16)
+                .background(Color.cardBackground)
+        }.isEmpty)
+        #expect(!SnapshotHarness.capture("widget-ask-rectangular", size: CGSize(width: 172, height: 76)) {
+            AskWidgetView(family: .accessoryRectangular)
+        }.isEmpty)
+    }
 }
