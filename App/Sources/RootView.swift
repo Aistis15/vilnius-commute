@@ -12,6 +12,11 @@ struct RootView: View {
             List {
                 Section {
                     NavigationLink {
+                        DiagnosticsView()
+                    } label: {
+                        Label("Diagnostika", systemImage: "stethoscope")
+                    }
+                    NavigationLink {
                         LiveActivityDemoView()
                     } label: {
                         Label("Gyvoji veikla", systemImage: "bell.badge")

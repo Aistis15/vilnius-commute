@@ -45,6 +45,10 @@ struct SnapshotTests {
             NavigationStack { ProbeView() }
         }.isEmpty)
 
+        #expect(!SnapshotHarness.capture("screen-diagnostics") {
+            NavigationStack { DiagnosticsView() }
+        }.isEmpty)
+
         #expect(!SnapshotHarness.capture("screen-live-activity") {
             NavigationStack { LiveActivityDemoView() }
         }.isEmpty)
