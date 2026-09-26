@@ -124,7 +124,7 @@ Apple ID. Phases 3 and 4 can be built as designed.
 | **Background location** | ✅ **Works** | "Always" granted, so boarding detection in the background is possible |
 | Microphone | ✅ Granted | |
 | App Groups | ⏭️ Not tested | Deliberately skipped — optional, and there is a fallback. See D5 |
-| `AudioRecordingIntent` from the lock screen | ⏳ Pending | Control not yet pressed on a locked device |
+| `AudioRecordingIntent` from the lock screen | ❌ **Blocked** | The Control does not appear in the lock-screen list at all — the widget extension is not registered. See below |
 
 The most consequential of these is AlarmKit. It was the biggest single risk in
 the whole plan: without it there is no way to wake someone through silent mode,
@@ -138,6 +138,46 @@ app created it successfully and iOS declined to display it, which is a Settings
 matter (`Settings → <app> → Live Activities`, and `Settings → Face ID &
 Passcode → Allow Access When Locked → Live Activities`) rather than anything
 free signing prevents.
+
+### Open: the widget extension is not registering on device
+
+The banner never appeared. The decisive observation was not about the banner
+at all — **the "Vilnius · Kalbėk" Control is absent from the lock-screen
+Customize list**. Both the banner and that Control come from the same widget
+extension, so its absence says the extension itself is not registered with
+iOS.
+
+That also explains the confusing part. The probe reported an Activity as
+running, because `Activity.request` succeeds and the object lives in the *app*
+process; ActivityKit's bookkeeping is happy. But a Live Activity is *drawn* by
+the widget extension, and there is nothing there to draw it.
+
+The `.ipa` is not at fault. It carries the extension complete:
+
+```
+Payload/VilniusCommute.app/PlugIns/VilniusCommuteWidgets.appex/
+    VilniusCommuteWidgets        594,696 B
+    Info.plist                     1,104 B
+    Metadata.appintents/...
+```
+
+So it is lost at install time. Two candidates, untested:
+
+1. **The sideloading tool is stripping app extensions.** Several strip them by
+   default, because each extension needs its own provisioning profile and they
+   often break installs.
+2. **The free Apple ID App ID limit.** A free account allows 10 App IDs per 7
+   days, and this app needs two (app + extension). Several reinstalls in one
+   day can exhaust it, after which the app provisions and the extension does
+   not.
+
+Neither is confirmed. If the extension still fails to register once both are
+ruled out, that is a genuine free-account limit and the banner has to be
+approached differently — which would change Phase 4.
+
+**What this does not change:** AlarmKit, background location and ActivityKit
+authorization are all confirmed working. The alarm — the biggest risk in the
+plan — is unaffected.
 
 ### Whisper, Lithuanian
 
