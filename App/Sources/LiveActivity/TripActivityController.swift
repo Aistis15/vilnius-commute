@@ -94,6 +94,7 @@ final class TripActivityController {
         await Self.bump(activityID: activityID, byMinutes: minutes)
         refresh()
         lastAction = "Pridėta \(minutes) min · \(TimeFormat.clock(.now))"
+    }
 
     func end() async {
         guard let activityID else { return }
