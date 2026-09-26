@@ -62,6 +62,7 @@ struct Diagnostics {
         var sections: [Section] = []
         sections.append(device())
         sections.append(await widgetExtension())
+        sections.append(provisioning())
         sections.append(liveActivities())
         sections.append(await permissions())
         sections.append(background())
@@ -155,6 +156,102 @@ struct Diagnostics {
         }
 
         return Section(title: "Widget'o plėtinys", lines: lines)
+    }
+
+    // MARK: - Provisioning
+    //
+    // The decisive check when the extension is on disk but iOS will not run
+    // it. An app extension needs its OWN provisioning profile, whose
+    // application-identifier matches its own bundle id. A sideloader that
+    // rewrites bundle ids for a free account has to re-sign the extension too
+    // — if it only re-signs the app, the extension installs and is then
+    // ignored, which looks exactly like a missing extension.
+
+    private static func provisioning() -> Section {
+        var lines: [Line] = []
+
+        func describe(_ label: String, bundle: Bundle?, expectedID: String?) {
+            guard let bundle else {
+                lines.append(Line(label: label, value: "bundle neprieinamas", ok: false))
+                return
+            }
+            guard let url = bundle.url(forResource: "embedded", withExtension: "mobileprovision"),
+                  let raw = try? Data(contentsOf: url)
+            else {
+                lines.append(Line(
+                    label: label,
+                    value: "NĖRA profilio — nepasirašyta, todėl iOS jo nepaleis",
+                    ok: false
+                ))
+                return
+            }
+
+            guard let profile = parseProfile(raw) else {
+                lines.append(Line(label: label, value: "profilis yra, bet neperskaitomas", ok: nil))
+                return
+            }
+
+            let appID = profile.applicationIdentifier ?? "?"
+            // The profile id is prefixed with the team id, so compare on the
+            // suffix rather than demanding an exact match.
+            let matches = expectedID.map { appID.hasSuffix($0) } ?? true
+            lines.append(Line(
+                label: label,
+                value: appID + (matches ? "" : "  ← NESUTAMPA su bundle id"),
+                ok: matches
+            ))
+
+            if let expiry = profile.expirationDate {
+                let days = Int(expiry.timeIntervalSinceNow / 86_400)
+                lines.append(Line(
+                    label: "  galioja iki",
+                    value: "\(ISO8601DateFormatter().string(from: expiry)) (\(days) d.)",
+                    ok: days >= 0
+                ))
+            }
+        }
+
+        let appID = Bundle.main.bundleIdentifier
+        describe("Programėlės profilis", bundle: .main, expectedID: appID)
+
+        let appexes: [URL] = Bundle.main.builtInPlugInsURL.flatMap {
+            try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)
+        }?.filter { $0.pathExtension == "appex" } ?? []
+
+        for appex in appexes {
+            let bundle = Bundle(url: appex)
+            describe("Plėtinio profilis", bundle: bundle,
+                     expectedID: bundle?.bundleIdentifier)
+        }
+        if appexes.isEmpty {
+            lines.append(Line(label: "Plėtinio profilis", value: "plėtinio nėra", ok: false))
+        }
+
+        return Section(title: "Pasirašymas", lines: lines)
+    }
+
+    private struct Profile {
+        let applicationIdentifier: String?
+        let expirationDate: Date?
+    }
+
+    /// A `.mobileprovision` is CMS-wrapped, but the plist inside is plain
+    /// text, so it can be sliced out without any crypto.
+    private static func parseProfile(_ data: Data) -> Profile? {
+        guard let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8))
+        else { return nil }
+
+        let slice = data[start.lowerBound..<end.upperBound]
+        guard let plist = try? PropertyListSerialization.propertyList(
+            from: slice, options: [], format: nil
+        ) as? [String: Any] else { return nil }
+
+        let entitlements = plist["Entitlements"] as? [String: Any]
+        return Profile(
+            applicationIdentifier: entitlements?["application-identifier"] as? String,
+            expirationDate: plist["ExpirationDate"] as? Date
+        )
     }
 
     // MARK: - Live Activities
@@ -320,6 +417,10 @@ struct Diagnostics {
                     ?? "nėra",
                 ok: size == nil ? nil : size == model.bytes
             ))
+        }
+
+        if let failure = UserDefaults.standard.string(forKey: "VCLastVoiceError") {
+            lines.append(Line(label: "Paskutinė klaida", value: failure, ok: false))
         }
 
         if let marker = LockScreenRecordingMarker.read() {

@@ -183,6 +183,7 @@ struct WhisperTestView: View {
 
             let result = try await transcriber.transcribe(samples: samples, language: "lt")
             transcript = result.text.isEmpty ? "(tyla)" : result.text
+            UserDefaults.standard.removeObject(forKey: "VCLastVoiceError")
 
             timing = String(
                 format: "įrašas %.1f s · modelis %.1f s · atpažinimas %.1f s",
@@ -200,6 +201,12 @@ struct WhisperTestView: View {
             )
         } catch {
             problem = error.localizedDescription
+            // Kept so the failure shows up in the diagnostics report; an
+            // error only visible on this screen costs another round trip.
+            UserDefaults.standard.set(
+                "\(Date().formatted(date: .omitted, time: .standard)) — \(error)",
+                forKey: "VCLastVoiceError"
+            )
         }
     }
 }

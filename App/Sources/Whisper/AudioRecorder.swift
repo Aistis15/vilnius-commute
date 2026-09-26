@@ -57,11 +57,17 @@ final class AudioRecorder {
 
         do {
             let session = AVAudioSession.sharedInstance()
-            // `.measurement` was used here first and is the wrong tool: it
-            // disables the input gain processing iOS normally applies, which
-            // leaves speech recordings very quiet. `.spokenAudio` keeps that
-            // processing, which is what whisper wants to be fed.
-            try session.setCategory(.record, mode: .spokenAudio, options: [.duckOthers])
+            // Two wrong answers were tried here before this one.
+            //
+            // `.measurement` disables the input gain processing iOS normally
+            // applies, leaving speech recordings very quiet — bad input for
+            // whisper. `.spokenAudio` was the replacement and is worse: it is
+            // a *playback* mode, for apps that play podcasts or audiobooks,
+            // and setting it on a `.record` session throws.
+            //
+            // `.default` is the one that actually fits: ordinary input
+            // processing, no special-case tuning.
+            try session.setCategory(.record, mode: .default, options: [.duckOthers])
             try session.setActive(true, options: [])
 
             let url = FileManager.default.temporaryDirectory

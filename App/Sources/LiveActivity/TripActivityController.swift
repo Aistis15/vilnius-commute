@@ -36,6 +36,17 @@ final class TripActivityController {
     private(set) var status: Status = .idle
     private(set) var activityID: String?
 
+    /// The live Activity's current content, re-read after every change.
+    ///
+    /// Without this the demo screen showed a fixed sample, so "add 5 minutes"
+    /// updated the real banner on the lock screen and changed nothing in the
+    /// app — indistinguishable from a button that does nothing.
+    private(set) var liveState: TripContentState?
+
+    /// Short confirmation of the last action, because an update that only
+    /// lands on the lock screen is invisible from inside the app.
+    private(set) var lastAction: String?
+
     /// Whether the system currently permits Live Activities for this app.
     /// Flips to `false` if the user turns them off in Settings.
     var activitiesEnabled: Bool {
@@ -67,7 +78,9 @@ final class TripActivityController {
                 pushType: nil          // Phase 1 updates locally only.
             )
             activityID = activity.id
+            liveState = state
             status = .running
+            lastAction = "Paleista \(TimeFormat.clock(.now))"
         } catch {
             // Surfaced in the UI on purpose: this is the go/no-go signal.
             status = .failed(String(describing: error))
@@ -79,21 +92,40 @@ final class TripActivityController {
     func bumpCountdown(byMinutes minutes: Int = 5) async {
         guard let activityID else { return }
         await Self.bump(activityID: activityID, byMinutes: minutes)
-    }
+        refresh()
+        lastAction = "Pridėta \(minutes) min · \(TimeFormat.clock(.now))"
 
     func end() async {
         guard let activityID else { return }
         await Self.end(activityID: activityID)
         self.activityID = nil
+        liveState = nil
         status = .idle
+        lastAction = "Sustabdyta \(TimeFormat.clock(.now))"
+    }
+
+    /// Re-reads the live Activity so the UI reflects what is on the lock
+    /// screen rather than what the app last remembered.
+    func refresh() {
+        guard let activityID else {
+            liveState = nil
+            return
+        }
+        liveState = Self.state(of: activityID)
+        if Self.find(activityID) == nil {
+            // It ended or was dismissed from outside the app.
+            self.activityID = nil
+            status = .idle
+        }
     }
 
     /// Re-attaches to an Activity that outlived a previous launch.
     func adoptRunningActivity() {
-        guard activityID == nil,
-              let existing = Self.runningActivityID() else { return }
-        activityID = existing
-        status = .running
+        if activityID == nil, let existing = Self.runningActivityID() {
+            activityID = existing
+            status = .running
+        }
+        refresh()
     }
 
     // MARK: - Nonisolated work
@@ -103,6 +135,10 @@ final class TripActivityController {
 
     private nonisolated static func find(_ id: String) -> Activity<TripActivityAttributes>? {
         Activity<TripActivityAttributes>.activities.first { $0.id == id }
+    }
+
+    private nonisolated static func state(of id: String) -> TripContentState? {
+        find(id)?.content.state
     }
 
     private nonisolated static func runningActivityID() -> String? {
