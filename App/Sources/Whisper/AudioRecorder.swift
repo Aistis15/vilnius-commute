@@ -57,7 +57,11 @@ final class AudioRecorder {
 
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+            // `.measurement` was used here first and is the wrong tool: it
+            // disables the input gain processing iOS normally applies, which
+            // leaves speech recordings very quiet. `.spokenAudio` keeps that
+            // processing, which is what whisper wants to be fed.
+            try session.setCategory(.record, mode: .spokenAudio, options: [.duckOthers])
             try session.setActive(true, options: [])
 
             let url = FileManager.default.temporaryDirectory
@@ -90,6 +94,26 @@ final class AudioRecorder {
 
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         return recorder.url
+    }
+
+    /// How loud a recording actually is.
+    ///
+    /// Exists to settle a specific question: when transcription comes back
+    /// wrong, is whisper being fed near-silence, or is it being fed decent
+    /// audio and simply getting it wrong? Those need opposite fixes, and
+    /// guessing between them wastes a device round trip.
+    ///
+    /// Whisper works on samples in -1...1. A peak below roughly 0.05 means the
+    /// capture is too quiet to judge the model by.
+    nonisolated static func levels(of samples: [Float]) -> (peak: Float, rms: Float) {
+        guard !samples.isEmpty else { return (0, 0) }
+        var peak: Float = 0
+        var sumOfSquares: Double = 0
+        for sample in samples {
+            peak = max(peak, abs(sample))
+            sumOfSquares += Double(sample) * Double(sample)
+        }
+        return (peak, Float((sumOfSquares / Double(samples.count)).squareRoot()))
     }
 
     /// Reads a recorded WAV back as the float samples whisper wants.

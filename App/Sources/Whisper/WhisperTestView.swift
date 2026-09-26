@@ -16,6 +16,7 @@ struct WhisperTestView: View {
     @State private var selected: WhisperModel = .baseQ5
     @State private var transcript: String = ""
     @State private var timing: String = ""
+    @State private var audioLevel: String = ""
     @State private var problem: String?
     @State private var isWorking = false
 
@@ -121,6 +122,12 @@ struct WhisperTestView: View {
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
+                if !audioLevel.isEmpty {
+                    Text(audioLevel)
+                        .font(.footnote)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
             .commuteCard()
         }
@@ -158,6 +165,7 @@ struct WhisperTestView: View {
         problem = nil
         transcript = ""
         timing = ""
+        audioLevel = ""
         defer { isWorking = false }
 
         let recordedSeconds = recorder.lastDuration
@@ -175,9 +183,20 @@ struct WhisperTestView: View {
 
             let result = try await transcriber.transcribe(samples: samples, language: "lt")
             transcript = result.text.isEmpty ? "(tyla)" : result.text
+
             timing = String(
                 format: "įrašas %.1f s · modelis %.1f s · atpažinimas %.1f s",
                 recordedSeconds, loadSeconds, result.duration
+            )
+
+            // Reported next to the transcript so a wrong result can be
+            // attributed rather than guessed at: near-silence means the
+            // capture is at fault, a healthy level means the model is.
+            let levels = AudioRecorder.levels(of: samples)
+            audioLevel = String(
+                format: "garsas: peak %.2f · rms %.3f%@",
+                Double(levels.peak), Double(levels.rms),
+                levels.peak < 0.05 ? "  ⚠︎ per tylu" : ""
             )
         } catch {
             problem = error.localizedDescription
