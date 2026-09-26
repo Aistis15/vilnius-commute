@@ -94,7 +94,7 @@ jobs:
             -destination "${SIMULATOR}" \
             -derivedDataPath build/dd-coretests \
             CODE_SIGNING_ALLOWED=NO \
-            | xcbeautify --quieter
+            | xcbeautify
 
       - name: Snapshots
         run: |

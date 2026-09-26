@@ -15,7 +15,14 @@ import Testing
 /// The strongest of them is `neverWorseThanTheBestDirectTrip`: RAPTOR is
 /// allowed to find something better by transferring, but it must never do
 /// worse than simply staying on one vehicle.
-@Suite("Routing on real Vilnius data", .serialized)
+@Suite(
+    "Routing on real Vilnius data",
+    .serialized,
+    // A genuine skip. The database is a build artifact, not source, so its
+    // absence locally is not a routing failure — but when it IS present, a
+    // load failure below is a real bug and must fail loudly.
+    .enabled(if: RoutingTests.databaseExists, "no schedule database present")
+)
 struct RoutingTests {
 
     /// Built in CI by `Tools/gtfs/build_db.py` and fetched before the tests
@@ -30,17 +37,21 @@ struct RoutingTests {
             .appendingPathComponent("vilnius.sqlite")
     }()
 
+    static var databaseExists: Bool {
+        FileManager.default.fileExists(atPath: databaseURL.path)
+    }
+
     static let timetable: Timetable? = {
         guard FileManager.default.fileExists(atPath: databaseURL.path) else { return nil }
         return try? TimetableLoader.load(from: databaseURL)
     }()
 
-    /// The database is an artifact, not source. If it is missing the tests skip
-    /// rather than fail — a missing download should not look like a routing bug.
+    /// The suite only runs when the database exists, so reaching here with a
+    /// nil timetable means the file is present and failed to load — a real bug.
     private func requireTimetable() throws -> Timetable {
         try #require(
             Self.timetable,
-            "No schedule database at \(Self.databaseURL.path). Run Tools/gtfs/build_db.py."
+            "Database exists at \(Self.databaseURL.path) but failed to load."
         )
     }
 
