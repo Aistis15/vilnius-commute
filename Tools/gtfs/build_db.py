@@ -1,27 +1,41 @@
 #!/usr/bin/env python3
-"""Turn the Vilnius GTFS feed into a compact SQLite database for on-device routing.
+"""Turn the stops.lt GTFS feeds into one compact SQLite database for on-device routing.
 
-Runs in CI, never on the phone: the feed is a 3.7 MB zip that expands to ~34 MB
-of CSV, and parsing it on an iPhone every launch would be wasteful and slow.
+Runs in CI, never on the phone: the Vilnius feed alone is a 3.6 MB zip that
+expands to ~34 MB of CSV, and parsing it on an iPhone every launch would be
+wasteful and slow.
+
+Five cities publish the same GTFS shape on stops.lt: Vilnius, Kaunas, Klaipėda,
+Šiauliai and Panevėžys. They are merged into one set of tables with dense
+integer ids across all of them, so the router sees a single network. The file
+keeps its historical name, vilnius.sqlite, because the app and the release
+asset already use it.
 
 The schema is shaped for RAPTOR rather than for GTFS. The important difference
 is `pattern`: RAPTOR's notion of a "route" is a set of trips that visit an
 identical ordered list of stops, which is not the same as a GTFS `route_id`.
-The live feed has 115 GTFS routes but 691 distinct patterns, so the distinction
-is load-bearing.
+The Vilnius feed has 115 GTFS routes but ~690 distinct patterns, so the
+distinction is load-bearing.
 
-Three properties of this feed drive the design, all verified rather than
-assumed — see docs/data-formats.md:
+Four properties of these feeds drive the design, all verified rather than
+assumed (see docs/data-formats.md):
 
-1. Times run past 24:00:00 (the feed reaches 30:11:00). They are stored as
+1. Times run past 24:00:00 (Vilnius reaches 30:11:00). They are stored as
    seconds from the service day's midnight and may exceed 86 400. Parsing them
    into a wall clock loses the night network.
-2. Stops are flat — no parent_station, no location_type. Nothing says which
+2. Stops are flat: no parent_station, no location_type. Nothing says which
    stops are the same place.
-3. There is no transfers.txt, so foot transfers are derived here by proximity.
+3. No feed has a transfers.txt, so foot transfers are derived here by
+   proximity, across feeds too. That is how a Šiauliai intercity bus that ends
+   at Vilnius bus station meets the Vilnius city buses.
+4. Stop, service and trip ids repeat between feeds (stop 5118 exists in three
+   of them), so those are namespaced as `<city>:<id>`. Route ids already carry
+   the city (`kaunas_bus_3`) and are kept verbatim.
 
 Usage:
-    build_db.py <gtfs.zip | extracted-dir> <out.sqlite> [--max-transfer-m 400]
+    build_db.py --feed vilnius=v.zip --feed kaunas=k.zip ... <out.sqlite>
+    build_db.py <gtfs.zip | extracted-dir> <out.sqlite>    # Vilnius only
+    [--max-transfer-m 400]
 """
 
 from __future__ import annotations
@@ -30,6 +44,7 @@ import argparse
 import csv
 import hashlib
 import io
+import json
 import math
 import sqlite3
 import sys
@@ -37,14 +52,31 @@ import zipfile
 from collections import defaultdict
 from pathlib import Path
 
-# route_id prefix -> the category the UI draws. Kept in step with
-# TransitCategory.from(routeID:) in Core.
-CATEGORY_BY_PREFIX = {
-    "vilnius_bus": "bus",
-    "vilnius_expressbus": "expressBus",
-    "vilnius_nightbus": "nightBus",
-    "vilnius_trol": "trolleybus",
-    "vilnius_ferry": "ferry",
+# stops.lt path segment -> the name people read. The slug is also the
+# route_id prefix and the namespace for stop, service and trip ids.
+CITY_NAMES = {
+    "vilnius": "Vilnius",
+    "kaunas": "Kaunas",
+    "klaipeda": "Klaipėda",
+    "siauliai": "Šiauliai",
+    "panevezys": "Panevėžys",
+}
+
+# The kind token of `<city>_<kind>_<name>` -> the category the UI draws.
+# Existing strings must not change: they are Core.TransitCategory raw values.
+# TransitCategory.from(routeID:) in Core still knows only Vilnius prefixes, but
+# nothing on the load path uses it: the app reads route.category from here.
+CATEGORY_BY_KIND = {
+    "bus": "bus",
+    "expressbus": "expressBus",
+    "nightbus": "nightBus",
+    "trol": "trolleybus",
+    "ferry": "ferry",
+    # Šiauliai's minibus, regional and intercity lines are all route_type 3
+    # buses with their own colours in the feed, so "bus" loses nothing.
+    "minibus": "bus",
+    "regionalbus": "bus",
+    "intercitybus": "bus",
 }
 
 SCHEMA = """
@@ -55,10 +87,11 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE stop (
     id       INTEGER PRIMARY KEY,   -- dense 0..n-1, so RAPTOR can index arrays
-    gtfs_id  TEXT NOT NULL UNIQUE,
+    gtfs_id  TEXT NOT NULL UNIQUE,  -- '<city>:<stop_id>'; ids repeat across feeds
     name     TEXT NOT NULL,
     lat      REAL NOT NULL,
-    lon      REAL NOT NULL
+    lon      REAL NOT NULL,
+    city     TEXT NOT NULL          -- the feed it came from, e.g. 'Klaipėda'
 );
 
 CREATE TABLE route (
@@ -90,7 +123,7 @@ CREATE TABLE pattern_stop (
 
 CREATE TABLE service (
     id         INTEGER PRIMARY KEY,
-    gtfs_id    TEXT NOT NULL UNIQUE,
+    gtfs_id    TEXT NOT NULL UNIQUE,  -- '<city>:<service_id>'
     weekdays   INTEGER NOT NULL,    -- bitmask, bit 0 = Monday .. bit 6 = Sunday
     start_date INTEGER NOT NULL,    -- yyyymmdd
     end_date   INTEGER NOT NULL
@@ -107,7 +140,7 @@ CREATE TABLE trip (
     id         INTEGER PRIMARY KEY,
     pattern_id INTEGER NOT NULL REFERENCES pattern(id),
     service_id INTEGER NOT NULL REFERENCES service(id),
-    gtfs_id    TEXT NOT NULL,
+    gtfs_id    TEXT NOT NULL,       -- '<city>:<trip_id>'
     departure  INTEGER NOT NULL     -- first stop's departure, for ordering
 );
 
@@ -120,7 +153,7 @@ CREATE TABLE trip_time (
     PRIMARY KEY (trip_id, seq)
 ) WITHOUT ROWID;
 
--- Derived here: the feed ships no transfers.txt.
+-- Derived here: no feed ships a transfers.txt.
 CREATE TABLE transfer (
     from_stop INTEGER NOT NULL REFERENCES stop(id),
     to_stop   INTEGER NOT NULL REFERENCES stop(id),
@@ -139,12 +172,14 @@ CREATE INDEX idx_transfer_from ON transfer(from_stop, meters);
 CREATE INDEX idx_stop_name ON stop(name);
 """
 
+DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
 
 def parse_time(value: str) -> int:
     """`HH:MM:SS` -> seconds from the service day's midnight.
 
     Hours past 24 are legal and meaningful: `30:11:00` is 06:11 the following
-    morning, still part of the previous service day. The feed really does
+    morning, still part of the previous service day. The feeds really do
     contain those, so this must not wrap.
     """
     hours, minutes, seconds = value.split(":")
@@ -152,8 +187,15 @@ def parse_time(value: str) -> int:
 
 
 def category_for(route_id: str) -> str:
-    prefix = route_id.rsplit("_", 1)[0] if "_" in route_id else ""
-    return CATEGORY_BY_PREFIX.get(prefix, "other")
+    """`<city>_<kind>_<name>` -> category, for any city.
+
+    Split from the left: names can contain underscores themselves
+    (`klaipeda_bus_M6_TOKS`), so the kind is always the second token.
+    """
+    parts = route_id.split("_", 2)
+    if len(parts) < 3:
+        return "other"
+    return CATEGORY_BY_KIND.get(parts[1], "other")
 
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -167,9 +209,13 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 class Feed:
-    """Reads the GTFS CSVs out of a zip or a directory."""
+    """Reads one city's GTFS CSVs out of a zip or a directory."""
 
-    def __init__(self, source: Path):
+    def __init__(self, slug: str, source: Path):
+        if slug not in CITY_NAMES:
+            raise SystemExit(f"unknown city {slug!r}; known: {', '.join(CITY_NAMES)}")
+        self.slug = slug
+        self.city = CITY_NAMES[slug]
         self.source = source
         self.zip = zipfile.ZipFile(source) if source.is_file() else None
 
@@ -187,172 +233,238 @@ class Feed:
             return name in self.zip.namelist()
         return (self.source / name).exists()
 
-    def digest(self) -> str:
-        """Hash of the source, so the app can tell builds apart."""
+    def sha256(self) -> str:
+        """Full hex hash of the source: the zip's bytes, or its sorted .txt files."""
         if self.zip is not None:
-            return hashlib.sha256(self.source.read_bytes()).hexdigest()[:16]
-        parts = sorted(p.name for p in self.source.glob("*.txt"))
+            return hashlib.sha256(self.source.read_bytes()).hexdigest()
         h = hashlib.sha256()
-        for name in parts:
+        for name in sorted(p.name for p in self.source.glob("*.txt")):
             h.update((self.source / name).read_bytes())
-        return h.hexdigest()[:16]
+        return h.hexdigest()
 
 
-def build(feed: Feed, db: sqlite3.Connection, max_transfer_m: int) -> dict:
-    db.executescript(SCHEMA)
-    stats: dict[str, int] = {}
+def combined_digest(feeds: list[Feed]) -> str:
+    """One short hash over every feed, so the app can tell builds apart.
 
-    # --- stops -------------------------------------------------------------
-    stop_index: dict[str, int] = {}
-    stop_rows = []
-    coords = []
-    for row in feed.rows("stops.txt"):
-        index = len(stop_index)
-        stop_index[row["stop_id"]] = index
-        lat, lon = float(row["stop_lat"]), float(row["stop_lon"])
-        stop_rows.append((index, row["stop_id"], row["stop_name"].strip(), lat, lon))
-        coords.append((lat, lon))
-    db.executemany("INSERT INTO stop VALUES (?,?,?,?,?)", stop_rows)
-    stats["stops"] = len(stop_rows)
+    Byte-for-byte what .github/workflows/gtfs.yml computes before building
+    (`echo "<city> <sha256 of zip>"` per feed, in the same order, piped through
+    sha256sum), so CI can skip a build when no feed changed.
+    """
+    lines = "".join(f"{feed.slug} {feed.sha256()}\n" for feed in feeds)
+    return hashlib.sha256(lines.encode()).hexdigest()[:16]
 
-    # --- routes ------------------------------------------------------------
-    route_index: dict[str, int] = {}
-    route_rows = []
-    for row in feed.rows("routes.txt"):
-        index = len(route_index)
-        route_index[row["route_id"]] = index
-        route_rows.append((
-            index,
-            row["route_id"],
-            row["route_short_name"].strip(),
-            (row.get("route_long_name") or "").strip() or None,
-            category_for(row["route_id"]),
-            int(row["route_type"]),
-            (row.get("route_color") or "").strip().upper() or None,
-            (row.get("route_text_color") or "").strip().upper() or None,
-        ))
-    db.executemany("INSERT INTO route VALUES (?,?,?,?,?,?,?,?)", route_rows)
-    stats["routes"] = len(route_rows)
 
-    # --- services ----------------------------------------------------------
-    service_index: dict[str, int] = {}
-    service_rows = []
-    DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-    for row in feed.rows("calendar.txt"):
-        index = len(service_index)
-        service_index[row["service_id"]] = index
-        mask = 0
-        for bit, day in enumerate(DAYS):
-            if row[day] == "1":
-                mask |= 1 << bit
-        service_rows.append((index, row["service_id"], mask,
-                             int(row["start_date"]), int(row["end_date"])))
-    db.executemany("INSERT INTO service VALUES (?,?,?,?,?)", service_rows)
-    stats["services"] = len(service_rows)
+class Builder:
+    """Accumulates every feed into one set of rows with dense global ids."""
 
-    if feed.has("calendar_dates.txt"):
-        exceptions = []
-        for row in feed.rows("calendar_dates.txt"):
-            sid = row["service_id"]
-            if sid not in service_index:
-                # A service that appears only as an exception still needs a row,
-                # or its trips reference nothing.
-                index = len(service_index)
-                service_index[sid] = index
-                db.execute("INSERT INTO service VALUES (?,?,?,?,?)",
-                           (index, sid, 0, 0, 99999999))
-            exceptions.append((service_index[sid], int(row["date"]),
-                               1 if row["exception_type"] == "1" else 0))
-        db.executemany("INSERT OR REPLACE INTO service_exception VALUES (?,?,?)", exceptions)
-        stats["service_exceptions"] = len(exceptions)
+    def __init__(self):
+        self.stop_rows: list[tuple] = []
+        self.coords: list[tuple[float, float]] = []
+        self.route_rows: list[tuple] = []
+        self.service_rows: list[tuple] = []
+        self.exceptions: dict[tuple[int, int], int] = {}
+        self.pattern_rows: list[tuple] = []
+        self.pattern_stop_rows: list[tuple] = []
+        self.trip_rows: list[tuple] = []
+        self.trip_time_rows: list[tuple] = []
+        self.pattern_index: dict[tuple, int] = {}
+        self.cities: list[dict] = []
 
-    # --- trips and their stop sequences ------------------------------------
-    trip_meta = {}
-    for row in feed.rows("trips.txt"):
-        trip_meta[row["trip_id"]] = row
+    def add(self, feed: Feed) -> None:
+        ns = feed.slug + ":"
+        before = (len(self.stop_rows), len(self.route_rows),
+                  len(self.pattern_rows), len(self.trip_rows))
 
-    sequences: dict[str, list[tuple[int, str, int, int]]] = defaultdict(list)
-    for row in feed.rows("stop_times.txt"):
-        sequences[row["trip_id"]].append((
-            int(row["stop_sequence"]),
-            row["stop_id"],
-            parse_time(row["arrival_time"]),
-            parse_time(row["departure_time"]),
-        ))
+        # --- stops ---------------------------------------------------------
+        # Local GTFS ids -> global dense ids, scoped to this feed: stop 5118
+        # in Kaunas is not stop 5118 in Vilnius.
+        stop_index: dict[str, int] = {}
+        for row in feed.rows("stops.txt"):
+            index = len(self.stop_rows)
+            stop_index[row["stop_id"]] = index
+            lat, lon = float(row["stop_lat"]), float(row["stop_lon"])
+            self.stop_rows.append((index, ns + row["stop_id"], row["stop_name"].strip(),
+                                   lat, lon, feed.city))
+            self.coords.append((lat, lon))
 
-    # Group trips into patterns by their ordered stop list.
-    pattern_index: dict[tuple, int] = {}
-    pattern_rows = []
-    pattern_stop_rows = []
-    trip_rows = []
-    trip_time_rows = []
-
-    for trip_id in sorted(sequences):            # sorted for reproducible ids
-        stops = sorted(sequences[trip_id])
-        meta = trip_meta.get(trip_id)
-        if meta is None or len(stops) < 2:
-            continue
-
-        key = (meta["route_id"], tuple(s[1] for s in stops))
-        if key not in pattern_index:
-            pid = len(pattern_index)
-            pattern_index[key] = pid
-            pattern_rows.append((
-                pid,
-                route_index[meta["route_id"]],
-                (meta.get("trip_headsign") or "").strip() or None,
-                int(meta["direction_id"]) if meta.get("direction_id") not in (None, "") else None,
-                len(stops),
+        # --- routes --------------------------------------------------------
+        route_index: dict[str, int] = {}
+        for row in feed.rows("routes.txt"):
+            index = len(self.route_rows)
+            route_index[row["route_id"]] = index
+            self.route_rows.append((
+                index,
+                row["route_id"],
+                row["route_short_name"].strip(),
+                (row.get("route_long_name") or "").strip() or None,
+                category_for(row["route_id"]),
+                int(row["route_type"]),
+                (row.get("route_color") or "").strip().upper() or None,
+                (row.get("route_text_color") or "").strip().upper() or None,
             ))
-            for seq, (_, gtfs_stop, _, _) in enumerate(stops):
-                pattern_stop_rows.append((pid, seq, stop_index[gtfs_stop]))
 
-        pid = pattern_index[key]
-        tid = len(trip_rows)
-        trip_rows.append((tid, pid, service_index[meta["service_id"]], trip_id, stops[0][3]))
-        for seq, (_, _, arrival, departure) in enumerate(stops):
-            trip_time_rows.append((tid, seq, arrival, departure))
+        # --- services ------------------------------------------------------
+        service_index: dict[str, int] = {}
+        for row in feed.rows("calendar.txt"):
+            index = len(self.service_rows)
+            service_index[row["service_id"]] = index
+            mask = 0
+            for bit, day in enumerate(DAYS):
+                if row[day] == "1":
+                    mask |= 1 << bit
+            self.service_rows.append((index, ns + row["service_id"], mask,
+                                      int(row["start_date"]), int(row["end_date"])))
 
-    db.executemany("INSERT INTO pattern VALUES (?,?,?,?,?)", pattern_rows)
-    db.executemany("INSERT INTO pattern_stop VALUES (?,?,?)", pattern_stop_rows)
-    db.executemany("INSERT INTO trip VALUES (?,?,?,?,?)", trip_rows)
-    db.executemany("INSERT INTO trip_time VALUES (?,?,?,?)", trip_time_rows)
-    stats["patterns"] = len(pattern_rows)
-    stats["trips"] = len(trip_rows)
-    stats["stop_times"] = len(trip_time_rows)
-    stats["max_departure_s"] = max((t[3] for t in trip_time_rows), default=0)
+        if feed.has("calendar_dates.txt"):
+            for row in feed.rows("calendar_dates.txt"):
+                sid = row["service_id"]
+                if sid not in service_index:
+                    # A service that appears only as an exception still needs a
+                    # row, or its trips reference nothing.
+                    index = len(self.service_rows)
+                    service_index[sid] = index
+                    self.service_rows.append((index, ns + sid, 0, 0, 99999999))
+                # A repeated (service, date) keeps the last row, as the
+                # single-feed build's INSERT OR REPLACE did.
+                self.exceptions[(service_index[sid], int(row["date"]))] = (
+                    1 if row["exception_type"] == "1" else 0)
 
-    # --- derived foot transfers -------------------------------------------
-    # The feed has no transfers.txt and no parent_station, so walkable pairs
-    # are found geometrically. A grid keyed on ~max_transfer_m cells keeps this
-    # linear instead of comparing all 1.2M stop pairs.
-    cell = max_transfer_m / 111_320.0            # degrees latitude per metre
-    grid: dict[tuple[int, int], list[int]] = defaultdict(list)
-    for index, (lat, lon) in enumerate(coords):
-        grid[(int(lat / cell), int(lon / cell))].append(index)
+        # --- trips and their stop sequences --------------------------------
+        trip_meta = {row["trip_id"]: row for row in feed.rows("trips.txt")}
 
-    transfers = []
-    for index, (lat, lon) in enumerate(coords):
-        gy, gx = int(lat / cell), int(lon / cell)
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                for other in grid.get((gy + dy, gx + dx), ()):
-                    if other == index:
-                        continue
-                    distance = haversine_m(lat, lon, coords[other][0], coords[other][1])
-                    if distance <= max_transfer_m:
-                        transfers.append((index, other, round(distance)))
+        sequences: dict[str, list[tuple[int, str, int, int]]] = defaultdict(list)
+        for row in feed.rows("stop_times.txt"):
+            sequences[row["trip_id"]].append((
+                int(row["stop_sequence"]),
+                row["stop_id"],
+                parse_time(row["arrival_time"]),
+                parse_time(row["departure_time"]),
+            ))
+
+        # Group trips into patterns by their ordered stop list.
+        for trip_id in sorted(sequences):            # sorted for reproducible ids
+            stops = sorted(sequences[trip_id])
+            meta = trip_meta.get(trip_id)
+            if meta is None or len(stops) < 2:
+                continue
+
+            route = route_index[meta["route_id"]]
+            stop_ids = tuple(stop_index[s[1]] for s in stops)
+            key = (route, stop_ids)
+            if key not in self.pattern_index:
+                pid = len(self.pattern_index)
+                self.pattern_index[key] = pid
+                self.pattern_rows.append((
+                    pid,
+                    route,
+                    (meta.get("trip_headsign") or "").strip() or None,
+                    int(meta["direction_id"]) if meta.get("direction_id") not in (None, "") else None,
+                    len(stops),
+                ))
+                for seq, stop in enumerate(stop_ids):
+                    self.pattern_stop_rows.append((pid, seq, stop))
+
+            pid = self.pattern_index[key]
+            tid = len(self.trip_rows)
+            self.trip_rows.append((tid, pid, service_index[meta["service_id"]],
+                                   ns + trip_id, stops[0][3]))
+            for seq, (_, _, arrival, departure) in enumerate(stops):
+                self.trip_time_rows.append((tid, seq, arrival, departure))
+
+        self.cities.append({
+            "slug": feed.slug,
+            "name": feed.city,
+            "feed_digest": feed.sha256()[:16],
+            "stops": len(self.stop_rows) - before[0],
+            "routes": len(self.route_rows) - before[1],
+            "patterns": len(self.pattern_rows) - before[2],
+            "trips": len(self.trip_rows) - before[3],
+        })
+
+    def transfers(self, max_transfer_m: int) -> list[tuple[int, int, int]]:
+        """Walkable stop pairs, found geometrically over every city at once.
+
+        No feed has transfers.txt or parent_station. A grid of cells at least
+        max_transfer_m across keeps this linear instead of comparing every
+        pair. The cities are tens of kilometres apart, so a pair only crosses
+        feeds where two networks share a street, such as a Šiauliai intercity
+        stop at Vilnius bus station.
+        """
+        if not self.coords:
+            return []
+        lat_cell = max_transfer_m / 111_320.0        # degrees latitude per cell
+        # A degree of longitude shrinks with latitude (~62 km at 56°N). A cell
+        # as many degrees wide as it is tall would be ~225 m across, and the
+        # ±1-cell search below would miss pairs 225-400 m apart east-west.
+        # Sized for the most northerly stop, it is wide enough everywhere.
+        max_lat = max(abs(lat) for lat, _ in self.coords)
+        lon_cell = lat_cell / math.cos(math.radians(max_lat))
+
+        grid: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for index, (lat, lon) in enumerate(self.coords):
+            grid[(math.floor(lat / lat_cell), math.floor(lon / lon_cell))].append(index)
+
+        pairs = []
+        for index, (lat, lon) in enumerate(self.coords):
+            gy, gx = math.floor(lat / lat_cell), math.floor(lon / lon_cell)
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    for other in grid.get((gy + dy, gx + dx), ()):
+                        if other == index:
+                            continue
+                        lat2, lon2 = self.coords[other]
+                        distance = haversine_m(lat, lon, lat2, lon2)
+                        if distance <= max_transfer_m:
+                            pairs.append((index, other, round(distance)))
+        return pairs
+
+
+def build(feeds: list[Feed], db: sqlite3.Connection, max_transfer_m: int) -> dict:
+    db.executescript(SCHEMA)
+    builder = Builder()
+    for feed in feeds:
+        builder.add(feed)
+
+    db.executemany("INSERT INTO stop (id, gtfs_id, name, lat, lon, city) VALUES (?,?,?,?,?,?)",
+                   builder.stop_rows)
+    db.executemany("INSERT INTO route VALUES (?,?,?,?,?,?,?,?)", builder.route_rows)
+    db.executemany("INSERT INTO service VALUES (?,?,?,?,?)", builder.service_rows)
+    db.executemany("INSERT INTO service_exception VALUES (?,?,?)",
+                   [(sid, date, added) for (sid, date), added in builder.exceptions.items()])
+    db.executemany("INSERT INTO pattern VALUES (?,?,?,?,?)", builder.pattern_rows)
+    db.executemany("INSERT INTO pattern_stop VALUES (?,?,?)", builder.pattern_stop_rows)
+    db.executemany("INSERT INTO trip VALUES (?,?,?,?,?)", builder.trip_rows)
+    db.executemany("INSERT INTO trip_time VALUES (?,?,?,?)", builder.trip_time_rows)
+
+    transfers = builder.transfers(max_transfer_m)
     db.executemany("INSERT OR REPLACE INTO transfer VALUES (?,?,?)", transfers)
-    stats["transfers"] = len(transfers)
+
+    city_of = [row[5] for row in builder.stop_rows]
+    stats = {
+        "stops": len(builder.stop_rows),
+        "routes": len(builder.route_rows),
+        "services": len(builder.service_rows),
+        "service_exceptions": len(builder.exceptions),
+        "patterns": len(builder.pattern_rows),
+        "trips": len(builder.trip_rows),
+        "stop_times": len(builder.trip_time_rows),
+        "transfers": len(transfers),
+        "cross_city_transfers": sum(1 for a, b, _ in transfers if city_of[a] != city_of[b]),
+        "max_departure_s": max((t[3] for t in builder.trip_time_rows), default=0),
+        "cities": builder.cities,
+    }
 
     # --- metadata and indexes ---------------------------------------------
+    # schema_version stays 1: stop.city and meta.cities are additions, and the
+    # app refuses any other version outright (TimetableLoader.swift).
     db.executemany("INSERT INTO meta VALUES (?,?)", [
         ("schema_version", "1"),
-        ("feed_digest", feed.digest()),
+        ("feed_digest", combined_digest(feeds)),
         ("max_transfer_m", str(max_transfer_m)),
         ("stops", str(stats["stops"])),
         ("patterns", str(stats["patterns"])),
         ("trips", str(stats["trips"])),
+        ("cities", json.dumps(builder.cities, ensure_ascii=False)),
     ])
     db.executescript(INDEXES)
     db.commit()
@@ -361,32 +473,64 @@ def build(feed: Feed, db: sqlite3.Connection, max_transfer_m: int) -> dict:
     return stats
 
 
+def parse_feed_arg(value: str) -> tuple[str, Path]:
+    slug, sep, path = value.partition("=")
+    if not sep or not slug.strip() or not path:
+        raise argparse.ArgumentTypeError(f"expected city=path, got {value!r}")
+    return slug.strip().lower(), Path(path)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path, help="gtfs.zip or an extracted directory")
-    parser.add_argument("output", type=Path, help="SQLite file to write")
+    # City names need UTF-8; a Windows pipe would otherwise encode cp1252 and
+    # crash on 'Klaipėda' (in --help, too).
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")
+
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("paths", type=Path, nargs="+",
+                        help="<out.sqlite> with --feed; otherwise <gtfs.zip|dir> <out.sqlite> for Vilnius alone")
+    parser.add_argument("--feed", action="append", type=parse_feed_arg, default=[],
+                        metavar="CITY=PATH",
+                        help=f"a feed to merge, repeatable, in id order; CITY is one of {', '.join(CITY_NAMES)}")
     parser.add_argument("--max-transfer-m", type=int, default=400,
                         help="furthest walkable stop-to-stop transfer, metres")
     args = parser.parse_args()
 
-    if args.output.exists():
-        args.output.unlink()
-    args.output.parent.mkdir(parents=True, exist_ok=True)
+    if args.feed:
+        if len(args.paths) != 1:
+            parser.error("with --feed, give only the output path")
+        sources, output = args.feed, args.paths[0]
+    else:
+        # The original single-feed form, kept so older commands still work.
+        if len(args.paths) != 2:
+            parser.error("give --feed city=path ... <out.sqlite>, or <gtfs.zip|dir> <out.sqlite>")
+        sources, output = [("vilnius", args.paths[0])], args.paths[1]
 
-    feed = Feed(args.source)
-    with sqlite3.connect(args.output) as db:
-        stats = build(feed, db, args.max_transfer_m)
+    slugs = [slug for slug, _ in sources]
+    if len(set(slugs)) != len(slugs):
+        parser.error(f"a city was given twice: {slugs}")
+    feeds = [Feed(slug, path) for slug, path in sources]
 
-    size = args.output.stat().st_size
-    print(f"wrote {args.output} ({size/1e6:.1f} MB)")
-    for key in ("stops", "routes", "services", "service_exceptions",
-                "patterns", "trips", "stop_times", "transfers", "max_departure_s"):
-        if key in stats:
-            print(f"  {key:20} {stats[key]:>10,}")
+    if output.exists():
+        output.unlink()
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    with sqlite3.connect(output) as db:
+        stats = build(feeds, db, args.max_transfer_m)
+
+    size = output.stat().st_size
+    print(f"wrote {output} ({size/1e6:.1f} MB)")
+    for key in ("stops", "routes", "services", "service_exceptions", "patterns", "trips",
+                "stop_times", "transfers", "cross_city_transfers", "max_departure_s"):
+        print(f"  {key:20} {stats[key]:>10,}")
+    for city in stats["cities"]:
+        print(f"  {city['name']:10} stops {city['stops']:>6,}  routes {city['routes']:>4}"
+              f"  patterns {city['patterns']:>5,}  trips {city['trips']:>7,}")
 
     # A feed whose latest departure does not pass midnight means the times were
     # parsed wrong and the night network is gone.
-    if stats.get("max_departure_s", 0) <= 86_400:
+    if stats["max_departure_s"] <= 86_400:
         print("\nWARNING: no departures past 24:00:00 - after-midnight service "
               "may have been parsed incorrectly", file=sys.stderr)
 

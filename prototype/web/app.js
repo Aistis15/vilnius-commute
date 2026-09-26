@@ -18,6 +18,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const localIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 const uid = () => Math.random().toString(36).slice(2, 10);
+const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const store = {
   get(key, fallback) {
@@ -39,7 +40,9 @@ const transfersText = (n) => (n === 0 ? 'be persėdimų' : `${n} ${plural(n, 'pe
 const stopsText = (n) => `${n} ${plural(n, 'stotelė', 'stotelės', 'stotelių')}`;
 // After "po" Lithuanian wants the genitive: po 1 stotelės, po 5 stotelių.
 const stopsAfterText = (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'stotelės' : 'stotelių'}`;
-const metresText = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1).replace('.', ',')} km` : `${Math.max(10, Math.round(m / 10) * 10)} m`);
+const placesText = (n) => `${n} ${plural(n, 'vieta', 'vietos', 'vietų')}`;
+const roundMetres = (m) => (m >= 1000 ? (m / 1000).toFixed(1).replace('.', ',') : String(Math.max(10, Math.round(m / 10) * 10)));
+const metresText = (m) => `${roundMetres(m)} ${m >= 1000 ? 'km' : 'm'}`;
 
 const ICONS = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
@@ -57,8 +60,194 @@ const ICONS = {
   star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   stop: '<rect x="6" y="3" width="12" height="9" rx="2"/><path d="M12 12v9"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+// Filled, so it reads as a direction rather than a line drawing. Points north.
+const ARROW = '<path d="M12 2.5 19.5 20.5 12 16.3 4.5 20.5z"/>';
+const dotsHtml = '<span class="listening-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
+// A number whose digits roll when it changes (see rollTo).
+const roll = (value) => `<span class="roll">${esc(value)}</span>`;
+
+// ------------------------------------------------------------------ motion
+//
+// The timing lives in style.css (--t-*, --ease-*) so CSS transitions and the
+// scripted animations below share one vocabulary. Reduced motion zeroes the
+// durations there, which makes every play() here a no-op: changes are instant.
+
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const ROLES = {
+  fade: ['--t-fade', '--ease-out'],
+  exit: ['--t-fade', '--ease-in'],
+  content: ['--t-content', '--ease-out'],
+  roll: ['--t-roll', '--ease-out'],
+  push: ['--t-push', '--ease-move'],
+  sheet: ['--t-sheet', '--ease-move'],
+  rise: ['--t-sheet', '--ease-out'],
+};
+let motionCache = null;
+if (reducedMotion.addEventListener) reducedMotion.addEventListener('change', () => { motionCache = null; });
+
+function motion(role) {
+  if (!motionCache) {
+    const css = getComputedStyle(document.documentElement);
+    motionCache = { stagger: reducedMotion.matches ? 0 : parseFloat(css.getPropertyValue('--stagger')) || 0 };
+    for (const [name, [time, ease]] of Object.entries(ROLES)) {
+      motionCache[name] = {
+        duration: reducedMotion.matches ? 0 : parseFloat(css.getPropertyValue(time)) || 0,
+        easing: css.getPropertyValue(ease).trim() || 'ease',
+      };
+    }
+  }
+  return motionCache[role];
+}
+
+function play(el, keyframes, role, extra = {}) {
+  const m = motion(role);
+  if (!m.duration || !el || !el.animate) return null;
+  return el.animate(keyframes, { duration: m.duration, easing: m.easing, ...extra });
+}
+const afterPlay = (animation, fn) => { if (animation) animation.finished.then(fn, fn); else fn(); };
+
+// -------------------------------------------------------------------- morph
+//
+// Every render goes through here: patch the DOM to match new HTML, keeping
+// each element that is still there. Kept elements keep focus, scroll position,
+// running transitions and the Leaflet map, and only genuinely new ones animate
+// in — which is what lets the 250 ms loop run without restarting anything.
+// Siblings with data-key are matched by key, the rest by position.
+
+function morph(root, html) {
+  const next = document.createElement('div');
+  next.innerHTML = html;
+  const added = [];
+  patchChildren(root, next, added);
+  return added;
+}
+
+function sameKind(a, b) {
+  if (a.nodeType !== b.nodeType) return false;
+  if (a.nodeType !== 1) return true;
+  return a.tagName === b.tagName && !a.dataset.key && !b.dataset.key;
+}
+
+function patchChildren(parent, next, added) {
+  const keyed = new Map();
+  for (const node of parent.childNodes) if (node.nodeType === 1 && node.dataset.key) keyed.set(node.dataset.key, node);
+  let cursor = parent.firstChild;
+  for (const node of Array.from(next.childNodes)) {
+    let match = null;
+    if (node.nodeType === 1 && node.dataset.key) {
+      const old = keyed.get(node.dataset.key);
+      if (old && old.tagName === node.tagName) { match = old; keyed.delete(node.dataset.key); }
+    } else if (cursor && sameKind(cursor, node)) {
+      match = cursor;
+    }
+    if (match) {
+      if (match === cursor) cursor = cursor.nextSibling;
+      else parent.insertBefore(match, cursor);
+      patchNode(match, node, added);
+    } else {
+      parent.insertBefore(node, cursor);
+      if (node.nodeType === 1) added.push(node);
+    }
+  }
+  while (cursor) { const following = cursor.nextSibling; parent.removeChild(cursor); cursor = following; }
+}
+
+function patchNode(old, node, added) {
+  if (old.nodeType !== 1) {
+    if (old.nodeValue !== node.nodeValue) old.nodeValue = node.nodeValue;
+    return;
+  }
+  if (old.dataset.morph === 'keep') return; // Leaflet owns this one
+  if (old.classList.contains('roll') && node.classList.contains('roll')) { rollTo(old, node.textContent); return; }
+  for (const { name } of Array.from(old.attributes)) if (!node.hasAttribute(name)) old.removeAttribute(name);
+  for (const { name, value } of Array.from(node.attributes)) if (old.getAttribute(name) !== value) old.setAttribute(name, value);
+  if (old.tagName === 'INPUT' || old.tagName === 'TEXTAREA') {
+    // Never fight the person typing.
+    if (document.activeElement !== old && old.value !== node.value) old.value = node.value;
+    return;
+  }
+  patchChildren(old, node, added);
+}
+
+/* New list items drift in one after another, but only when they are new:
+   a re-render that keeps them never replays it. */
+function staggerIn(nodes) {
+  const step = motion('stagger');
+  let i = 0;
+  nodes.forEach((node) => {
+    const parent = node.parentElement;
+    const targets = parent && parent.classList.contains('stagger') ? [node]
+      : node.classList.contains('stagger') ? Array.from(node.children)
+        : node.classList.contains('reveal') ? [node] : Array.from(node.querySelectorAll('.stagger > *'));
+    targets.forEach((el) => {
+      play(el, [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 'content',
+        { delay: Math.min(i++, 6) * step, fill: 'backwards' });
+    });
+  });
+}
+
+/* Digits that change roll, the rest stay put — like the iPhone's numeric
+   text transition. Counting down, the new digit drops in from above. */
+function rollTo(el, text) {
+  const prev = el.dataset.v != null ? el.dataset.v : el.textContent;
+  if (prev === text) return;
+  el.dataset.v = text;
+  const m = motion('roll');
+  if (!prev || !m.duration || !el.isConnected) { el.textContent = text; return; }
+  const digits = (s) => Number(s.replace(/\D/g, '')) || 0;
+  const down = digits(text) < digits(prev);
+  const a = [...prev], b = [...text], shift = b.length - a.length;
+  el.textContent = '';
+  b.forEach((ch, i) => {
+    const cell = document.createElement('span');
+    cell.className = 'rd';
+    const glyph = document.createElement('span');
+    glyph.textContent = ch;
+    cell.appendChild(glyph);
+    el.appendChild(cell);
+    const before = a[i - shift];
+    if (before === ch) return;
+    const offset = down ? '-0.4em' : '0.4em';
+    glyph.animate([{ transform: `translateY(${offset})`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: m.duration, easing: m.easing });
+    if (before == null) return;
+    const ghost = document.createElement('span');
+    ghost.className = 'rd-old';
+    ghost.textContent = before;
+    cell.appendChild(ghost);
+    ghost.animate([{ transform: 'none', opacity: 1 }, { transform: `translateY(${down ? '0.4em' : '-0.4em'})`, opacity: 0 }],
+      { duration: m.duration * 0.7, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' }).onfinish = () => ghost.remove();
+  });
+}
+
+/* A stage change in the banner: the old content lifts away, the new one
+   settles in, and the card's height follows instead of jumping. Page flips
+   move sideways, so the direction of the tap is visible. */
+function crossfade(card, body, mutate, { dx = 0, animateHeight = true } = {}) {
+  const m = motion('content');
+  if (!m.duration) { mutate(); return; }
+  const from = card.offsetHeight;
+  const ghost = body.cloneNode(true);
+  ghost.classList.add('act-ghost');
+  ghost.removeAttribute('data-key');
+  Object.assign(ghost.style, { left: `${body.offsetLeft}px`, top: `${body.offsetTop}px`, width: `${body.offsetWidth}px` });
+  card.appendChild(ghost);
+  mutate();
+  const to = card.offsetHeight;
+  const away = dx ? `translateX(${-dx * 16}px)` : 'translateY(-6px)';
+  const toward = dx ? `translateX(${dx * 16}px)` : 'translateY(8px)';
+  // The old content is mostly gone before the new one is readable, so the
+  // two never sit on top of each other as a smudge.
+  afterPlay(play(ghost, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: away }], 'exit',
+    { duration: m.duration * 0.45, fill: 'forwards' }), () => ghost.remove());
+  play(body, [{ opacity: 0, transform: toward }, { opacity: 1, transform: 'none' }], 'content', { delay: m.duration * 0.3, fill: 'backwards' });
+  if (animateHeight && Math.abs(from - to) > 1) {
+    play(card, [{ height: `${from}px` }, { height: `${to}px` }], 'content');
+  }
+}
 
 // ------------------------------------------------------------------- clock
 //
@@ -71,6 +260,8 @@ function jumpTo(ms) { clock.sim = ms; clock.base = Date.now(); }
 
 // ------------------------------------------------------------------- state
 
+const HOME = () => ({ name: 'home', id: 'home' });
+
 const state = {
   prefs: store.get('prefs', null),
   places: store.get('places', []),
@@ -79,9 +270,11 @@ const state = {
   originChoice: store.get('originChoice', 'gps'),
   gps: null,
   gpsError: null,
-  stack: [{ name: 'home' }],
+  locating: false,
+  stack: [HOME()],
   query: '',
   results: [],
+  heard: '',
   timeMode: 'now',
   timeValue: '',
   destination: null,
@@ -89,6 +282,7 @@ const state = {
   planning: false,
   planError: null,
   selected: null,
+  openStops: {},
   trip: null,
   banner: null,
   locked: false,
@@ -116,6 +310,47 @@ function origin() {
   return place ? { name: place.name, lat: place.lat, lon: place.lon } : null;
 }
 
+/* Where search should look first: the rider's own city, not always Vilnius. */
+function near() {
+  const from = origin();
+  return from ? { lat: from.lat.toFixed(4), lon: from.lon.toFixed(4) } : {};
+}
+
+// ---------------------------------------------------------------- location
+
+const GPS_ERRORS = {
+  1: 'Naršyklė neleidžia šiai svetainei naudoti tavo vietos.',
+  2: 'Kompiuteris nepateikė vietos.',
+  3: 'Vietos nepavyko gauti per 10 sekundžių.',
+};
+
+/* Asks the browser where we are. Called once at start and again from the
+   "Nustatyti mano vietą" button, which is a user gesture: some browsers only
+   show the permission prompt again after one. */
+function locate(userAsked = false) {
+  if (!navigator.geolocation) {
+    state.gpsError = 'Ši naršyklė nepateikia vietos.';
+    fillOrigins(); renderApp();
+    return;
+  }
+  state.locating = true;
+  renderApp();
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      state.gps = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy };
+      state.gpsError = null; state.locating = false;
+      if (userAsked) { state.originChoice = 'gps'; save(); toast(`Vieta nustatyta, tikslumas ±${Math.round(pos.coords.accuracy)} m`); }
+      fillOrigins(); renderApp();
+    },
+    (err) => {
+      state.gpsError = GPS_ERRORS[err.code] || 'Vietos nustatyti nepavyko.';
+      state.locating = false;
+      fillOrigins(); renderApp();
+    },
+    { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+  );
+}
+
 // --------------------------------------------------------------------- api
 
 async function api(path, params) {
@@ -139,7 +374,11 @@ function atFor(mode, time) {
 
 async function planTrip(place, mode, time) {
   const from = origin();
-  if (!from) throw new Error('Nežinau, iš kur keliauji. Pasirink šone, skiltyje „Iš kur keliauji“.');
+  if (!from) {
+    const error = new Error('Nežinau, iš kur keliauji. Leisk naršyklei nustatyti vietą arba pasirink ją.');
+    error.code = 'no-origin';
+    throw error;
+  }
   const prefs = state.prefs || { priority: 'fastest', walk: 'normal' };
   return api('/api/plan', {
     from: `${from.lat},${from.lon}`, from_name: from.name,
@@ -153,9 +392,9 @@ async function planTrip(place, mode, time) {
 // -------------------------------------------------------------- navigation
 
 const currentScreen = () => state.stack[state.stack.length - 1];
-function push(screen) { state.stack.push(screen); renderApp(); }
+function push(screen) { state.stack.push({ id: uid(), ...screen }); renderApp(); }
 function pop() { if (state.stack.length > 1) state.stack.pop(); renderApp(); }
-function goHome() { state.stack = [{ name: 'home' }]; renderApp(); }
+function goHome() { state.stack = [HOME()]; renderApp(); }
 
 function toast(text) {
   state.toast = text;
@@ -188,73 +427,145 @@ function placeIcon(place) {
   return icon('pin');
 }
 
+/* "Prekybos centras, Ozo g. 25, Vilnius" — plus the city when the search
+   says which one and the subtitle does not already. */
+function placeSubtitle(item) {
+  if (item.saved) return item.subtitle || 'Tavo vieta';
+  const sub = item.subtitle || '';
+  if (item.city && !fold(sub).includes(fold(item.city))) return [sub, item.city].filter(Boolean).join(', ');
+  return sub;
+}
+
 function sameName(a, b) {
   const fa = fold(a), fb = fold(b);
   return fa === fb || (fa.length >= 5 && fb.length >= 5 && fa.slice(0, -2) === fb.slice(0, -2));
 }
 
+const placeKey = (p) => `${fold(p.name)}@${p.lat.toFixed(3)},${p.lon.toFixed(3)}`;
+
 // ================================================================ app screens
+//
+// Each screen is its own .page. Re-rendering the same screen morphs it in
+// place; a different screen slides over (push) or away (pop) like UIKit.
+
+let pageEl = null;
+let pageScreen = null;
+let pageDepth = 0;
 
 function renderApp() {
-  const screen = state.prefs ? currentScreen() : { name: 'onboarding' };
-  const app = $('#app');
-  const focused = document.activeElement && document.activeElement.id;
-  const caret = focused ? document.activeElement.selectionStart : null;
-
+  const screen = state.prefs ? currentScreen() : onboardingScreen();
   const view = {
     onboarding: onboardingView, home: homeView, results: resultsView, detail: detailView,
     settings: settingsView, places: placesView, pick: pickView,
   }[screen.name] || homeView;
-  app.innerHTML = view(screen);
+  const html = view(screen);
 
-  if (focused) {
-    const again = document.getElementById(focused);
-    if (again) { again.focus(); if (caret != null && again.setSelectionRange) again.setSelectionRange(caret, caret); }
+  if (pageEl && pageScreen && pageScreen.id === screen.id && pageEl.isConnected) {
+    staggerIn(morph(pageEl, html));
+  } else {
+    const depth = screen.depth || state.stack.length;
+    let kind = 'fade';
+    if (!pageEl) kind = 'none';
+    else if ((screen.name === 'onboarding') === (pageScreen.name === 'onboarding')) {
+      if (depth > pageDepth) kind = 'push';
+      else if (depth < pageDepth) kind = 'pop';
+    }
+    const content = pageEl && pageEl.querySelector('.content');
+    if (content && pageScreen) pageScreen.scroll = content.scrollTop;
+    const page = document.createElement('div');
+    page.className = 'page';
+    page.innerHTML = html;
+    transitionPages(pageEl, page, kind);
+    const scroller = page.querySelector('.content');
+    if (scroller && screen.scroll) scroller.scrollTop = screen.scroll;
+    pageEl = page; pageScreen = screen; pageDepth = depth;
   }
   if (screen.name === 'detail') drawMap();
   $('#statusbar').classList.toggle('on-lock', state.locked);
 }
 
-function navBar({ back = false, title = '', right = '' } = {}) {
+// Queries scoped to the screen on top: during a slide two pages exist.
+const inPage = (sel) => (pageEl ? pageEl.querySelector(sel) : null);
+
+function transitionPages(from, to, kind) {
+  const app = $('#app');
+  // A navigation during a slide finishes the old slide at once.
+  app.querySelectorAll('.page.leaving').forEach((p) => p.remove());
+  if (kind === 'pop' && from) app.insertBefore(to, from); else app.appendChild(to);
+  if (!from) return;
+  from.classList.add('leaving');
+  from.inert = true;
+  const done = () => from.remove();
+  const behind = [{ transform: 'none', filter: 'brightness(1)' }, { transform: 'translateX(-30%)', filter: 'brightness(0.92)' }];
+  if (kind === 'push') {
+    play(to, [{ transform: 'translateX(100%)' }, { transform: 'none' }], 'push');
+    afterPlay(play(from, behind, 'push', { fill: 'forwards' }), done);
+  } else if (kind === 'pop') {
+    play(to, [...behind].reverse(), 'push');
+    afterPlay(play(from, [{ transform: 'none' }, { transform: 'translateX(100%)' }], 'push', { fill: 'forwards' }), done);
+  } else {
+    play(to, [{ opacity: 0 }, { opacity: 1 }], 'content');
+    afterPlay(play(from, [{ opacity: 1 }, { opacity: 0 }], 'exit', { fill: 'forwards' }), done);
+  }
+}
+
+// iOS shows the title in the bar once the large one has scrolled away.
+document.addEventListener('scroll', (event) => {
+  const el = event.target;
+  if (!(el instanceof Element) || !el.classList.contains('content')) return;
+  const page = el.closest('.page');
+  if (page) page.classList.toggle('scrolled', el.scrollTop > 40);
+}, true);
+
+function navBar({ back = false, title = '', right = '', always = false } = {}) {
   return `<div class="bar">
     ${back ? `<button class="back" data-action="back">${icon('back')}<span>Atgal</span></button>` : '<span></span>'}
-    ${title ? `<span class="title-inline">${esc(title)}</span>` : ''}
-    ${right || '<span style="width:36px"></span>'}
+    <span class="title-inline${always ? ' always' : ''}">${esc(title)}</span>
+    ${right || '<span></span>'}
   </div>`;
 }
 
 function timeControls() {
   const modes = [['now', 'Dabar'], ['arrive', 'Atvykti iki'], ['depart', 'Išvykti']];
-  return `<div class="segmented" role="group" aria-label="Kada">
+  const sel = Math.max(0, modes.findIndex(([m]) => m === state.timeMode));
+  return `<div class="segmented" role="group" aria-label="Kada" style="--sel:${sel};--count:${modes.length}">
+      <span class="seg-pill" aria-hidden="true"></span>
       ${modes.map(([m, label]) => `<button data-action="time-mode" data-mode="${m}" aria-pressed="${state.timeMode === m}">${label}</button>`).join('')}
     </div>
-    ${state.timeMode !== 'now' ? `<div class="time-row">
-      <input class="time-input" id="time-value" type="time" value="${esc(state.timeValue || hm(new Date(now().getTime() + 30 * 60_000)))}" aria-label="Laikas">
-      <span class="footnote" style="margin:0">${state.timeMode === 'arrive' ? 'turi būti vietoje' : 'nori išeiti'}</span>
+    ${state.timeMode !== 'now' ? `<div class="time-row reveal">
+      <input class="time-input" id="time-value" type="text" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="14:20"
+        value="${esc(state.timeValue || hm(new Date(now().getTime() + 30 * 60_000)))}" aria-label="Laikas, pvz., 14:20">
+      <span class="footnote">${state.timeMode === 'arrive' ? 'turi būti vietoje' : 'nori išeiti'}</span>
     </div>` : ''}`;
 }
 
 // ---- onboarding: the preferences from the vision, asked once
 
-function onboardingView() {
+function onboardingScreen() {
   const draft = state.draft || (state.draft = { priority: 'fastest', walk: 'normal', step: 0 });
+  return { name: 'onboarding', id: `onboarding-${draft.step}`, depth: draft.step + 1 };
+}
+
+function onboardingView() {
+  const draft = state.draft;
   const choice = (key, value, title, sub) =>
-    `<button class="choice" data-action="draft" data-key="${key}" data-value="${value}" aria-pressed="${draft[key] === value}">
-       <div class="title">${title}</div><div class="sub">${sub}</div></button>`;
+    `<button class="choice" data-action="draft" data-pref="${key}" data-value="${value}" aria-pressed="${draft[key] === value}">
+       <span><div class="title">${title}</div><div class="sub">${sub}</div></span><span class="tick">${icon('check')}</span></button>`;
   const steps = [
-    `<div class="large">Kaip mėgsti keliauti?</div>
-     <p class="footnote" style="margin:0 4px 6px">Visada ieškosiu greičiausio kelio, bet kartais jis reiškia persėdimus ar ilgesnį ėjimą. Pasakyk, kas tau svarbiau.</p>
+    `<h1 class="large">Kaip mėgsti keliauti?</h1>
+     <p class="lede">Visada ieškosiu greičiausio kelio, bet kartais jis reiškia persėdimus ar ilgesnį ėjimą. Pasakyk, kas tau svarbiau.</p>
      ${choice('priority', 'fastest', 'Kuo greičiau', 'Nesvarbu, kiek persėdimų')}
      ${choice('priority', 'single', 'Vienu autobusu, jei įmanoma', 'Mieliau važiuosiu kiek ilgiau be persėdimų')}
      ${choice('priority', 'fewest', 'Kuo mažiau persėdimų', 'Persėsti tik tada, kai kitaip neišeina')}`,
-    `<div class="large">Kiek gali paeiti?</div>
-     <p class="footnote" style="margin:0 4px 6px">Iki stotelės ir nuo jos. Daugiau ėjimo kartais reiškia greitesnį kelią.</p>
+    `<h1 class="large">Kiek gali paeiti?</h1>
+     <p class="lede">Iki stotelės ir nuo jos. Daugiau ėjimo kartais reiškia greitesnį kelią.</p>
      ${choice('walk', 'short', 'Kuo mažiau', 'Iki 400 m')}
      ${choice('walk', 'normal', 'Įprastai', 'Iki 800 m')}
      ${choice('walk', 'long', 'Galiu ir toliau', 'Iki 1,5 km')}`,
   ];
   return `<div class="nav">${navBar({ back: draft.step > 0 })}</div>
     <div class="content">
+      <div class="steps" aria-hidden="true">${steps.map((_, i) => `<i class="${i <= draft.step ? 'done' : ''}"></i>`).join('')}</div>
       ${steps[draft.step]}
       <div style="margin-top:28px">
         <button class="prominent" data-action="draft-next">${draft.step < steps.length - 1 ? 'Toliau' : 'Pradėti'}</button>
@@ -263,96 +574,126 @@ function onboardingView() {
     </div>`;
 }
 
-// ---- home: the question, search, your places
+// ---- home: say it, or type it, or tap a place
 
 function homeView() {
-  const from = origin();
-  const suggestions = saveSuggestions();
+  const listening = state.listening === 'app';
   return `<div class="nav">
-      ${navBar({ right: `<button class="icon-button" data-action="settings" aria-label="Nustatymai">${icon('gear')}</button>` })}
-      <div class="large">Kur keliausime šiandien?</div>
+      ${navBar({ title: 'Kur keliausime?', right: `<button class="icon-button" data-action="settings" aria-label="Nustatymai">${icon('gear')}</button>` })}
+    </div>
+    <div class="content">
+      <h1 class="large">Kur keliausime šiandien?</h1>
+      <button class="voice${listening ? ' listening' : ''}" data-action="app-mic" aria-pressed="${listening}">
+        <span class="voice-disc">${icon('mic')}</span>
+        <span class="voice-text">
+          <span class="voice-title">${listening ? `Klausau${dotsHtml}` : 'Pasakyk, kur keliauji'}</span>
+          <span class="voice-sub">${listening
+            ? (state.interim ? `„${esc(state.interim)}“` : 'Paliesk dar kartą, kad sustabdytum')
+            : 'Pvz.: „Į Akropolį keturiolika dvidešimt“'}</span>
+        </span>
+      </button>
       <label class="search">
         ${icon('search')}
-        <input id="search" type="search" placeholder="Adresas, vieta ar stotelė" value="${esc(state.query)}" autocomplete="off" aria-label="Kur keliausi">
-        <button class="mic${state.listening === 'app' ? ' listening' : ''}" data-action="app-mic" aria-label="Sakyk balsu">${icon('mic')}</button>
+        <input id="search" type="search" placeholder="Arba įrašyk adresą ar stotelę" value="${esc(state.query)}" autocomplete="off" aria-label="Kur keliausi">
       </label>
-      ${state.listening === 'app' ? `<p class="footnote">Klausau… ${esc(state.interim)}</p>` : ''}
-      <div class="time-row">
-        <button class="chip" data-action="pick-origin">${icon('location')}<span>Iš: ${esc(from ? from.name : 'pasirink')}</span></button>
+      ${originChip()}
+      <div id="home-content">${homeContent(saveSuggestions())}</div>
+    </div>`;
+}
+
+function originChip() {
+  const from = origin();
+  let label = from ? from.name : 'pasirink vietą';
+  if (!from && state.originChoice === 'gps' && !state.gpsError) label = 'ieškau vietos…';
+  return `<div class="from-row"><button class="chip" data-action="pick-origin">${icon('location')}<span>Iš: ${esc(label)}</span>${icon('chevron')}</button></div>`;
+}
+
+/* When the browser cannot say where we are, say why and what to do, in the
+   app itself — not only in the test panel. */
+function locationNotice() {
+  if (state.originChoice !== 'gps' || state.gps || !state.gpsError) return '';
+  return `<div class="notice reveal" data-key="location-notice" role="status">
+      <div class="notice-title"><span class="problem">${icon('location')}</span>Nežinau, kur tu esi</div>
+      <p>${esc(state.gpsError)} Patikrink du dalykus:</p>
+      <ol>
+        <li><b>Naršyklė.</b> Paspausk ženkliuką adreso juostos kairėje ir leisk šiai svetainei naudoti vietą.</li>
+        <li><b>Windows.</b> Settings › Privacy &amp; security › Location: įjunk vietos paslaugas ir leisk jomis naudotis darbalaukio programoms.</li>
+      </ol>
+      <div class="notice-actions">
+        <button class="secondary" data-action="locate">${state.locating ? 'Ieškau…' : 'Nustatyti mano vietą'}</button>
+        <button class="secondary" data-action="pick-origin">Pasirinkti vietą</button>
       </div>
-      ${timeControls()}
-    </div>
-    <div class="content" id="home-content">${homeContent(suggestions)}</div>`;
+    </div>`;
 }
 
 function homeContent(suggestions) {
   if (state.query.trim().length >= 2) return searchResultsHtml('go');
-  const places = state.places.map((p) => `
-      <button class="row" data-action="go-place" data-id="${p.id}">
-        <span class="lead">${placeIcon({ ...p, saved: true })}</span>
-        <span class="main"><div class="title">${esc(p.name)}</div><div class="sub">${esc(p.subtitle || '')}</div></span>
-        <span class="trail">${icon('chevron')}</span>
+  const tiles = state.places.map((p) => `
+      <button class="tile" data-action="go-place" data-id="${p.id}" data-key="${p.id}">
+        <span class="glyph">${placeIcon({ ...p, saved: true })}</span>
+        <span><span class="title">${esc(p.name)}</span><span class="sub">${esc(p.subtitle || ' ')}</span></span>
       </button>`).join('');
   return `
-    ${suggestions.map((s) => `<div class="section-title"><span>Pasiūlymas</span></div>
-      <div class="group"><div class="row plain"><span class="main">
-        <div class="title">Dažnai važiuoji į „${esc(s.name)}“</div>
-        <div class="sub">Išsaugoti ir pavadinti savaip?</div></span></div>
-        <div class="row plain" style="gap:8px">
-          <button class="secondary" data-action="save-suggestion" data-key="${esc(s.key)}">Išsaugoti</button>
-          <button class="secondary" data-action="dismiss-suggestion" data-key="${esc(s.key)}">Ne</button>
+    ${locationNotice()}
+    ${suggestions.map((s) => `<div class="notice reveal" data-key="suggest-${esc(s.key)}">
+        <div class="notice-title">Dažnai važiuoji į „${esc(s.name)}“</div>
+        <p>Išsaugoti ir pavadinti savaip?</p>
+        <div class="notice-actions">
+          <button class="secondary" data-action="save-suggestion" data-key-ref="${esc(s.key)}">Išsaugoti</button>
+          <button class="secondary" data-action="dismiss-suggestion" data-key-ref="${esc(s.key)}">Ne</button>
         </div></div>`).join('')}
-    <div class="section-title"><span>Tavo vietos</span><button data-action="places">Keisti</button></div>
-    <div class="group">
-      ${places}
-      <button class="row" data-action="add-place"><span class="lead">${icon('plus')}</span><span class="main"><div class="title">Pridėti vietą</div></span></button>
+    <div class="heading"><h2>Tavo vietos</h2>${state.places.length ? '<button data-action="places">Keisti</button>' : ''}</div>
+    <div class="places stagger">
+      ${tiles}
+      <button class="tile add" data-action="add-place" data-key="add"><span class="glyph">${icon('plus')}</span>
+        <span><span class="title">Pridėti vietą</span><span class="sub">Kiek tik nori</span></span></button>
     </div>
-    <p class="footnote">Vietų gali būti kiek nori. Ne tik namai ir darbas.</p>
-    <div class="section-title"><span>Užrakto ekrane</span></div>
-    <div class="group"><button class="row" data-action="lock"><span class="lead">${icon('bus')}</span>
+    ${state.places.length ? '' : '<p class="footnote">Namai, mokykla, darbas, močiutė: paliesk vietą, ir maršrutas jau skaičiuojamas.</p>'}
+    <div class="group lock-row"><button class="row" data-action="lock"><span class="lead">${icon('lock')}</span>
       <span class="main"><div class="title">Užrakinti telefoną</div>
-      <div class="sub">Apačioje kairėje — mygtukas, kuris atidaro banerį</div></span></button></div>`;
+      <div class="sub">Užrakto ekrane — mygtukas, kuris atidaro banerį</div></span></button></div>`;
 }
 
 function searchResultsHtml(action) {
+  const items = currentItems();
   const q = state.query.trim();
-  const saved = state.places.filter((p) => fold(p.name).includes(fold(q)) || sameName(p.name, q))
-    .map((p) => ({ ...p, saved: true }));
-  const items = [...saved, ...state.results.filter((r) => !saved.some((s) => sameName(s.name, r.name)))];
+  const heard = state.heard ? `<p class="heard-line">Išgirdau: „<b>${esc(state.heard)}</b>“. Kurią vietą turėjai omeny?</p>` : '';
   if (!items.length) {
-    return `<p class="footnote">${state.searching ? 'Ieškau…' : `Nieko neradau pagal „${esc(q)}“.`}</p>`;
+    return `${heard}<p class="footnote">${state.searching ? 'Ieškau…' : `Nieko neradau pagal „${esc(q)}“.`}</p>`;
   }
-  return `<div class="group" style="margin-top:12px">${items.map((item, i) => `
-    <button class="row" data-action="${action}" data-index="${i}">
+  return `${heard}<div class="group stagger" style="margin-top:14px">${items.map((item, i) => `
+    <button class="row" data-action="${action}" data-index="${i}" data-key="${esc(item.saved ? `saved-${item.id}` : placeKey(item))}">
       <span class="lead">${placeIcon(item)}</span>
-      <span class="main"><div class="title">${esc(item.name)}</div><div class="sub">${esc(item.saved ? 'Tavo vieta' : item.subtitle || '')}</div></span>
+      <span class="main"><div class="title">${esc(item.name)}</div><div class="sub">${esc(placeSubtitle(item))}</div></span>
     </button>`).join('')}</div>`;
 }
 
 let searchTimer;
 function onSearchInput(value) {
   state.query = value;
+  state.heard = '';
   clearTimeout(searchTimer);
-  const container = $('#home-content') || $('#pick-content');
+  const container = inPage('#home-content') || inPage('#pick-content');
+  const isPick = currentScreen().name === 'pick';
   if (value.trim().length < 2) {
     state.results = [];
-    if (container) container.innerHTML = currentScreen().name === 'pick' ? pickContent() : homeContent(saveSuggestions());
+    if (container) staggerIn(morph(container, isPick ? pickContent() : homeContent(saveSuggestions())));
     return;
   }
   state.searching = true;
-  if (container) container.innerHTML = searchResultsHtml(currentScreen().name === 'pick' ? 'picked' : 'go');
+  if (container) staggerIn(morph(container, searchResultsHtml(isPick ? 'picked' : 'go')));
   searchTimer = setTimeout(async () => {
     try {
-      const data = await api('/api/search', { q: value });
+      const data = await api('/api/search', { q: value, ...near() });
       if (state.query !== value) return;
-      state.results = data.results;
+      state.results = data.results || [];
     } catch (e) {
       state.results = [];
       toast(e.message);
     }
     state.searching = false;
-    const box = $('#home-content') || $('#pick-content');
-    if (box) box.innerHTML = searchResultsHtml(currentScreen().name === 'pick' ? 'picked' : 'go');
+    const box = inPage('#home-content') || inPage('#pick-content');
+    if (box) staggerIn(morph(box, searchResultsHtml(currentScreen().name === 'pick' ? 'picked' : 'go')));
   }, 250);
 }
 
@@ -364,31 +705,57 @@ function currentItems() {
 
 // ---- results
 
+/* "po 5 min", "po 1 val. 20 min", "rytoj": how soon, with its unit. */
+function inText(ms) {
+  const minutes = Math.ceil((ms - now().getTime()) / 60_000);
+  if (minutes <= 0) return 'dabar';
+  const day = dayWord(ms);
+  if (day) return day.trim();
+  if (minutes < 60) return `po ${minutes} min`;
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return `po ${h} val.${m ? ` ${m} min` : ''}`;
+}
+
+/* An arrive-by plan can start before now (the only bus that makes it has
+   gone). Say so instead of "Išeik dabar". */
+const isLate = (o) => new Date(o.leave.iso).getTime() < now().getTime() - 60_000;
+const leaveCaption = (o) => (isLate(o)
+  ? '<div class="cap late">Reikėjo išeiti</div>'
+  : `<div class="cap">Išeik ${esc(inText(new Date(o.leave.iso).getTime()))}</div>`);
+
+function optionCard(o, i) {
+  const meta = o.walk_only ? `${metresText(o.walk_m)} pėsčiomis`
+    : `${metresText(o.walk_m)} pėsčiomis · ${transfersText(o.transfers)}${o.first_stop ? ` · nuo „${esc(o.first_stop)}“` : ''}`;
+  return `<button class="option${isLate(o) ? ' late' : ''}" data-action="open-option" data-index="${i}" data-key="${esc(o.id)}">
+      <div class="top">
+        <div>${leaveCaption(o)}<div class="leave">${esc(o.leave.hm)}</div></div>
+        <div class="right"><div class="dur">${o.duration_min} min</div><div class="cap">atvyksi ${esc(o.arrive.hm)}</div></div>
+      </div>
+      <div class="route-line">${routeLine(o)}</div>
+      <div class="meta">${meta}</div>
+      ${o.tags && o.tags.length ? `<div class="tags">${o.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+    </button>`;
+}
+
 function resultsView() {
   const place = state.destination;
   let body;
-  if (state.planning) body = '<p class="footnote">Ieškau maršrutų…</p>';
+  if (state.planning) body = `<p class="footnote loading">Ieškau maršrutų${dotsHtml}</p>`;
   else if (state.planError) body = `<p class="footnote error-text">${esc(state.planError)}</p>`;
   else if (state.plan && !state.plan.options.length) body = '<p class="footnote">Maršruto šiuo laiku nerasta. Pabandyk kitą laiką.</p>';
   else if (state.plan) {
-    body = state.plan.options.map((o, i) => `
-      <button class="option" data-action="open-option" data-index="${i}">
-        <div class="top">
-          <span class="leave num"><small>Išeik</small>${esc(o.leave.hm)}</span>
-          <span class="arrive num">${esc(o.arrive.hm)} · ${o.duration_min} min</span>
-        </div>
-        <div class="route-line">${routeLine(o)}</div>
-        <div class="meta">${o.walk_only ? metresText(o.walk_m) : `${metresText(o.walk_m)} pėsčiomis · ${transfersText(o.transfers)}${o.first_stop ? ` · nuo „${esc(o.first_stop)}“` : ''}`}</div>
-        ${o.tags && o.tags.length ? `<div class="tags">${o.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
-      </button>`).join('');
+    const allLate = state.plan.options.every(isLate);
+    body = `${allLate && state.timeMode === 'arrive' ? `<p class="footnote error-text reveal" style="margin-top:16px">Iki ${esc(state.timeValue)} nebespėsi: visi keliai prasideda anksčiau nei dabar. Pasirink „Dabar“ — parodysiu greičiausią.</p>` : ''}
+      <div class="options stagger">${state.plan.options.map(optionCard).join('')}</div>`;
   } else body = '';
   const from = origin();
-  return `<div class="nav">${navBar({ back: true })}
-      <div class="large" style="font-size:28px">${esc(place ? place.name : '')}</div>
-      <div class="footnote" style="margin:-6px 0 0">Iš: ${esc(from ? from.name : '—')}</div>
+  return `<div class="nav">${navBar({ back: true, title: place ? place.name : '' })}</div>
+    <div class="content">
+      <h1 class="large title2">${esc(place ? place.name : '')}</h1>
+      <div class="from-line">Iš: ${esc(from ? from.name : '—')}</div>
       ${timeControls()}
-    </div>
-    <div class="content">${body}</div>`;
+      ${body}
+    </div>`;
 }
 
 async function runPlan() {
@@ -406,8 +773,8 @@ async function runPlan() {
 
 function openDestination(place) {
   state.destination = place;
-  state.query = ''; state.results = [];
-  if (currentScreen().name !== 'results') state.stack.push({ name: 'results' });
+  state.query = ''; state.results = []; state.heard = '';
+  if (currentScreen().name !== 'results') state.stack.push({ name: 'results', id: uid() });
   runPlan();
 }
 
@@ -417,45 +784,53 @@ function detailView() {
   const o = state.selected;
   if (!o) return homeView();
   const steps = o.legs.map((leg, i) => {
-    const last = i === o.legs.length - 1;
-    let what;
+    let what, seg;
     if (leg.kind === 'ride') {
       const between = leg.stops.slice(1, -1).map((s) => esc(s.name)).join(' · ');
-      what = `<div class="route-line">${badge(leg.route)} <span>→ ${esc(leg.headsign || '')}</span></div>
-        <div class="sub">Lipk „${esc(leg.from.name)}“ ${esc(leg.departure.hm)} · išlipk „${esc(leg.to.name)}“ ${esc(leg.arrival.hm)} · ${stopsText(leg.stop_count)}</div>
-        ${between ? `<div class="stops">${between}</div>` : ''}`;
+      const open = !!state.openStops[i];
+      what = `<div class="route-line">${badge(leg.route)} <span class="headsign">${esc(leg.headsign || '')}</span></div>
+        <div class="sub">Lipk „${esc(leg.from.name)}“ · išlipk „${esc(leg.to.name)}“ ${esc(leg.arrival.hm)}</div>
+        ${between ? `<button class="stops-toggle" data-action="toggle-stops" data-index="${i}" aria-expanded="${open}">${stopsText(leg.stop_count)}${icon('chevron')}</button>
+          ${open ? `<div class="stops reveal">${between}</div>` : ''}` : `<div class="sub">${stopsText(leg.stop_count)}</div>`}`;
+      seg = `<b class="seg" style="background:#${esc(leg.route.color)}"></b>`;
     } else {
       const target = leg.to.stop == null ? `iki „${esc(leg.to.name)}“` : (leg.from.name === leg.to.name ? 'į kitą tos pačios stotelės peroną' : `į stotelę „${esc(leg.to.name)}“`);
       what = `<div>Eik ${target}</div><div class="sub">${metresText(leg.metres)} · ${leg.minutes} min</div>`;
+      seg = '<b class="seg walk"></b>';
     }
     return `<div class="step">
       <div class="t">${esc(leg.departure.hm)}</div>
-      <div class="dot"><i></i>${last ? '' : `<b class="${leg.kind === 'walk' ? 'dashed' : ''}"></b>`}</div>
+      <div class="rail"><i class="node"></i>${seg}</div>
       <div class="what">${what}</div>
     </div>`;
-  }).join('') + `<div class="step"><div class="t">${esc(o.arrive.hm)}</div><div class="dot"><i style="background:var(--label)"></i></div>
+  }).join('') + `<div class="step"><div class="t">${esc(o.arrive.hm)}</div><div class="rail"><i class="node end"></i></div>
       <div class="what">Atvyksti į „${esc(state.destination ? state.destination.name : '')}“</div></div>`;
 
-  return `<div class="nav">${navBar({ back: true, title: 'Maršrutas' })}</div>
+  const running = state.trip && state.trip.option.id === o.id && state.trip.option.leave.iso === o.leave.iso;
+  return `<div class="nav">${navBar({ back: true, title: 'Maršrutas', always: true })}</div>
     <div class="content">
-      <div id="map" class="map"></div>
-      <div class="option" style="margin-top:12px">
-        <div class="top"><span class="leave num"><small>Išeik</small>${esc(o.leave.hm)}</span>
-        <span class="arrive num">atvyksi ${esc(o.arrive.hm)} · ${o.duration_min} min</span></div>
-        <div class="meta">${metresText(o.walk_m)} pėsčiomis · ${transfersText(o.transfers)}</div>
+      <div id="map" class="map" data-morph="keep"></div>
+      <div class="summary">
+        <div>${leaveCaption(o)}<div class="leave${isLate(o) ? ' late' : ''}">${esc(o.leave.hm)}</div></div>
+        <div class="right"><div class="dur">${o.duration_min} min</div><div class="cap">atvyksi ${esc(o.arrive.hm)}</div></div>
       </div>
+      <div class="summary-meta">${metresText(o.walk_m)} pėsčiomis · ${transfersText(o.transfers)}</div>
       <div class="timeline">${steps}</div>
-      <div class="sticky-bottom"><button class="prominent" data-action="start-trip">Pradėti kelionę</button></div>
+      <div class="sticky-bottom">${running
+        ? '<div class="trip-running"><button class="secondary" data-action="end-trip" style="height:52px;flex:1">Baigti kelionę</button><button class="prominent" data-action="lock">Rodyti banerį</button></div>'
+        : '<button class="prominent" data-action="start-trip">Pradėti kelionę</button>'}</div>
     </div>`;
 }
 
-let map;
+let map, mapFor;
 function drawMap() {
   const o = state.selected;
-  const el = $('#map');
+  const el = inPage('#map');
   if (!o || !el || !window.L) return;
+  if (map && map.getContainer() === el && mapFor === o) return;
   if (map) { map.remove(); map = null; }
   map = L.map(el, { zoomControl: false, attributionControl: true });
+  mapFor = o;
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '© OpenStreetMap',
   }).addTo(map);
@@ -478,60 +853,73 @@ function drawMap() {
 function settingsView() {
   const p = state.prefs;
   const choice = (key, value, title) =>
-    `<button class="row plain" data-action="pref" data-key="${key}" data-value="${value}">
-       <span class="main"><div class="title">${title}</div></span><span class="trail">${p[key] === value ? '✓' : ''}</span></button>`;
-  return `<div class="nav">${navBar({ back: true })}<div class="large">Nustatymai</div></div>
+    `<button class="row plain" data-action="pref" data-pref="${key}" data-value="${value}" aria-pressed="${p[key] === value}">
+       <span class="main"><div class="title">${title}</div></span><span class="trail check">${p[key] === value ? icon('check') : ''}</span></button>`;
+  return `<div class="nav">${navBar({ back: true, title: 'Nustatymai' })}</div>
     <div class="content">
+      <h1 class="large">Nustatymai</h1>
       <div class="section-title"><span>Kaip keliauti</span></div>
       <div class="group">${choice('priority', 'fastest', 'Kuo greičiau')}${choice('priority', 'single', 'Vienu autobusu, jei įmanoma')}${choice('priority', 'fewest', 'Kuo mažiau persėdimų')}</div>
       <div class="section-title"><span>Ėjimas iki stotelės</span></div>
       <div class="group">${choice('walk', 'short', 'Kuo mažiau · iki 400 m')}${choice('walk', 'normal', 'Įprastai · iki 800 m')}${choice('walk', 'long', 'Galiu ir toliau · iki 1,5 km')}</div>
       <div class="section-title"><span>Vietos</span></div>
-      <div class="group"><button class="row" data-action="places"><span class="lead">${icon('star')}</span><span class="main"><div class="title">Tavo vietos</div></span><span class="trail">${state.places.length}</span></button></div>
+      <div class="group">
+        <button class="row" data-action="places"><span class="lead">${icon('star')}</span><span class="main"><div class="title">Tavo vietos</div></span><span class="trail">${placesText(state.places.length)}${icon('chevron')}</span></button>
+        <button class="row" data-action="pick-origin"><span class="lead">${icon('location')}</span><span class="main"><div class="title">Iš kur keliauji</div></span><span class="trail">${esc(origin() ? origin().name : 'nežinoma')}${icon('chevron')}</span></button>
+      </div>
       <div class="section-title"><span>Duomenys</span></div>
       <div class="group"><div class="row plain"><span class="main"><div class="title">Vilniaus tvarkaraščiai</div><div class="sub" id="data-info">${esc(state.dataInfo || '')}</div></span></div></div>
-      <div style="margin-top:22px"><button class="secondary" style="width:100%" data-action="reset">Pradėti iš naujo</button></div>
+      <div style="margin-top:24px"><button class="secondary" style="width:100%" data-action="reset">Pradėti iš naujo</button></div>
     </div>`;
 }
 
 function placesView() {
   const rows = state.places.map((p) => `
-    <div class="row">
+    <div class="row" data-key="${p.id}">
       <span class="lead">${placeIcon({ ...p, saved: true })}</span>
       <span class="main"><input id="name-${p.id}" data-action="rename" data-id="${p.id}" value="${esc(p.name)}" aria-label="Pavadinimas"
         style="border:0;background:none;font-size:17px;width:100%;outline:0;padding:0"><div class="sub">${esc(p.subtitle || '')}</div></span>
-      <button data-action="delete-place" data-id="${p.id}" aria-label="Ištrinti ${esc(p.name)}" style="color:var(--red)">${icon('trash')}</button>
+      <button data-action="delete-place" data-id="${p.id}" aria-label="Ištrinti ${esc(p.name)}" style="color:var(--red);font-size:19px;padding:6px">${icon('trash')}</button>
     </div>`).join('');
-  return `<div class="nav">${navBar({ back: true })}<div class="large">Tavo vietos</div></div>
+  return `<div class="nav">${navBar({ back: true, title: 'Tavo vietos' })}</div>
     <div class="content">
+      <h1 class="large">Tavo vietos</h1>
       <div class="group">${rows || '<div class="row plain"><span class="main"><div class="sub">Dar nėra vietų.</div></span></div>'}
-        <button class="row" data-action="add-place"><span class="lead">${icon('plus')}</span><span class="main"><div class="title">Pridėti vietą</div></span></button></div>
+        <button class="row" data-action="add-place" data-key="add"><span class="lead">${icon('plus')}</span><span class="main"><div class="title">Pridėti vietą</div></span></button></div>
       <p class="footnote">Paspausk pavadinimą, kad pakeistum. Pavadinimai gali būti bet kokie: „Mokykla“, „Močiutė“, „Sporto klubas“.</p>
     </div>`;
 }
 
 function pickView(screen) {
-  return `<div class="nav">${navBar({ back: true })}
-      <div class="large" style="font-size:28px">${screen.purpose === 'origin' ? 'Iš kur keliauji?' : 'Nauja vieta'}</div>
+  const title = screen.purpose === 'origin' ? 'Iš kur keliauji?' : 'Nauja vieta';
+  return `<div class="nav">${navBar({ back: true, title })}</div>
+    <div class="content">
+      <h1 class="large title2">${title}</h1>
       <label class="search">${icon('search')}
-        <input id="search" type="search" placeholder="Adresas, vieta ar stotelė" value="${esc(state.query)}" autocomplete="off"></label>
-    </div>
-    <div class="content" id="pick-content">${state.query.trim().length >= 2 ? searchResultsHtml('picked') : pickContent()}</div>`;
+        <input id="search" type="search" placeholder="Adresas, vieta ar stotelė" value="${esc(state.query)}" autocomplete="off" aria-label="Paieška"></label>
+      <div id="pick-content">${state.query.trim().length >= 2 ? searchResultsHtml('picked') : pickContent()}</div>
+    </div>`;
 }
 
 function pickContent() {
   if (currentScreen().purpose !== 'origin') return '<p class="footnote">Surask vietą ir duok jai vardą.</p>';
-  return `<div class="group" style="margin-top:12px">
-      <button class="row" data-action="origin-gps"><span class="lead">${icon('location')}</span>
-        <span class="main"><div class="title">Tavo vieta</div><div class="sub">${esc(state.gps ? `Pagal naršyklę, ±${Math.round(state.gps.accuracy)} m` : state.gpsError || 'Naršyklė dar nepateikė vietos')}</div></span></button>
-      ${state.places.map((p) => `<button class="row" data-action="origin-place" data-id="${p.id}"><span class="lead">${placeIcon({ ...p, saved: true })}</span>
-        <span class="main"><div class="title">${esc(p.name)}</div><div class="sub">${esc(p.subtitle || '')}</div></span></button>`).join('')}
-    </div>`;
+  let gpsSub = 'Paliesk, kad naršyklė nustatytų';
+  if (state.locating) gpsSub = 'Ieškau…';
+  else if (state.gps) gpsSub = `Pagal naršyklę, tikslumas ±${Math.round(state.gps.accuracy)} m`;
+  else if (state.gpsError) gpsSub = state.gpsError;
+  return `${locationNotice()}
+    <div class="group stagger" style="margin-top:14px">
+      <button class="row" data-action="${state.gps ? 'origin-gps' : 'locate'}" data-key="gps"><span class="lead">${icon('location')}</span>
+        <span class="main"><div class="title">${state.gps ? 'Tavo vieta' : 'Nustatyti mano vietą'}</div><div class="sub">${esc(gpsSub)}</div></span>
+        <span class="trail check">${state.originChoice === 'gps' && state.gps ? icon('check') : ''}</span></button>
+      ${state.places.map((p) => `<button class="row" data-action="origin-place" data-id="${p.id}" data-key="${p.id}"><span class="lead">${placeIcon({ ...p, saved: true })}</span>
+        <span class="main"><div class="title">${esc(p.name)}</div><div class="sub">${esc(p.subtitle || '')}</div></span>
+        <span class="trail check">${state.originChoice === p.id ? icon('check') : ''}</span></button>`).join('')}
+    </div>
+    <p class="footnote">Kompiuteryje naršyklės vieta gali būti netiksli. Tada geriau pasirinkti vietą iš sąrašo arba surasti ją paieškoje.</p>`;
 }
 
 // ---- save suggestions: "you go there often, save it?"
-
-function placeKey(p) { return `${fold(p.name)}@${p.lat.toFixed(3)},${p.lon.toFixed(3)}`; }
 
 function saveSuggestions() {
   return Object.entries(state.visits)
@@ -552,7 +940,7 @@ function recordVisit(place) {
 // ================================================================ the trip
 
 function startTrip(option, place) {
-  state.trip = { option, place, startedAt: now().getTime(), snoozeUntil: 0 };
+  state.trip = { option, place, startedAt: now().getTime(), snoozeUntil: 0, page: 0 };
   state.banner = { stage: 'trip' };
   store.set('trip', state.trip);
   recordVisit(place);
@@ -574,7 +962,11 @@ function phaseOf(trip, at) {
   const legs = trip.option.legs;
   if (at < t(legs[0].departure)) return { kind: 'before' };
   for (let i = 0; i < legs.length; i++) {
-    if (at < t(legs[i].arrival)) return { kind: legs[i].kind, i, leg: legs[i] };
+    if (at >= t(legs[i].arrival)) continue;
+    // Standing at the stop until the bus leaves is its own moment: the rider
+    // needs "in 3 min", not a progress bar that has not started.
+    if (legs[i].kind === 'ride' && at < t(legs[i].departure)) return { kind: 'wait', i, leg: legs[i] };
+    return { kind: legs[i].kind, i, leg: legs[i] };
   }
   return { kind: 'arrived' };
 }
@@ -584,10 +976,11 @@ function minutesUntil(ms, at) { return Math.max(0, Math.ceil((ms - at) / 60_000)
 /* "12 min", or "9 val. 12 min" once it is over an hour: a bare 552 min is
    a number nobody can read at a glance. Units always attached. */
 function durationHtml(minutes) {
-  if (minutes < 60) return `${minutes}<small>min</small>`;
+  if (minutes < 60) return `${roll(minutes)}<small>min</small>`;
   const h = Math.floor(minutes / 60), m = minutes % 60;
-  return `${h}<small>val.</small>${m ? ` ${m}<small>min</small>` : ''}`;
+  return `${roll(h)}<small>val.</small>${m ? ` ${roll(m)}<small>min</small>` : ''}`;
 }
+const metresHtml = (m) => `${roll(roundMetres(m))}<small>${m >= 1000 ? 'km' : 'm'}</small>`;
 
 function dayWord(ms) {
   const today = now(); today.setHours(0, 0, 0, 0);
@@ -600,6 +993,73 @@ function nextRide(legs, from) {
   return null;
 }
 
+// ---- direction: where the rider is, and which way the target lies
+
+const rad = (d) => (d * Math.PI) / 180;
+const lerp = (a, b, f) => ({ lat: a.lat + (b.lat - a.lat) * f, lon: a.lon + (b.lon - a.lon) * f });
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+
+/* Initial great-circle bearing, degrees clockwise from north. */
+function bearing(a, b) {
+  const p1 = rad(a.lat), p2 = rad(b.lat), dl = rad(b.lon - a.lon);
+  const y = Math.sin(dl) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function straightMetres(a, b) {
+  const dy = (b.lat - a.lat) * 111_320;
+  const dx = (b.lon - a.lon) * 111_320 * Math.cos(rad((a.lat + b.lat) / 2));
+  return Math.hypot(dx, dy);
+}
+
+const COMPASS = ['šiaurė', 'šiaurės rytai', 'rytai', 'pietryčiai', 'pietūs', 'pietvakariai', 'vakarai', 'šiaurės vakarai'];
+const compassWord = (deg) => COMPASS[Math.round(deg / 45) % 8];
+
+/* The needle turns the short way round: 350° to 10° is 20°, not 340°. */
+const needleTurns = {};
+function needleAngle(where, deg) {
+  const prev = needleTurns[where];
+  if (prev == null) return (needleTurns[where] = deg);
+  const delta = ((((deg - prev) % 360) + 540) % 360) - 180;
+  return (needleTurns[where] = prev + delta);
+}
+const needle = (where, deg) => `<svg class="needle" viewBox="0 0 24 24" aria-hidden="true" style="transform:rotate(${needleAngle(where, deg).toFixed(1)}deg)">${ARROW}</svg>`;
+const pointer = (deg) => `<span class="pointer" aria-hidden="true"><svg viewBox="0 0 24 24" style="transform:rotate(${deg.toFixed(0)}deg)">${ARROW}</svg></span>`;
+
+/* The prototype has no GPS during a trip, so the rider is placed where the
+   timetable says they should be: along the walk by elapsed time, between two
+   stops by their times. What the real app will replace with a location fix. */
+function guidance(trip, phase, at) {
+  const legs = trip.option.legs;
+  const leg = phase.kind === 'before' ? legs[0] : phase.leg;
+  const lastLeg = legs.indexOf(leg) === legs.length - 1;
+  if (leg.kind === 'walk') {
+    const span = Math.max(1, t(leg.arrival) - t(leg.departure));
+    const done = phase.kind === 'before' ? 0 : clamp01((at - t(leg.departure)) / span);
+    const here = lerp(leg.from, leg.to, done);
+    return {
+      mode: 'walk',
+      deg: bearing(here, leg.to),
+      metres: Math.round(leg.metres * (1 - done)),
+      straight: straightMetres(here, leg.to),
+      target: leg.to.name,
+      toStop: !lastLeg && leg.to.stop != null,
+    };
+  }
+  const stops = leg.stops;
+  let k = 0;
+  while (k < stops.length - 2 && t(stops[k + 1].time) <= at) k++;
+  const a = stops[k], b = stops[k + 1] || stops[k];
+  const same = a.lat === b.lat && a.lon === b.lon;
+  return {
+    mode: 'ride',
+    deg: bearing(same ? leg.from : a, same ? leg.to : b),
+    next: b.name,
+    minutes: Math.max(1, minutesUntil(t(b.time), at)),
+  };
+}
+
 /* The banner's content for the current moment. Shared by the lock screen and
    the expanded Dynamic Island, like one ActivityConfiguration drawing both. */
 function activityContent(where) {
@@ -608,44 +1068,93 @@ function activityContent(where) {
   const at = now().getTime();
   const actions = (buttons) => `<div class="actions">${buttons.map(([label, action, primary]) =>
     `<button data-action="${action}"${primary ? ' class="primary"' : ''}>${label}</button>`).join('')}</div>`;
-  const dots = '<span class="listening-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
 
   switch (b.stage) {
     case 'ask':
-      return `<div class="question">Kur keliausime šiandien?${state.listening === 'lock' ? dots : ''}</div>
+      return `<div class="question">Kur keliausime šiandien?${state.listening === 'lock' ? dotsHtml : ''}</div>
         <div class="heard">${state.interim ? `„${esc(state.interim)}“` : state.listening === 'lock' ? 'Klausau…' : 'Paliesk, kad rašytum'}</div>
         ${actions([['Rašyti', 'banner-open-search'], ['Atšaukti', 'banner-cancel']])}`;
     case 'thinking':
-      return `<div class="question">Ieškau maršruto…</div><div class="heard">„${esc(b.heard || '')}“</div>`;
+      return `<div class="question">Ieškau maršruto${dotsHtml}</div><div class="heard">„${esc(b.heard || '')}“</div>`;
+    case 'choosePlace':
+      return `<div class="caption">Išgirdau: „${esc(b.heard)}“</div>
+        <div class="question small" style="margin-top:4px">Kurią vietą turėjai omeny?</div>
+        <div class="choices">${b.choices.slice(0, 2).map((c, i) => `<button data-action="banner-choose" data-index="${i}">
+            <span class="t">${esc(c.name)}</span><span class="s">${esc(placeSubtitle(c) || ' ')}</span></button>`).join('')}</div>
+        <button class="link-button" data-action="banner-none">Nė viena</button>`;
     case 'chooseTime':
       return `<div class="caption">Į</div><div class="question">${esc(b.place.name)}</div>
         <div class="heard">Kada?</div>
         ${actions([['Dabar', 'banner-now', true], ['Planuoti', 'banner-plan']])}`;
     case 'askTime':
-      return `<div class="question">Kada turi būti vietoje?${state.listening === 'lock' ? dots : ''}</div>
+      return `<div class="question">Kada turi būti vietoje?${state.listening === 'lock' ? dotsHtml : ''}</div>
         <div class="heard">${state.interim ? `„${esc(state.interim)}“` : `${esc(b.place.name)} · pasakyk laiką, pvz., „keturiolika dvidešimt“`}</div>
         ${actions([['Dabar', 'banner-now'], ['Atšaukti', 'banner-cancel']])}`;
     case 'error':
-      return `<div class="question" style="font-size:20px">${esc(b.message)}</div>
-        ${actions([['Bandyti dar', 'banner-retry', true], ['Atšaukti', 'banner-cancel']])}`;
+      return `<div class="question small">${esc(b.message)}</div>
+        ${b.detail ? `<div class="heard wrap">${esc(b.detail)}</div>` : ''}
+        ${b.code === 'no-origin' ? actions([['Pasirinkti vietą', 'banner-pick-origin', true], ['Atšaukti', 'banner-cancel']])
+          : b.code === 'late' ? actions([['Dabar', 'banner-now', true], ['Atšaukti', 'banner-cancel']])
+            : actions([['Bandyti dar', 'banner-retry', true], ['Atšaukti', 'banner-cancel']])}`;
     case 'saved':
-      return `<div class="question" style="font-size:20px">Išsaugota: ${esc(b.name)}</div>`;
+      return `<div class="question small">Išsaugota: ${esc(b.name)}</div>`;
     case 'suggestSave':
-      return `<div class="question" style="font-size:20px">Dažnai važiuoji į „${esc(b.name)}“. Išsaugoti?</div>
+      return `<div class="question small">Dažnai važiuoji į „${esc(b.name)}“. Išsaugoti?</div>
         ${actions([['Išsaugoti', 'banner-save', true], ['Ne', 'banner-nosave']])}`;
     case 'trip':
-      return tripContent(at, actions);
+      return tripContent(at, actions, where);
     default:
       return '';
   }
 }
 
-function tripContent(at, actions) {
+const PAGES = ['Dabar', 'Kryptis', 'Visa kelionė'];
+
+/* Identity of what the banner shows. When it changes the content cross-fades;
+   when it stays, only the numbers inside it move. */
+function activityKey() {
+  const b = state.banner;
+  if (!b) return '';
+  if (b.stage !== 'trip' || !state.trip) return b.stage;
+  const at = now().getTime();
+  const phase = phaseOf(state.trip, at);
+  if (phase.kind === 'arrived') return `arrived:${state.trip.snoozeUntil > at}`;
+  return `trip:${phase.kind}:${phase.i ?? ''}|${state.trip.page || 0}`;
+}
+
+function activityPager() {
+  const b = state.banner, trip = state.trip;
+  if (!b || b.stage !== 'trip' || !trip || phaseOf(trip, now().getTime()).kind === 'arrived') return '';
+  const page = trip.page || 0;
+  const next = (page + 1) % PAGES.length;
+  return `<div class="dots">${PAGES.map((name, i) => `<button class="dot" data-action="banner-page" data-page="${i}" aria-label="${esc(name)}"${i === page ? ' aria-current="true"' : ''}><i></i></button>`).join('')}</div>
+    <button class="pager-next" data-action="banner-page" data-page="${next}" aria-label="Rodyti: ${esc(PAGES[next])}">${esc(PAGES[next])}${icon('chevron')}</button>`;
+}
+
+function tripContent(at, actions, where) {
   const trip = state.trip;
   if (!trip) return '';
   const o = trip.option;
-  const legs = o.legs;
   const phase = phaseOf(trip, at);
+
+  if (phase.kind === 'arrived') {
+    if (trip.snoozeUntil > at) {
+      return `<div class="question small">${esc(trip.place.name)}</div><div class="heard">Atvykai ${esc(o.arrive.hm)}</div>`;
+    }
+    return `<div class="question">Ar baigėte kelionę?</div>
+      <div class="heard">${esc(trip.place.name)} · ${esc(o.arrive.hm)}</div>
+      ${actions([['Taip', 'trip-done', true], ['Dar ne', 'trip-snooze']])}`;
+  }
+  const page = trip.page || 0;
+  if (page === 1) return directionPage(trip, phase, at, where);
+  if (page === 2) return wholeTripPage(trip, phase);
+  return nowPage(trip, phase, at);
+}
+
+// Page 1: what to do now.
+function nowPage(trip, phase, at) {
+  const o = trip.option;
+  const legs = o.legs;
   const dest = `<span class="dest">${esc(trip.place.name)} ${esc(o.arrive.hm)}</span>`;
   const row2 = `<div class="row2"><div class="route-line">${routeLine(o, true)}</div>${dest}</div>`;
 
@@ -654,27 +1163,26 @@ function tripContent(at, actions) {
     const left = minutesUntil(leave, at);
     return `<div class="top">
         <div><div class="caption">Išeik${dayWord(leave)}</div><div class="big">${esc(o.leave.hm)}</div></div>
-        <div style="text-align:right"><div class="caption">Liko</div><div class="big"${left >= 60 ? ' style="font-size:26px"' : ''}>${durationHtml(left)}</div></div>
+        <div class="right"><div class="caption">Liko</div><div class="big${left >= 60 ? ' hours' : ''}">${durationHtml(left)}</div></div>
       </div>${row2}`;
   }
 
-  if (phase.kind === 'arrived') {
-    if (trip.snoozeUntil > at) {
-      return `<div class="question" style="font-size:20px">${esc(trip.place.name)}</div><div class="heard">Atvykai ${esc(o.arrive.hm)}</div>`;
-    }
-    return `<div class="question">Ar baigėte kelionę?</div>
-      <div class="heard">${esc(trip.place.name)} · ${esc(o.arrive.hm)}</div>
-      ${actions([['Taip', 'trip-done', true], ['Dar ne', 'trip-snooze']])}`;
-  }
-
   const leg = phase.leg;
+  if (phase.kind === 'wait') {
+    return `<div class="top">
+        <div><div class="caption">Lauk stotelėje</div><div class="instruction">${esc(leg.from.name)}</div>
+          <div class="heard">→ ${esc(leg.headsign || '')} · ${esc(leg.departure.hm)}</div></div>
+        <div class="right"><div class="route-line end">${badge(leg.route, true)}</div>
+          <div class="big mid">${durationHtml(minutesUntil(t(leg.departure), at))}</div></div>
+      </div>`;
+  }
   if (phase.kind === 'ride') {
     const remaining = leg.stops.filter((s) => t(s.time) > at).length;
-    const progress = Math.min(1, Math.max(0, (at - t(leg.departure)) / (t(leg.arrival) - t(leg.departure))));
+    const progress = clamp01((at - t(leg.departure)) / (t(leg.arrival) - t(leg.departure)));
     return `<div class="top">
-        <div style="min-width:0"><div class="route-line">${badge(leg.route)} <span class="instruction">→ ${esc(leg.headsign || '')}</span></div>
+        <div><div class="route-line">${badge(leg.route)} <span class="instruction">${esc(leg.headsign || '')}</span></div>
           <div class="heard">Išlipk „${esc(leg.to.name)}“ · po ${stopsAfterText(Math.max(1, remaining))}</div></div>
-        <div style="text-align:right;flex:none"><div class="caption">Išlipk</div><div class="big" style="font-size:28px">${esc(leg.arrival.hm)}</div></div>
+        <div class="right"><div class="caption">Išlipk</div><div class="big mid">${esc(leg.arrival.hm)}</div></div>
       </div>
       <div class="progress"><i style="width:${(progress * 100).toFixed(1)}%"></i></div>`;
   }
@@ -682,23 +1190,72 @@ function tripContent(at, actions) {
   // Walking: to the first stop, between vehicles, or to the destination.
   const last = phase.i === legs.length - 1;
   const ride = nextRide(legs, phase.i + 1);
-  const walkLeft = Math.max(0, t(leg.arrival) - at);
-  const metresLeft = Math.round(leg.metres * walkLeft / Math.max(1, t(leg.arrival) - t(leg.departure)));
+  const g = guidance(trip, phase, at);
   if (last || !ride) {
     return `<div class="top">
-        <div style="min-width:0"><div class="caption">Liko nueiti</div><div class="instruction">${esc(trip.place.name)}</div>
-          <div class="heard">${metresText(metresLeft)}</div></div>
-        <div style="text-align:right;flex:none"><div class="caption">Atvyksi</div><div class="big" style="font-size:28px">${esc(o.arrive.hm)}</div></div>
+        <div><div class="caption">Liko nueiti</div><div class="instruction">${esc(trip.place.name)}</div>
+          <div class="heard">${pointer(g.deg)}${metresText(g.metres)}</div></div>
+        <div class="right"><div class="caption">Atvyksi</div><div class="big mid">${esc(o.arrive.hm)}</div></div>
       </div>`;
   }
   const busIn = minutesUntil(t(ride.departure), at);
   const title = phase.i === 0 ? 'Eik į stotelę' : 'Persėdimas · eik į stotelę';
   return `<div class="top">
-      <div style="min-width:0"><div class="caption">${title}</div><div class="instruction">${esc(leg.to.name)}</div>
-        <div class="heard">${metresText(metresLeft)} · ${ride.departure.hm}</div></div>
-      <div style="text-align:right;flex:none"><div class="route-line" style="justify-content:flex-end">${badge(ride.route, true)}</div>
-        <div class="big" style="font-size:28px">${busIn}<small>min</small></div></div>
+      <div><div class="caption">${title}</div><div class="instruction">${esc(leg.to.name)}</div>
+        <div class="heard">${pointer(g.deg)}${metresText(g.metres)} · išvyksta ${esc(ride.departure.hm)}</div></div>
+      <div class="right"><div class="route-line end">${badge(ride.route, true)}</div>
+        <div class="big mid">${durationHtml(busIn)}</div></div>
     </div>`;
+}
+
+// Page 2: which way. Walking, towards the next stop or the destination;
+// riding, the direction of travel and the next stop.
+function directionPage(trip, phase, at, where) {
+  const g = guidance(trip, phase, at);
+  if (phase.kind === 'wait') {
+    const leg = phase.leg;
+    return `<div class="dir">
+        <div class="compass"><span class="north">Š</span>${needle(where, g.deg)}</div>
+        <div><div class="caption">Autobusas važiuos</div><div class="instruction">${capital(compassWord(g.deg))}</div>
+          <div class="heard">→ ${esc(leg.headsign || '')}</div></div>
+        <div class="right"><div class="caption">Liko</div><div class="big mid">${durationHtml(minutesUntil(t(leg.departure), at))}</div></div>
+      </div>`;
+  }
+  if (g.mode === 'ride') {
+    return `<div class="dir">
+        <div class="compass"><span class="north">Š</span>${needle(where, g.deg)}</div>
+        <div><div class="caption">Kita stotelė</div><div class="instruction">${esc(g.next)}</div>
+          <div class="heard">Kryptis: ${compassWord(g.deg)}</div></div>
+        <div class="right"><div class="caption">Liko</div><div class="big mid">${durationHtml(g.minutes)}</div></div>
+      </div>`;
+  }
+  const arrived = g.straight < 15 || g.metres < 15;
+  const target = g.toStop ? `į stotelę „${esc(g.target)}“` : `iki „${esc(g.target)}“`;
+  return `<div class="dir">
+      <div class="compass"><span class="north">Š</span>${arrived ? '<i class="here"></i>' : needle(where, g.deg)}</div>
+      <div><div class="caption">Kryptis</div><div class="instruction">${arrived ? 'Tu jau čia' : capital(compassWord(g.deg))}</div>
+        <div class="heard">${target}</div></div>
+      ${arrived ? '' : `<div class="right"><div class="caption">Liko</div><div class="big mid">${metresHtml(g.metres)}</div></div>`}
+    </div>`;
+}
+
+// Page 3: the whole trip, the current leg lit.
+function wholeTripPage(trip, phase) {
+  const o = trip.option;
+  const current = phase.kind === 'before' ? -1 : phase.i;
+  const rows = [];
+  o.legs.forEach((leg, i) => {
+    // A 50 m shuffle to the next platform is not a step worth a line.
+    if (leg.kind === 'walk' && leg.metres < 120 && o.legs.length > 1 && i !== current) return;
+    const cls = i < current ? ' past' : i === current ? ' now' : '';
+    const glyph = leg.kind === 'ride' ? badge(leg.route, true) : icon('walk');
+    const text = leg.kind === 'ride'
+      ? `iki „${esc(leg.to.name)}“`
+      : `${leg.to.stop == null ? 'iki' : 'į'} „${esc(leg.to.name)}“ · ${metresText(leg.metres)}`;
+    rows.push(`<div class="leg-row${cls}"><span class="t">${esc(leg.departure.hm)}</span><span class="glyph">${glyph}</span><span class="text">${text}</span></div>`);
+  });
+  rows.push(`<div class="leg-row"><span class="t">${esc(o.arrive.hm)}</span><span class="glyph">${icon('pin')}</span><span class="text">Atvyksti · ${esc(trip.place.name)}</span></div>`);
+  return `<div class="legs">${rows.join('')}</div>`;
 }
 
 function islandCompact() {
@@ -706,48 +1263,142 @@ function islandCompact() {
   if (!b) return null;
   const at = now().getTime();
   if (b.stage !== 'trip' || !state.trip) {
-    return { left: `<span style="font-size:18px">${icon('mic')}</span>`, right: state.listening ? 'Klausau' : '' };
+    return { left: icon('mic'), right: state.listening ? 'Klausau' : '' };
   }
   const legs = state.trip.option.legs;
   const phase = phaseOf(state.trip, at);
   if (phase.kind === 'before') {
     const ride = nextRide(legs, 0);
     const left = minutesUntil(t(legs[0].departure), at);
-    return { left: ride ? badge(ride.route, true) : icon('walk'), right: left >= 60 ? `${Math.floor(left / 60)} val.` : `${left} min` };
+    return { left: ride ? badge(ride.route, true) : icon('walk'), right: left >= 60 ? `${roll(Math.floor(left / 60))} val.` : `${roll(left)} min` };
   }
   if (phase.kind === 'arrived') return { left: icon('pin'), right: 'Atvykai' };
-  if (phase.kind === 'ride') return { left: badge(phase.leg.route, true), right: phase.leg.arrival.hm };
+  if (phase.kind === 'wait') return { left: badge(phase.leg.route, true), right: `${roll(minutesUntil(t(phase.leg.departure), at))} min` };
+  if (phase.kind === 'ride') return { left: badge(phase.leg.route, true), right: esc(phase.leg.arrival.hm) };
   const ride = nextRide(legs, phase.i + 1);
   return ride
-    ? { left: badge(ride.route, true), right: `${minutesUntil(t(ride.departure), at)} min` }
-    : { left: `<span style="font-size:18px">${icon('walk')}</span>`, right: state.trip.option.arrive.hm };
+    ? { left: badge(ride.route, true), right: `${roll(minutesUntil(t(ride.departure), at))} min` }
+    : { left: icon('walk'), right: esc(state.trip.option.arrive.hm) };
+}
+
+/* Puts the banner into `host`, or updates the one already there. Same key:
+   morph, so only the digits move. New key: cross-fade. No content: the card
+   leaves. */
+function renderActivity(host, where, { fresh = false } = {}) {
+  const body = activityContent(where);
+  let card = host.querySelector(':scope > .activity:not(.leaving)');
+  if (!body) {
+    if (card) {
+      card.classList.add('leaving');
+      afterPlay(play(card, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(10px) scale(0.97)' }], 'exit', { fill: 'forwards' }), () => card.remove());
+    }
+    return null;
+  }
+  const key = activityKey();
+  const pager = activityPager();
+  if (card && fresh) { card.remove(); card = null; }
+  if (!card) {
+    card = document.createElement('div');
+    card.className = 'activity';
+    if (where === 'lock') {
+      card.dataset.action = 'activity-tap';
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-label', 'Kelionės baneris');
+    }
+    card.innerHTML = '<div class="act-body"></div><div class="act-pager"></div>';
+    card.firstChild.innerHTML = body;
+    card.lastChild.innerHTML = pager;
+    card.dataset.key = key;
+    host.appendChild(card);
+    if (where === 'lock' && !fresh) {
+      play(card, [{ opacity: 0, transform: 'translateY(16px) scale(0.97)' }, { opacity: 1, transform: 'none' }], 'rise');
+    }
+    return card;
+  }
+  const bodyEl = card.querySelector('.act-body');
+  const pagerEl = card.querySelector('.act-pager');
+  if (card.dataset.key !== key) {
+    const [oldStage, oldPage] = card.dataset.key.split('|');
+    const [newStage, newPage] = key.split('|');
+    const dx = oldStage === newStage && oldPage !== newPage
+      ? ((Number(newPage) - Number(oldPage) + PAGES.length) % PAGES.length === 1 ? 1 : -1) : 0;
+    card.dataset.key = key;
+    crossfade(card, bodyEl, () => { bodyEl.innerHTML = body; morph(pagerEl, pager); }, { dx, animateHeight: where === 'lock' });
+    return card;
+  }
+  morph(bodyEl, body);
+  morph(pagerEl, pager);
+  return card;
 }
 
 // ============================================================ lock screen
 
+let lockShown = false;
+
 function renderLock() {
   const lock = $('#lock');
-  lock.hidden = !state.locked;
   $('#statusbar').classList.toggle('on-lock', state.locked);
+  if (state.locked && !lock.firstChild) {
+    lock.innerHTML = `
+      <div class="lock-top"><div class="date"></div><div class="clock"><span class="roll"></span></div></div>
+      <div class="coach" hidden></div>
+      <div class="stack"></div>
+      <div class="controls">
+        <button class="control ours" data-action="lock-button" aria-label="Vilnius · Kur keliausime">${icon('bus')}</button>
+        <button class="control" aria-label="Kamera" tabindex="-1">${icon('camera')}</button>
+      </div>
+      <div class="unlock-hint">Braukite aukštyn arba paspauskite juostelę</div>
+      <div class="home-indicator" data-action="unlock" role="button" tabindex="0" aria-label="Atrakinti"></div>`;
+  }
+  if (state.locked !== lockShown) {
+    lockShown = state.locked;
+    animateLock(lock, state.locked);
+  }
   if (!state.locked) return;
   const d = now();
   // iOS: "Šeštadienis, rugsėjo 26".
   const parts = Object.fromEntries(new Intl.DateTimeFormat('lt-LT', { weekday: 'long', month: 'long', day: 'numeric' })
     .formatToParts(d).map((p) => [p.type, p.value]));
-  const date = `${parts.weekday.charAt(0).toUpperCase()}${parts.weekday.slice(1)}, ${parts.month} ${parts.day}`;
-  const content = activityContent('lock');
-  const html = `
-    <div class="date">${esc(date)}</div>
-    <div class="clock">${hm(d)}</div>
-    <div class="stack">${content ? `<div class="activity" data-action="activity-tap" role="button" aria-label="Kelionės baneris">${content}</div>` : ''}</div>
-    <div class="controls">
-      <button class="control ours" data-action="lock-button" aria-label="Vilnius · Kur keliausime">${icon('bus')}</button>
-      <button class="control" aria-label="Kamera" tabindex="-1">${icon('camera')}</button>
-    </div>
-    <div class="unlock-hint">Braukite aukštyn arba paspauskite juostelę</div>
-    <div class="home-indicator" data-action="unlock" role="button" aria-label="Atrakinti"></div>`;
-  if (lock.dataset.html !== html) { lock.innerHTML = html; lock.dataset.html = html; }
+  const date = `${capital(parts.weekday)}, ${parts.month} ${parts.day}`;
+  const dateEl = $('.date', lock);
+  if (dateEl.textContent !== date) dateEl.textContent = date;
+  rollTo($('.clock .roll', lock), hm(d));
+  const card = renderActivity($('.stack', lock), 'lock');
+  // Until the button has been used once, say what it is for.
+  const coach = $('.coach', lock);
+  const showCoach = !card && !store.get('lockButtonUsed', false);
+  if (coach.hidden === showCoach) {
+    coach.hidden = !showCoach;
+    coach.innerHTML = showCoach ? 'Paspausk <b>mygtuką apačioje</b> ir pasakyk, kur keliauji.' : '';
+    if (showCoach) play(coach, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'content', { delay: 300, fill: 'backwards' });
+  }
 }
+
+/* Locking fades the lock screen in; unlocking slides it up and the app
+   zooms back to full size under it, from wherever a swipe left it. */
+function animateLock(lock, show) {
+  lock.getAnimations().forEach((a) => a.cancel());
+  if (show) {
+    lock.hidden = false;
+    lock.style.transform = '';
+    play(lock, [{ opacity: 0 }, { opacity: 1 }], 'fade');
+    play($('.lock-top', lock), [{ transform: 'translateY(-10px)', opacity: 0.4 }, { transform: 'none', opacity: 1 }], 'content');
+    return;
+  }
+  const from = lock.style.transform || 'none';
+  lock.style.transform = '';
+  const slide = play(lock, [{ transform: from }, { transform: 'translateY(-100%)' }], 'push', { fill: 'forwards' });
+  play($('#app'), [{ transform: 'scale(0.94)', opacity: 0.6 }, { transform: 'none', opacity: 1 }], 'push');
+  afterPlay(slide, () => {
+    if (state.locked) return;
+    lock.hidden = true;
+    lock.innerHTML = '';
+    if (slide) slide.cancel();
+  });
+}
+
+let islandWasExpanded = false;
 
 function renderIsland() {
   const island = $('#island');
@@ -757,27 +1408,68 @@ function renderIsland() {
   if (!state.banner || state.banner.stage !== 'trip') state.islandExpanded = false;
   // On the lock screen the banner is already there; the island stays idle,
   // as it does on a real iPhone.
-  const showCompact = compact && !state.locked;
-  island.classList.toggle('compact', !!showCompact && !state.islandExpanded);
-  island.classList.toggle('expanded', !!showCompact && state.islandExpanded);
-  const html = showCompact
-    ? `<div class="compact-row"><span>${compact.left}</span><span class="compact-right">${esc(compact.right)}</span></div>
-       <div class="expanded-body">${activityContent('island')}</div>`
-    : '';
-  if (island.dataset.html !== html) { island.innerHTML = html; island.dataset.html = html; }
+  const showCompact = !!compact && !state.locked;
+  const expanded = showCompact && state.islandExpanded;
+  island.classList.toggle('compact', showCompact && !expanded);
+  island.classList.toggle('expanded', expanded);
+  if (!island.firstChild) {
+    island.innerHTML = '<div class="compact-row"><span class="c-left"></span><span class="c-right"></span></div><div class="expanded-body"></div>';
+  }
+  if (showCompact) {
+    const row = $('.compact-row', island);
+    const html = `<span class="c-left">${compact.left}</span><span class="c-right">${compact.right}</span>`;
+    if (row.dataset.html !== html) { morph(row, html); row.dataset.html = html; }
+  }
+  const body = $('.expanded-body', island);
+  if (expanded) {
+    renderActivity(body, 'island', { fresh: !islandWasExpanded });
+    island.style.height = `${body.offsetHeight}px`;
+  } else {
+    island.style.height = '';
+  }
+  islandWasExpanded = expanded;
 }
 
 function renderOverlay() {
   const overlay = $('#overlay');
-  let html = '';
-  if (state.sheet) html += state.sheet;
-  if (state.toast) html += `<div class="toast">${esc(state.toast)}</div>`;
-  overlay.innerHTML = html;
+  let sheet = overlay.querySelector('.sheet-backdrop:not(.leaving)');
+  if (state.sheet && !sheet) {
+    overlay.insertAdjacentHTML('afterbegin', state.sheet);
+    sheet = overlay.querySelector('.sheet-backdrop');
+    sheet.dataset.html = state.sheet;
+    play(sheet, [{ backgroundColor: 'rgba(0,0,0,0)' }, { backgroundColor: 'rgba(0,0,0,0.35)' }], 'fade');
+    play(sheet.firstElementChild, [{ transform: 'translateY(100%)' }, { transform: 'none' }], 'sheet');
+  } else if (state.sheet && sheet.dataset.html !== state.sheet) {
+    sheet.dataset.html = state.sheet;
+    morph(sheet, $('.sheet-backdrop', Object.assign(document.createElement('div'), { innerHTML: state.sheet })).innerHTML);
+  } else if (!state.sheet && sheet) {
+    const leaving = sheet;
+    leaving.classList.add('leaving');
+    play(leaving.firstElementChild, [{ transform: 'none' }, { transform: 'translateY(100%)' }], 'exit', { fill: 'forwards' });
+    afterPlay(play(leaving, [{ backgroundColor: 'rgba(0,0,0,0.35)' }, { backgroundColor: 'rgba(0,0,0,0)' }], 'exit', { fill: 'forwards' }), () => leaving.remove());
+  }
+
+  let toastEl = overlay.querySelector('.toast:not(.leaving)');
+  if (toastEl && toastEl.textContent !== state.toast) {
+    const leaving = toastEl;
+    leaving.classList.add('leaving');
+    afterPlay(play(leaving, [{ opacity: 1 }, { opacity: 0 }], 'exit', { fill: 'forwards' }), () => leaving.remove());
+    toastEl = null;
+  }
+  if (state.toast && !toastEl) {
+    toastEl = document.createElement('div');
+    toastEl.className = 'toast';
+    toastEl.setAttribute('role', 'status');
+    toastEl.textContent = state.toast;
+    overlay.appendChild(toastEl);
+    play(toastEl, [{ opacity: 0, transform: 'translateY(10px) scale(0.96)' }, { opacity: 1, transform: 'none' }], 'content');
+  }
 }
 
 function renderClock() {
   const d = now();
-  $('#status-time').textContent = hm(d);
+  const status = $('#status-time');
+  if (status.textContent !== hm(d)) status.textContent = hm(d);
   $('#sim-clock').textContent = `${hm(d)}:${pad(d.getSeconds())}`;
 }
 
@@ -786,7 +1478,17 @@ function renderAll() {
   $('#toggle-lock').textContent = state.locked ? 'Atrakinti' : 'Užrakinti';
 }
 
-setInterval(() => { renderClock(); renderLock(); renderIsland(); }, 250);
+// Four times a second, but the DOM only changes where the content did.
+let lastMinute = '';
+setInterval(() => {
+  renderClock(); renderLock(); renderIsland();
+  const minute = hm(now());
+  if (minute !== lastMinute) {
+    lastMinute = minute;
+    // "Išeik po 5 min" on the results and the route must not go stale.
+    if (state.prefs && ['results', 'detail'].includes(currentScreen().name)) renderApp();
+  }
+}, 250);
 
 // =================================================================== voice
 
@@ -844,21 +1546,31 @@ function failVoice(surface, message) {
   renderAll();
 }
 
+/* A spoken place is taken only when the search is sure of it. Otherwise the
+   rider picks: better one tap than a trip to the wrong Akropolis. Servers
+   that do not report confidence keep the old behaviour (take the top). */
 async function resolvePlace(parsed) {
   if (parsed.home) {
     const home = state.places.find((p) => ['namai', 'namo'].includes(fold(p.name)));
     if (!home) throw new Error('Dar neišsaugojai vietos „Namai“.');
-    return home;
+    return { place: home };
   }
-  for (const candidate of parsed.candidates.length ? parsed.candidates : [parsed.destination]) {
+  const candidates = parsed.candidates && parsed.candidates.length ? parsed.candidates : [parsed.destination];
+  for (const candidate of candidates) {
     const saved = state.places.find((p) => sameName(p.name, candidate));
-    if (saved) return saved;
+    if (saved) return { place: saved };
   }
-  for (const candidate of parsed.candidates.length ? parsed.candidates : [parsed.destination]) {
-    const data = await api('/api/search', { q: candidate });
-    if (data.results.length) return data.results[0];
+  let unsure = null;
+  for (const candidate of candidates) {
+    const data = await api('/api/search', { q: candidate, ...near() });
+    const results = data.results || [];
+    if (!results.length) continue;
+    const top = results[0];
+    const sure = !data.ambiguous && (top.confidence == null || top.confidence === 'high');
+    if (sure) return { place: top };
+    if (!unsure) unsure = { choices: results, query: candidate };
   }
-  return null;
+  return unsure;
 }
 
 /* One utterance, from the lock screen or from the app. `awaiting` is the
@@ -877,20 +1589,36 @@ async function handleUtterance(text, surface, awaiting = null) {
       return planAndGo(awaiting, parsed.now ? 'now' : parsed.mode === 'depart' ? 'depart' : 'arrive', parsed.time, surface);
     }
     if (!parsed.destination) return fail('Neišgirdau, kur keliausi.');
-    const place = await resolvePlace(parsed);
-    if (!place) return fail(`Neradau „${parsed.destination}“.`);
-    if (parsed.time) return planAndGo(place, parsed.mode || 'arrive', parsed.time, surface);
-    if (parsed.now) return planAndGo(place, 'now', null, surface);
-    if (onLock) { state.banner = { stage: 'chooseTime', place }; renderAll(); return; }
-    state.destination = place;
-    state.sheet = `<div class="sheet-backdrop" data-action="close-sheet"><div class="sheet" data-stop="1">
-        <h3>${esc(place.name)}</h3><p>Kada keliausi?</p>
-        <div class="buttons"><button class="prominent" data-action="sheet-now">Dabar</button>
-        <button class="secondary" style="height:52px" data-action="sheet-plan">Planuoti</button></div></div></div>`;
-    renderOverlay();
+    const found = await resolvePlace(parsed);
+    if (!found) return fail(`Neradau „${parsed.destination}“.`);
+    if (found.choices) {
+      const when = { time: parsed.time, mode: parsed.mode, now: parsed.now };
+      if (onLock) {
+        state.banner = { stage: 'choosePlace', heard: text, choices: found.choices, query: found.query, when };
+        renderAll();
+      } else {
+        state.heard = text; state.query = found.query; state.results = found.choices; state.searching = false;
+        state.stack = [HOME()];
+        renderApp();
+      }
+      return;
+    }
+    return goWithPlace(found.place, parsed, surface);
   } catch (e) {
     fail(e.message);
   }
+}
+
+function goWithPlace(place, when, surface) {
+  if (when.time) return planAndGo(place, when.mode || 'arrive', when.time, surface);
+  if (when.now) return planAndGo(place, 'now', null, surface);
+  if (surface === 'lock') { state.banner = { stage: 'chooseTime', place }; renderAll(); return; }
+  state.destination = place;
+  state.sheet = `<div class="sheet-backdrop" data-action="close-sheet"><div class="sheet" data-stop="1" role="dialog" aria-label="Kada keliausi">
+      <h3>${esc(place.name)}</h3><p>Kada keliausi?</p>
+      <div class="buttons"><button class="prominent" data-action="sheet-now">Dabar</button>
+      <button class="secondary" style="height:52px" data-action="sheet-plan">Planuoti</button></div></div></div>`;
+  renderOverlay();
 }
 
 async function planAndGo(place, mode, time, surface) {
@@ -900,9 +1628,18 @@ async function planAndGo(place, mode, time, surface) {
     try {
       const plan = await planTrip(place, mode, time);
       if (!plan.options.length) throw new Error('Maršruto šiuo laiku nerasta.');
-      startTrip(plan.options[0], place);
+      const reachable = mode === 'arrive' ? plan.options.find((o) => !isLate(o)) : plan.options[0];
+      if (!reachable) {
+        state.banner = { stage: 'error', message: `Iki ${time} nebespėsi.`, detail: `Galiu parodyti greičiausią kelią į „${place.name}“ dabar.`, code: 'late', place };
+        renderAll();
+        return;
+      }
+      startTrip(reachable, place);
     } catch (e) {
-      state.banner = { stage: 'error', message: e.message, retry: 'ask' };
+      // A banner has room for a sentence, not a paragraph.
+      state.banner = e.code === 'no-origin'
+        ? { stage: 'error', message: 'Nežinau, iš kur keliauji.', detail: 'Pasirink vietą arba leisk naršyklei ją nustatyti.', code: e.code, retry: 'ask' }
+        : { stage: 'error', message: e.message, retry: 'ask' };
       renderAll();
     }
     return;
@@ -914,6 +1651,8 @@ async function planAndGo(place, mode, time, surface) {
 // ================================================================= events
 
 document.addEventListener('click', (event) => {
+  // Like iOS: a tap anywhere else folds the expanded island back.
+  if (state.islandExpanded && !event.target.closest('#island')) { state.islandExpanded = false; renderIsland(); }
   const target = event.target.closest('[data-action]');
   if (!target) return;
   if (event.target.closest('[data-stop]') && target.dataset.action === 'close-sheet' && !event.target.closest('button')) return;
@@ -923,25 +1662,42 @@ document.addEventListener('click', (event) => {
 });
 
 const actions = {
-  back: () => { if (!state.prefs && state.draft) { state.draft.step = Math.max(0, state.draft.step - 1); renderApp(); } else pop(); },
+  back: () => {
+    if (!state.prefs && state.draft) { state.draft.step = Math.max(0, state.draft.step - 1); renderApp(); return; }
+    // The pick screen's search is its own: home must not come back showing it.
+    if (currentScreen().name === 'pick') { state.query = ''; state.results = []; }
+    pop();
+  },
   settings: () => push({ name: 'settings' }),
   places: () => push({ name: 'places' }),
-  'add-place': () => { state.query = ''; state.results = []; push({ name: 'pick', purpose: 'place' }); },
-  'pick-origin': () => { state.query = ''; state.results = []; push({ name: 'pick', purpose: 'origin' }); },
-  lock: () => { state.locked = true; renderAll(); },
-  unlock: () => { state.locked = false; state.islandExpanded = false; stopListening(); renderAll(); },
+  'add-place': () => { state.query = ''; state.results = []; state.heard = ''; push({ name: 'pick', purpose: 'place' }); },
+  'pick-origin': () => { state.query = ''; state.results = []; state.heard = ''; push({ name: 'pick', purpose: 'origin' }); },
+  locate: () => locate(true),
+  lock: () => { state.locked = true; state.islandExpanded = false; renderAll(); },
+  unlock: () => {
+    state.locked = false; state.islandExpanded = false; stopListening();
+    // A question or an error was for the lock screen; only a trip lives on
+    // in the island.
+    if (state.banner && state.banner.stage !== 'trip') state.banner = state.trip ? { stage: 'trip' } : null;
+    renderAll();
+  },
 
-  draft: (el) => { state.draft[el.dataset.key] = el.dataset.value; renderApp(); },
+  draft: (el) => { state.draft[el.dataset.pref] = el.dataset.value; renderApp(); },
   'draft-next': () => {
     if (state.draft.step < 1) { state.draft.step += 1; renderApp(); return; }
     state.prefs = { priority: state.draft.priority, walk: state.draft.walk };
-    state.draft = null; save(); goHome();
+    state.draft = null; save();
+    state.stack = [HOME()];
+    // Straight to the lock screen: the banner is the product.
+    state.locked = true;
+    renderAll();
   },
-  pref: (el) => { state.prefs[el.dataset.key] = el.dataset.value; save(); renderApp(); },
+  pref: (el) => { state.prefs[el.dataset.pref] = el.dataset.value; save(); renderApp(); },
   reset: () => {
     if (!confirm('Ištrinti nustatymus, vietas ir istoriją šioje naršyklėje?')) return;
-    Object.assign(state, { prefs: null, places: [], visits: {}, dismissed: [], originChoice: 'gps' });
-    save(); endTrip(); goHome();
+    Object.assign(state, { prefs: null, places: [], visits: {}, dismissed: [], originChoice: 'gps', stack: [HOME()] });
+    store.set('lockButtonUsed', false);
+    save(); endTrip();
   },
 
   'time-mode': (el) => {
@@ -957,7 +1713,7 @@ const actions = {
     const item = currentItems()[Number(el.dataset.index)];
     if (currentScreen().purpose === 'origin') {
       const existing = state.places.find((p) => sameName(p.name, item.name) && Math.abs(p.lat - item.lat) < 0.002);
-      const place = existing || { id: uid(), name: item.name, subtitle: item.subtitle || '', lat: item.lat, lon: item.lon, temporary: true };
+      const place = existing || { id: uid(), name: item.name, subtitle: placeSubtitle(item), lat: item.lat, lon: item.lon, temporary: true };
       if (!existing) state.places.push(place);
       state.originChoice = place.id; save(); state.query = ''; pop(); fillOrigins();
       if (!existing) toast('Pridėta prie tavo vietų — gali pervadinti');
@@ -972,14 +1728,16 @@ const actions = {
     if (state.originChoice === el.dataset.id) state.originChoice = 'gps';
     save(); renderApp(); fillOrigins();
   },
-  'open-option': (el) => { state.selected = state.plan.options[Number(el.dataset.index)]; push({ name: 'detail' }); },
+  'open-option': (el) => { state.selected = state.plan.options[Number(el.dataset.index)]; state.openStops = {}; push({ name: 'detail' }); },
+  'toggle-stops': (el) => { const i = el.dataset.index; state.openStops[i] = !state.openStops[i]; renderApp(); },
   'start-trip': () => {
     startTrip(state.selected, state.destination);
     toast('Kelionė pradėta');
     setTimeout(() => { state.locked = true; renderAll(); }, 700);
   },
-  'save-suggestion': (el) => { const v = state.visits[el.dataset.key]; if (v) askName({ ...v }); },
-  'dismiss-suggestion': (el) => { state.dismissed.push(el.dataset.key); save(); renderApp(); },
+  'end-trip': () => { endTrip(); pop(); },
+  'save-suggestion': (el) => { const v = state.visits[el.dataset.keyRef]; if (v) askName({ ...v }); },
+  'dismiss-suggestion': (el) => { state.dismissed.push(el.dataset.keyRef); save(); renderApp(); },
 
   'app-mic': () => {
     if (state.listening === 'app') { stopListening(); renderAll(); return; }
@@ -997,15 +1755,16 @@ const actions = {
     const pending = state.pendingPlace;
     if (!pending || !input) return;
     const name = input.value.trim() || pending.name;
-    state.places.push({ id: uid(), name, subtitle: pending.subtitle || pending.name, lat: pending.lat, lon: pending.lon });
+    state.places.push({ id: uid(), name, subtitle: placeSubtitle(pending) || pending.name, lat: pending.lat, lon: pending.lon });
     state.pendingPlace = null; state.sheet = null; save(); renderOverlay();
-    if (currentScreen().name === 'pick') pop(); else renderApp();
+    if (currentScreen().name === 'pick') { state.query = ''; state.results = []; pop(); } else renderApp();
     fillOrigins();
     toast(`Išsaugota: ${name}`);
   },
 
   // --- lock screen and banner
   'lock-button': () => {
+    store.set('lockButtonUsed', true);
     state.banner = { stage: 'ask' };
     state.islandExpanded = false;
     renderAll();
@@ -1017,16 +1776,21 @@ const actions = {
     stopListening();
     state.locked = false;
     if (b && b.stage === 'trip' && state.trip) {
-      state.selected = state.trip.option; state.destination = state.trip.place;
-      state.stack = [{ name: 'home' }, { name: 'detail' }];
+      state.selected = state.trip.option; state.destination = state.trip.place; state.openStops = {};
+      state.stack = [HOME(), { name: 'detail', id: uid() }];
+    } else if (b && b.stage === 'choosePlace') {
+      // The full list, with what was heard, is one tap away.
+      state.heard = b.heard; state.query = b.query; state.results = b.choices;
+      state.banner = state.trip ? { stage: 'trip' } : null;
+      state.stack = [HOME()];
     } else {
       if (b && b.stage !== 'trip') state.banner = null;
-      state.stack = [{ name: 'home' }];
-      setTimeout(() => { const s = $('#search'); if (s) s.focus(); }, 50);
+      state.stack = [HOME()];
+      setTimeout(() => { const s = inPage('#search'); if (s) s.focus(); }, 50);
     }
     renderAll();
   },
-  'banner-open-search': () => { stopListening(); state.banner = null; state.locked = false; goHome(); renderAll(); setTimeout(() => $('#search') && $('#search').focus(), 50); },
+  'banner-open-search': () => { stopListening(); state.banner = null; state.locked = false; state.stack = [HOME()]; renderAll(); setTimeout(() => { const s = inPage('#search'); if (s) s.focus(); }, 50); },
   'banner-cancel': () => { stopListening(); state.banner = state.trip ? { stage: 'trip' } : null; renderAll(); },
   'banner-now': () => { const place = state.banner.place; stopListening(); planAndGo(place, 'now', null, 'lock'); },
   'banner-plan': () => {
@@ -1039,6 +1803,26 @@ const actions = {
     const b = state.banner;
     if (b.retry === 'askTime' && b.place) return actions['banner-plan']();
     actions['lock-button']();
+  },
+  'banner-choose': (el) => {
+    const b = state.banner;
+    const place = b.choices[Number(el.dataset.index)];
+    stopListening();
+    goWithPlace(place, b.when, 'lock');
+  },
+  'banner-none': () => actions['lock-button'](),
+  'banner-pick-origin': () => {
+    stopListening();
+    state.banner = state.trip ? { stage: 'trip' } : null;
+    state.locked = false; state.query = ''; state.results = [];
+    state.stack = [HOME(), { name: 'pick', purpose: 'origin', id: uid() }];
+    renderAll();
+  },
+  'banner-page': (el) => {
+    if (!state.trip) return;
+    state.trip.page = Number(el.dataset.page) % PAGES.length;
+    store.set('trip', state.trip);
+    renderLock(); renderIsland();
   },
   'trip-done': () => {
     const place = state.trip.place;
@@ -1068,19 +1852,35 @@ const actions = {
 
 function askName(item) {
   state.pendingPlace = item;
-  state.sheet = `<div class="sheet-backdrop" data-action="close-sheet"><div class="sheet" data-stop="1">
-      <h3>Kaip pavadinti?</h3><p>${esc(item.name)}${item.subtitle ? ` · ${esc(item.subtitle)}` : ''}</p>
-      <input id="new-name" class="time-input" style="width:100%;height:44px;font-size:17px;margin-bottom:12px" value="${esc(item.name)}" aria-label="Pavadinimas">
+  state.sheet = `<div class="sheet-backdrop" data-action="close-sheet"><div class="sheet" data-stop="1" role="dialog" aria-label="Kaip pavadinti">
+      <h3>Kaip pavadinti?</h3><p>${esc(item.name)}${placeSubtitle(item) ? ` · ${esc(placeSubtitle(item))}` : ''}</p>
+      <input id="new-name" class="time-input name-input" value="${esc(item.name)}" aria-label="Pavadinimas">
       <div class="buttons"><button class="secondary" style="height:52px" data-action="close-sheet">Atšaukti</button>
       <button class="prominent" data-action="confirm-name">Išsaugoti</button></div></div></div>`;
   renderOverlay();
   setTimeout(() => { const i = $('#new-name'); if (i) { i.focus(); i.select(); } }, 30);
 }
 
+/* Times are typed as 24-hour HH:MM. The browser's own time field follows the
+   system locale and shows "12:53 AM" on an English Windows. */
+function readTime(text) {
+  let digits = String(text || '').replace(/\D/g, '').slice(0, 4);
+  if (digits.length === 3) digits = '0' + digits;
+  if (digits.length !== 4) return null;
+  const h = Number(digits.slice(0, 2)), m = Number(digits.slice(2));
+  return h < 24 && m < 60 ? `${pad(h)}:${pad(m)}` : null;
+}
+
 document.addEventListener('input', (event) => {
   const el = event.target;
   if (el.id === 'search') onSearchInput(el.value);
-  if (el.id === 'time-value') { state.timeValue = el.value; }
+  if (el.id === 'time-value') {
+    const digits = el.value.replace(/\D/g, '').slice(0, 4);
+    const shown = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+    if (el.value !== shown) el.value = shown;
+    const time = readTime(shown);
+    if (time && digits.length === 4) state.timeValue = time;
+  }
   if (el.dataset && el.dataset.action === 'rename') {
     const place = state.places.find((p) => p.id === el.dataset.id);
     if (place) { place.name = el.value; save(); fillOrigins(); }
@@ -1088,15 +1888,25 @@ document.addEventListener('input', (event) => {
 });
 
 document.addEventListener('change', (event) => {
-  if (event.target.id === 'time-value' && currentScreen().name === 'results') runPlan();
+  if (event.target.id !== 'time-value') return;
+  const time = readTime(event.target.value);
+  if (time) state.timeValue = time;
+  event.target.value = state.timeValue;
+  if (time && currentScreen().name === 'results') runPlan();
 });
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') { state.islandExpanded = false; state.sheet = null; renderAll(); }
   if (event.key === 'Enter' && event.target.id === 'new-name') actions['confirm-name']();
+  if (event.key === 'Enter' && event.target.id === 'time-value') event.target.blur();
   if (event.key === 'Enter' && event.target.id === 'search') {
     const first = currentItems()[0];
     if (first && currentScreen().name === 'home') openDestination(first);
+  }
+  // The home indicator and the banner are role="button": keys press them too.
+  if ((event.key === 'Enter' || event.key === ' ') && event.target.matches && event.target.matches('[role="button"][data-action]')) {
+    event.preventDefault();
+    event.target.click();
   }
 });
 
@@ -1108,13 +1918,34 @@ $('#island').addEventListener('click', (event) => {
   renderIsland();
 });
 
-// Swipe up on the lock screen unlocks, like the real thing.
-let swipeStart = null;
-$('#lock').addEventListener('pointerdown', (e) => { if (!e.target.closest('button, .activity')) swipeStart = e.clientY; });
-$('#lock').addEventListener('pointerup', (e) => {
-  if (swipeStart != null && swipeStart - e.clientY > 80) actions.unlock();
-  swipeStart = null;
+// Swipe up on the lock screen unlocks, like the real thing; the screen
+// follows the finger, and springs back if the swipe was too short.
+let swipe = null;
+const lockEl = $('#lock');
+lockEl.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('button, .activity')) return;
+  swipe = { y: e.clientY, moved: false };
 });
+lockEl.addEventListener('pointermove', (e) => {
+  if (!swipe) return;
+  const dy = Math.min(0, e.clientY - swipe.y);
+  if (dy < -4) swipe.moved = true;
+  if (swipe.moved) lockEl.style.transform = `translateY(${dy}px)`;
+});
+const endSwipe = (e) => {
+  if (!swipe) return;
+  const dy = e.clientY - swipe.y;
+  const moved = swipe.moved;
+  swipe = null;
+  if (!moved) return;
+  if (dy < -80) { actions.unlock(); return; }
+  const from = lockEl.style.transform;
+  lockEl.style.transform = '';
+  play(lockEl, [{ transform: from }, { transform: 'none' }], 'content');
+};
+lockEl.addEventListener('pointerup', endSwipe);
+lockEl.addEventListener('pointerleave', endSwipe);
+lockEl.addEventListener('pointercancel', endSwipe);
 
 // ------------------------------------------------------------------ panel
 
@@ -1141,12 +1972,7 @@ $('#jump-stage').addEventListener('click', () => {
   jumpTo((next || at + 5 * 60_000) + 1000);
   renderAll();
 });
-$('#toggle-lock').addEventListener('click', () => {
-  state.locked = !state.locked;
-  state.islandExpanded = false;
-  if (!state.locked) stopListening();
-  renderAll();
-});
+$('#toggle-lock').addEventListener('click', () => (state.locked ? actions.unlock() : actions.lock()));
 $('#toggle-theme').addEventListener('click', () => {
   const root = document.documentElement;
   const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
@@ -1173,12 +1999,14 @@ $('#origin-select').addEventListener('change', (event) => {
   if (event.target.value === '__pick') {
     state.locked = false;
     actions['pick-origin']();
+    renderAll();
     fillOrigins();
     return;
   }
   state.originChoice = event.target.value;
   save(); renderAll(); fillOrigins();
 });
+$('#locate').addEventListener('click', () => locate(true));
 
 function fillOrigins() {
   const select = $('#origin-select');
@@ -1186,7 +2014,8 @@ function fillOrigins() {
   select.innerHTML = options.map(([value, label]) => `<option value="${esc(value)}"${value === state.originChoice ? ' selected' : ''}>${esc(label)}</option>`).join('');
   const from = origin();
   $('#origin-status').textContent = state.originChoice === 'gps'
-    ? (state.gps ? `Naršyklės vieta, tikslumas ±${Math.round(state.gps.accuracy)} m. Kompiuteryje ji gali būti netiksli.` : (state.gpsError || 'Laukiu naršyklės vietos…'))
+    ? (state.gps ? `Naršyklės vieta, tikslumas ±${Math.round(state.gps.accuracy)} m. Kompiuteryje ji gali būti netiksli.`
+      : state.locating ? 'Ieškau vietos…' : (state.gpsError ? `${state.gpsError} Pasirink vietą iš sąrašo.` : 'Laukiu naršyklės vietos…'))
     : (from ? `${from.lat.toFixed(4)}, ${from.lon.toFixed(4)}` : '');
 }
 
@@ -1201,18 +2030,12 @@ function fillOrigins() {
     state.trip = trip;
     state.banner = { stage: 'trip' };
   }
+  // Once set up, the phone starts locked: the banner is the product, and the
+  // app is one swipe away.
+  if (state.prefs) state.locked = true;
   fillOrigins();
   renderAll();
-
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { state.gps = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }; fillOrigins(); renderApp(); },
-      (err) => { state.gpsError = err.code === 1 ? 'Naršyklė neleido naudoti vietos. Pasirink vietą iš sąrašo.' : 'Vietos nustatyti nepavyko. Pasirink vietą iš sąrašo.'; fillOrigins(); },
-      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
-    );
-  } else {
-    state.gpsError = 'Naršyklė nepateikia vietos. Pasirink vietą iš sąrašo.';
-  }
+  locate(false);
 
   const poll = async () => {
     try {

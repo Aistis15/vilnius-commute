@@ -1,0 +1,458 @@
+{
+ "query": "Klaipėdos stotis",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=Klaip%C4%97dos+stotis&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-26",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 723360734,
+     "osm_key": "landuse",
+     "osm_value": "industrial",
+     "type": "locality",
+     "name": "Klaipėdos 1-oji dujų skirstymo stotis",
+     "district": "Sendvaris",
+     "city": "Klaipėda",
+     "county": "Klaipėdos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "countrycode": "LT",
+     "extent": [
+      21.1778262,
+      55.7072866,
+      21.1782041,
+      55.7069518
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.1780151,
+      55.7071192
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 349089253,
+     "osm_key": "building",
+     "osm_value": "train_station",
+     "type": "house",
+     "housenumber": "1",
+     "name": "Klaipėdos geležinkelio stotis",
+     "street": "Priestočio g.",
+     "locality": "Kretinga",
+     "district": "Centras",
+     "city": "Klaipėda",
+     "county": "Klaipėdos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "92228",
+     "countrycode": "LT",
+     "extent": [
+      21.1351637,
+      55.7209551,
+      21.1361733,
+      55.7206102
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.1359648,
+      55.7207739
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 221120837,
+     "osm_key": "amenity",
+     "osm_value": "bus_station",
+     "type": "house",
+     "housenumber": "9",
+     "name": "Klaipėdos autobusų stotis",
+     "street": "Butkų Juzės g.",
+     "locality": "Naujamiestis",
+     "district": "Centras",
+     "city": "Klaipėda",
+     "county": "Klaipėdos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "92228",
+     "countrycode": "LT",
+     "extent": [
+      21.1373783,
+      55.7197805,
+      21.1390671,
+      55.7192376
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.1382654,
+      55.7195106
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "R",
+     "osm_id": 8223049,
+     "osm_key": "landuse",
+     "osm_value": "railway",
+     "type": "other",
+     "name": "Draugystės geležinkelio stotis",
+     "district": "Žardė",
+     "city": "Klaipėda",
+     "county": "Klaipėdos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "95367",
+     "countrycode": "LT",
+     "extent": [
+      21.1849754,
+      55.6495442,
+      21.2257152,
+      55.6447009
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.2073882,
+      55.6471356
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 760683739,
+     "osm_key": "landuse",
+     "osm_value": "industrial",
+     "type": "locality",
+     "name": "Gargždų duų skirstymo stotis",
+     "district": "Lėbartai",
+     "city": "Gargždai",
+     "county": "Gargždų seniūnija",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "countrycode": "LT",
+     "extent": [
+      21.3807601,
+      55.7248159,
+      21.3812694,
+      55.7245771
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.3810148,
+      55.7246965
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 760682185,
+     "osm_key": "landuse",
+     "osm_value": "industrial",
+     "type": "locality",
+     "name": "Kretingos dujų skirstymo stotis",
+     "city": "Kluonaliai",
+     "county": "Žalgirio seniūnija",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "countrycode": "LT",
+     "extent": [
+      21.2602567,
+      55.8724764,
+      21.2609431,
+      55.8721459
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.2605999,
+      55.8723112
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 485096931,
+     "osm_key": "landuse",
+     "osm_value": "industrial",
+     "type": "locality",
+     "name": "Palangos dujų skirstymo stotis",
+     "city": "Vydmantai",
+     "county": "Vydmantų seniūnija",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "countrycode": "LT",
+     "extent": [
+      21.1170788,
+      55.9076323,
+      21.1177537,
+      55.907207
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.1174163,
+      55.9074197
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 354138123,
+     "osm_key": "highway",
+     "osm_value": "tertiary",
+     "type": "street",
+     "name": "Rūgailiai — vandens kėlimo stotis Nr.1",
+     "county": "Kintų seniūnija",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "99187",
+     "countrycode": "LT",
+     "extent": [
+      21.3623879,
+      55.3735533,
+      21.3714326,
+      55.3695825
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.3666064,
+      55.3723013
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 222269817,
+     "osm_key": "building",
+     "osm_value": "ruins",
+     "type": "house",
+     "housenumber": "35D",
+     "name": "Buvusi Nemirsetos laivų gelbėjimo stotis",
+     "street": "Klaipėdos pl.",
+     "district": "Nemirseta",
+     "city": "Palanga",
+     "county": "Palangos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "00101",
+     "countrycode": "LT",
+     "extent": [
+      21.053887,
+      55.8783188,
+      21.0541214,
+      55.8782028
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.0540042,
+      55.8782608
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 3805324672,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Gelž. stotis",
+     "street": "Klaipėdos g.",
+     "city": "Priekulė II",
+     "county": "Priekulės seniūnija",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "96342",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.3084042,
+      55.5629082
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 2312545385,
+     "osm_key": "information",
+     "osm_value": "board",
+     "type": "house",
+     "name": "Nemirsetos laivų gelbėjimo stotis",
+     "street": "Klaipėdos pl.",
+     "district": "Nemirseta",
+     "city": "Palanga",
+     "county": "Palangos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "00185",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.0669157,
+      55.8765418
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 2312545386,
+     "osm_key": "information",
+     "osm_value": "board",
+     "type": "house",
+     "name": "Buvusi Nemirsetos laivų gelbėjimo stotis",
+     "street": "Klaipėdos pl.",
+     "district": "Nemirseta",
+     "city": "Palanga",
+     "county": "Palangos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "00185",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.0546974,
+      55.8782211
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 13879188887,
+     "osm_key": "emergency",
+     "osm_value": "lifeguard",
+     "type": "house",
+     "name": "Gelbėtojų stotis Nemirseta",
+     "street": "Klaipėdos pl.",
+     "district": "Nemirseta",
+     "city": "Palanga",
+     "county": "Palangos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "00185",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.0523528,
+      55.8789521
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 943364042,
+     "osm_key": "amenity",
+     "osm_value": "bus_station",
+     "type": "house",
+     "housenumber": "22",
+     "name": "Šilutės autobusų stotis",
+     "street": "Tilžės g.",
+     "city": "Šilutė",
+     "county": "Šilutės seniūnija",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "99144",
+     "countrycode": "LT",
+     "extent": [
+      21.4838019,
+      55.3440523,
+      21.4841213,
+      55.3439345
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.4839625,
+      55.3439978
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 99250026,
+     "osm_key": "building",
+     "osm_value": "train_station",
+     "type": "house",
+     "housenumber": "4",
+     "name": "Šilutės geležinkelio stotis",
+     "street": "Geležinkelio g.",
+     "city": "Šilutė",
+     "county": "Šilutės seniūnija",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "99144",
+     "countrycode": "LT",
+     "extent": [
+      21.4837848,
+      55.3472785,
+      21.4842792,
+      55.3469038
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.4840256,
+      55.3471053
+     ]
+    }
+   }
+  ]
+ }
+}

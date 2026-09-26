@@ -91,6 +91,9 @@ class Timetable:
     stop_names: list[str] = field(default_factory=list)
     stop_lat: list[float] = field(default_factory=list)
     stop_lon: list[float] = field(default_factory=list)
+    # The feed each stop came from ("Vilnius", "Klaipėda", ...), not a
+    # municipal boundary: Šiauliai's intercity buses end at Vilnius AS.
+    stop_city: list[str] = field(default_factory=list)
     routes: list[Route] = field(default_factory=list)
     pattern_route: list[int] = field(default_factory=list)
     pattern_headsign: list[str | None] = field(default_factory=list)
@@ -119,10 +122,17 @@ def load_timetable(path: Path = DB_PATH) -> Timetable:
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     t = Timetable()
     try:
-        for _id, name, lat, lon in db.execute("SELECT id, name, lat, lon FROM stop ORDER BY id"):
+        # Databases built before the five-city merge have no city column, and
+        # were Vilnius only.
+        columns = {row[1] for row in db.execute("PRAGMA table_info(stop)")}
+        city = "city" if "city" in columns else "'Vilnius'"
+        for _id, name, lat, lon, stop_city in db.execute(
+            f"SELECT id, name, lat, lon, {city} FROM stop ORDER BY id"
+        ):
             t.stop_names.append(name)
             t.stop_lat.append(lat)
             t.stop_lon.append(lon)
+            t.stop_city.append(stop_city or "")
         stop_count = len(t.stop_names)
 
         for rid, short, category, color, text_color in db.execute(

@@ -1,0 +1,472 @@
+{
+ "query": "Vilniaus universitetas",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=Vilniaus+universitetas&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-26",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 531948359,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "name": "Vilniaus universitetas",
+     "street": "Šv. Jono g.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01123",
+     "countrycode": "LT",
+     "extent": [
+      25.2864733,
+      54.6839516,
+      25.2893518,
+      54.6817434
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2878334,
+      54.6828203
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 683417852,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Vilniaus universitetas",
+     "street": "Saulėtekio al.",
+     "locality": "Saulėtekis",
+     "district": "Antakalnio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "10222",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.332306,
+      54.724434
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "R",
+     "osm_id": 8974294,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "11",
+     "name": "Vilniaus Gedimino technikos universitetas",
+     "street": "Sauletekio g.",
+     "locality": "Saulėtekis",
+     "district": "Antakalnio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "10245",
+     "countrycode": "LT",
+     "extent": [
+      25.3334294,
+      54.723793,
+      25.3392483,
+      54.7202677
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.3366162,
+      54.7219118
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 53313181,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "20",
+     "name": "Mykolo Romerio Universitetas",
+     "street": "Ateities g.",
+     "locality": "Fabijoniškės",
+     "district": "Fabijoniškių seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "08303",
+     "countrycode": "LT",
+     "extent": [
+      25.2577788,
+      54.7348468,
+      25.2593427,
+      54.7334597
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2588288,
+      54.7342021
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 142295753,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "8",
+     "name": "VU Kauno fakultetas",
+     "street": "Muitinės g.",
+     "locality": "Senamiestis",
+     "district": "Centro seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "44280",
+     "countrycode": "LT",
+     "extent": [
+      23.888741,
+      54.8956161,
+      23.8891623,
+      54.8952484
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.8888344,
+      54.8954535
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 24569625,
+     "osm_key": "building",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "7",
+     "name": "ISM Vadybos ir ekonomikos universitetas",
+     "street": "Gedimino pr.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01103",
+     "countrycode": "LT",
+     "extent": [
+      25.2821818,
+      54.6872256,
+      25.2833402,
+      54.6866613
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2827027,
+      54.6868825
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 5089470371,
+     "osm_key": "amenity",
+     "osm_value": "school",
+     "type": "house",
+     "housenumber": "15",
+     "name": "Medardo Čoboto trečiojo amžiaus universitetas",
+     "street": "Pamėnkalnio g.",
+     "locality": "Lukiškės",
+     "district": "Naujamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01104",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2719746,
+      54.6874496
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 1299316248,
+     "osm_key": "building",
+     "osm_value": "university",
+     "type": "house",
+     "name": "Balstogės universitetas",
+     "street": "Aguonų g.",
+     "locality": "Vingriai",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "03213",
+     "countrycode": "LT",
+     "extent": [
+      25.2783151,
+      54.674188,
+      25.2790408,
+      54.6739436
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2786724,
+      54.6740736
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 12078335412,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "39",
+     "name": "Medardo Čoboto trečiojo amžiaus universitetas",
+     "street": "Studentų g.",
+     "locality": "Saltoniškės",
+     "district": "Žvėryno seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "08106",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2610388,
+      54.6971046
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 976251146,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "name": "Europos Humanitarinis Universitetas",
+     "street": "Bokšto g.",
+     "locality": "Tymo kvartalas",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01126",
+     "countrycode": "LT",
+     "extent": [
+      25.2897605,
+      54.679426,
+      25.2914937,
+      54.6782028
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2905379,
+      54.6787612
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 6979504407,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "name": "Kazimiero Simonavičiaus Universitetas",
+     "street": "Dariaus ir Girėno g.",
+     "locality": "Kaminai",
+     "district": "Naujininkų seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "02196",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2714086,
+      54.6504858
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 683417879,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Gedimino technikos universitetas",
+     "street": "Saulėtekio al.",
+     "locality": "Saulėtekis",
+     "district": "Antakalnio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "10224",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.3357221,
+      54.7238535
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 1409005259,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Mykolo Romerio universitetas",
+     "street": "Ateities g.",
+     "locality": "Fabijoniškės",
+     "district": "Fabijoniškių seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "08300",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2597233,
+      54.7353057
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 875611780,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "5",
+     "name": "Mykolo Romerio Universitetas, politikos ir vadybos fakultetai",
+     "street": "Valakupių g.",
+     "locality": "Valakampiai",
+     "district": "Antakalnio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "10111",
+     "countrycode": "LT",
+     "extent": [
+      25.3167547,
+      54.7284006,
+      25.3201988,
+      54.7262857
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.3184586,
+      54.7273243
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 683417877,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Gedimino technikos universitetas",
+     "street": "Saulėtekio al.",
+     "locality": "Saulėtekis",
+     "district": "Antakalnio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "10222",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.3344294,
+      54.7241562
+     ]
+    }
+   }
+  ]
+ }
+}

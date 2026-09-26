@@ -111,5 +111,38 @@ class Candidates(unittest.TestCase):
         self.assertEqual(r.candidates[0], "Žaliasis tiltas")
 
 
+class SpelledLetters(unittest.TestCase):
+    """Recognisers write an abbreviation said letter by letter as "i s m"."""
+
+    def test_ism_spelled(self):
+        r = parse("man reikia į i s m universitetą", TEN_AM)
+        self.assertEqual(r.destination, "ISM universitetą")
+        self.assertEqual(r.candidates[0], "ISM universitetas")
+
+    def test_ism_spelled_without_the_preposition_hook(self):
+        r = parse("man reikia i s m universitetą keturiolika dvidešimt", TEN_AM)
+        self.assertEqual(r.candidates[0], "ISM universitetas")
+        self.assertEqual(r.time, "14:20")
+
+    def test_other_abbreviations(self):
+        self.assertEqual(parse("Man reikia į k t u", TEN_AM).destination, "KTU")
+        self.assertEqual(parse("Į v u dabar", TEN_AM).destination, "VU")
+
+    def test_plain_i_before_letters_is_read_both_ways(self):
+        # "i v u" is IVU or "į VU" with the hook lost: both get searched.
+        self.assertEqual(parse("i v u", TEN_AM).candidates, ["IVU", "VU"])
+        # From four letters the "i" is more likely the preposition.
+        self.assertEqual(parse("man reikia i k t u", TEN_AM).candidates, ["KTU", "IKTU"])
+
+    def test_preposition_is_not_a_letter(self):
+        r = parse("Man reikia į Akropolį", TEN_AM)
+        self.assertEqual(r.candidates[0], "Akropolis")
+        self.assertEqual(parse("Man reikia i Akropolį", TEN_AM).candidates[0], "Akropolis")
+
+    def test_written_initials_stay_apart(self):
+        self.assertEqual(parse("M. K. Čiurlionio 5", TEN_AM).destination, "M K Čiurlionio 5")
+        self.assertEqual(parse("Ozo g. 25", TEN_AM).destination, "Ozo g 25")
+
+
 if __name__ == "__main__":
     unittest.main()

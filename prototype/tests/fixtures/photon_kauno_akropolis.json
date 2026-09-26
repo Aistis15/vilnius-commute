@@ -1,0 +1,74 @@
+{
+ "query": "Kauno Akropolis",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=Kauno+Akropolis&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-26",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 28161836,
+     "osm_key": "shop",
+     "osm_value": "mall",
+     "type": "house",
+     "housenumber": "49",
+     "name": "PLC „Akropolis“",
+     "street": "Karaliaus Mindaugo pr.",
+     "locality": "Karmelitai",
+     "district": "Centro seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "44330",
+     "countrycode": "LT",
+     "extent": [
+      23.9171631,
+      54.8928551,
+      23.9206868,
+      54.8901783
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9194883,
+      54.8914648
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 10815589119,
+     "osm_key": "amenity",
+     "osm_value": "parcel_locker",
+     "type": "house",
+     "housenumber": "49",
+     "name": "Omniva PC AKROPOLIS",
+     "street": "Karaliaus Mindaugo pr.",
+     "locality": "Karmelitai",
+     "district": "Centro seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "44330",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9182479,
+      54.8917915
+     ]
+    }
+   }
+  ]
+ }
+}

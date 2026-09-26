@@ -1,0 +1,514 @@
+{
+ "query": "KTU",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=KTU&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-26",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "R",
+     "osm_id": 9479243,
+     "osm_key": "amenity",
+     "osm_value": "school",
+     "type": "house",
+     "name": "KTU Inžinerijos licėjus",
+     "street": "Čiurlių g.",
+     "locality": "Prendzeliava",
+     "district": "Panemunės seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "45388",
+     "countrycode": "LT",
+     "extent": [
+      23.9710821,
+      54.867991,
+      23.9747299,
+      54.8656216
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9734333,
+      54.8667762
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 75368198,
+     "osm_key": "building",
+     "osm_value": "dormitory",
+     "type": "house",
+     "housenumber": "13",
+     "name": "KTU 10 bendrabutis",
+     "street": "Gričiupio g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51376",
+     "countrycode": "LT",
+     "extent": [
+      23.9665275,
+      54.9053592,
+      23.966935,
+      54.9050995
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9666902,
+      54.9052673
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 75311289,
+     "osm_key": "building",
+     "osm_value": "dormitory",
+     "type": "house",
+     "housenumber": "9",
+     "name": "KTU 5 bendrabutis",
+     "street": "Gričiupio g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51373",
+     "countrycode": "LT",
+     "extent": [
+      23.9642024,
+      54.9054837,
+      23.964695,
+      54.9047663
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9644434,
+      54.9051421
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 147689431,
+     "osm_key": "building",
+     "osm_value": "dormitory",
+     "type": "house",
+     "housenumber": "20",
+     "name": "KTU 8 bendrabutis",
+     "street": "A. Purėno g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51374",
+     "countrycode": "LT",
+     "extent": [
+      23.9637754,
+      54.9059388,
+      23.9644233,
+      54.9057652
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9640949,
+      54.9058392
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 56153036,
+     "osm_key": "building",
+     "osm_value": "dormitory",
+     "type": "house",
+     "housenumber": "71",
+     "name": "KTU 4 bendrabutis",
+     "street": "Studentų g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51394",
+     "countrycode": "LT",
+     "extent": [
+      23.96121,
+      54.9020316,
+      23.9614684,
+      54.9015046
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9613383,
+      54.9018334
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 851646567,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "name": "KTU studentų miestelis",
+     "street": "K. Baršausko g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51425",
+     "countrycode": "LT",
+     "extent": [
+      23.9489481,
+      54.9065852,
+      23.9628071,
+      54.8991169
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9603655,
+      54.9026996
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 258986241,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "48",
+     "name": "KTU Statybos ir architektūros fakultetas",
+     "street": "Studentų g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51367",
+     "countrycode": "LT",
+     "extent": [
+      23.9550549,
+      54.9064112,
+      23.9569769,
+      54.9049277
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9552871,
+      54.9056594
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 29343660,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "19",
+     "name": "KTU Chemijos laboratorija",
+     "street": "Radvilėnų pl.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "50299",
+     "countrycode": "LT",
+     "extent": [
+      23.950793,
+      54.9048246,
+      23.9514053,
+      54.9041846
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9510176,
+      54.9045044
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 32493748,
+     "osm_key": "building",
+     "osm_value": "dormitory",
+     "type": "house",
+     "housenumber": "25A",
+     "name": "KTU 15 bendrabutis",
+     "street": "Vydūno al.",
+     "locality": "Žaliakalnis",
+     "district": "Žaliakalnio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "50290",
+     "countrycode": "LT",
+     "extent": [
+      23.9398547,
+      54.9028856,
+      23.9409915,
+      54.9024856
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9406326,
+      54.9026875
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 194754474,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "8",
+     "name": "KTU Ekonomikos ir vadybos fakultetas",
+     "street": "Kęstučio g.",
+     "locality": "Karmelitai",
+     "district": "Centro seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "44320",
+     "countrycode": "LT",
+     "extent": [
+      23.9227738,
+      54.8955713,
+      23.9233434,
+      54.8953926
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9230596,
+      54.8954909
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 181615904,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "50",
+     "name": "KTU Ekonomikos ir verslo fakultetas",
+     "street": "Gedimino g.",
+     "locality": "Karmelitai",
+     "district": "Centro seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "44239",
+     "countrycode": "LT",
+     "extent": [
+      23.921733,
+      54.8993042,
+      23.9228323,
+      54.8987913
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9218792,
+      54.899091
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 1695211980,
+     "osm_key": "leisure",
+     "osm_value": "fitness_centre",
+     "type": "house",
+     "housenumber": "18",
+     "name": "KTU Activated Gym",
+     "street": "A. Purėno g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51370",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9633023,
+      54.9058116
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 147689432,
+     "osm_key": "building",
+     "osm_value": "dormitory",
+     "type": "house",
+     "housenumber": "18",
+     "name": "KTU 7 bendrabutis",
+     "street": "A. Purėno g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51370",
+     "countrycode": "LT",
+     "extent": [
+      23.9629256,
+      54.9058992,
+      23.9635666,
+      54.9057185
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9632494,
+      54.9058011
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "R",
+     "osm_id": 1326760,
+     "osm_key": "amenity",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "56",
+     "name": "KTU Mechanikos inžinerijos ir dizaino fakultetas",
+     "street": "Studentų g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51393",
+     "countrycode": "LT",
+     "extent": [
+      23.9592441,
+      54.9013692,
+      23.9609771,
+      54.8998378
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9606307,
+      54.9006064
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 56153038,
+     "osm_key": "building",
+     "osm_value": "dormitory",
+     "type": "house",
+     "housenumber": "69",
+     "name": "KTU 3 bendrabutis",
+     "street": "Studentų g.",
+     "locality": "Gričiupis",
+     "district": "Gričiupio seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "51393",
+     "countrycode": "LT",
+     "extent": [
+      23.9607302,
+      54.9027539,
+      23.9609713,
+      54.9022285
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9608507,
+      54.9024903
+     ]
+    }
+   }
+  ]
+ }
+}

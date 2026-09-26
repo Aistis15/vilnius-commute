@@ -50,6 +50,20 @@ def point(value: str, name: str) -> planner.Point:
     return planner.Point(lat, lon, name)
 
 
+def position(query: dict) -> tuple[float | None, float | None]:
+    """Where the person is, to bias search towards; (None, None) when unknown."""
+    if query.get("lat") and query.get("lon"):
+        return float(query["lat"]), float(query["lon"])
+    return None, None
+
+
+def minutes_of(now: str | None) -> int | None:
+    if not now:
+        return None
+    hours, mins = now.split(":")
+    return int(hours) * 60 + int(mins)
+
+
 class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # quieter console
@@ -77,16 +91,21 @@ class Handler(BaseHTTPRequestHandler):
                     "stops": State.manifest.get("stops"),
                 })
             if url.path == "/api/parse":
-                now = query.get("now")
-                minutes = None
-                if now:
-                    hours, mins = now.split(":")
-                    minutes = int(hours) * 60 + int(mins)
-                return self.send_json(speech_lt.parse(query.get("text", ""), minutes).as_json())
+                return self.send_json(speech_lt.parse(query.get("text", ""), minutes_of(query.get("now"))).as_json())
             if url.path.startswith("/api/") and State.timetable is None:
                 return self.send_json({"error": State.error or "Tvarkaraščiai dar kraunami…"}, 503)
             if url.path == "/api/search":
-                return self.send_json({"results": search.search(State.index, query.get("q", ""))})
+                # {"results": [...], "ambiguous": bool}; each result carries
+                # match and confidence so the app can ask rather than guess.
+                return self.send_json(search.search(State.index, query.get("q", ""), *position(query)))
+            if url.path == "/api/resolve":
+                # A spoken request in one call: parse it, then search every
+                # reading of the destination and keep the clearest.
+                parsed = speech_lt.parse(query.get("text", ""), minutes_of(query.get("now")))
+                found = {"results": [], "ambiguous": False, "query": None}
+                if parsed.destination and not parsed.home:
+                    found = search.resolve(State.index, parsed.candidates or [parsed.destination], *position(query))
+                return self.send_json({"parsed": parsed.as_json(), **found})
             if url.path == "/api/plan":
                 result = planner.plan(
                     State.timetable,

@@ -1,0 +1,345 @@
+{
+ "query": "Akropolis",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=Akropolis&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-26",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 253070157,
+     "osm_key": "landuse",
+     "osm_value": "construction",
+     "type": "other",
+     "name": "Akropolis Vingis",
+     "district": "Vilkpėdė",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "countrycode": "LT",
+     "extent": [
+      25.2342276,
+      54.6756781,
+      25.240263,
+      54.6721786
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2369767,
+      54.6739954
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 56976936,
+     "osm_key": "amenity",
+     "osm_value": "parking",
+     "type": "house",
+     "name": "Akropolis",
+     "street": "Tilžės g.",
+     "locality": "Senieji Dainai",
+     "district": "Lieporiai",
+     "city": "Šiauliai",
+     "county": "Šiaulių miesto savivaldybė",
+     "state": "Šiaulių apskritis",
+     "country": "Lietuva",
+     "postcode": "78321",
+     "countrycode": "LT",
+     "extent": [
+      23.2608019,
+      55.9075656,
+      23.2628447,
+      55.9065615
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.2618301,
+      55.9070767
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 5097813,
+     "osm_key": "shop",
+     "osm_value": "mall",
+     "type": "house",
+     "housenumber": "25",
+     "name": "PLC „Akropolis“",
+     "street": "Ozo g.",
+     "locality": "Šeškinė",
+     "district": "Šeškinės seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01402",
+     "countrycode": "LT",
+     "extent": [
+      25.2591714,
+      54.7122115,
+      25.2666314,
+      54.7088199
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2631365,
+      54.7105139
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 28161836,
+     "osm_key": "shop",
+     "osm_value": "mall",
+     "type": "house",
+     "housenumber": "49",
+     "name": "PLC „Akropolis“",
+     "street": "Karaliaus Mindaugo pr.",
+     "locality": "Karmelitai",
+     "district": "Centro seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "44330",
+     "countrycode": "LT",
+     "extent": [
+      23.9171631,
+      54.8928551,
+      23.9206868,
+      54.8901783
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9194883,
+      54.8914648
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 679520006,
+     "osm_key": "amenity",
+     "osm_value": "cinema",
+     "type": "house",
+     "housenumber": "25",
+     "name": "Apollo Kinas Akropolis",
+     "street": "Ozo g.",
+     "locality": "Šeškinė",
+     "district": "Šeškinės seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "07150",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2624603,
+      54.7100952
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 3266885270,
+     "osm_key": "amenity",
+     "osm_value": "pharmacy",
+     "type": "house",
+     "housenumber": "25",
+     "name": "Eurovaistinė",
+     "street": "Ozo g.",
+     "locality": "Šeškinė",
+     "district": "Šeškinės seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "07150",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2610778,
+      54.7101673
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 87973905,
+     "osm_key": "shop",
+     "osm_value": "mall",
+     "type": "house",
+     "housenumber": "61",
+     "name": "PLC „Akropolis“",
+     "street": "Taikos pr.",
+     "locality": "Arena",
+     "district": "Rumpiškė",
+     "city": "Klaipėda",
+     "county": "Klaipėdos miesto savivaldybė",
+     "state": "Klaipėdos apskritis",
+     "country": "Lietuva",
+     "postcode": "91182",
+     "countrycode": "LT",
+     "extent": [
+      21.1537894,
+      55.6946296,
+      21.1592393,
+      55.6907983
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.1565701,
+      55.6928318
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 10815589119,
+     "osm_key": "amenity",
+     "osm_value": "parcel_locker",
+     "type": "house",
+     "housenumber": "49",
+     "name": "Omniva PC AKROPOLIS",
+     "street": "Karaliaus Mindaugo pr.",
+     "locality": "Karmelitai",
+     "district": "Centro seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "44330",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9182479,
+      54.8917915
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 56976932,
+     "osm_key": "shop",
+     "osm_value": "mall",
+     "type": "house",
+     "housenumber": "8",
+     "name": "PLC „Akropolis“",
+     "street": "Aido g.",
+     "locality": "Senieji Dainai",
+     "district": "Dainai",
+     "city": "Šiauliai",
+     "county": "Šiaulių miesto savivaldybė",
+     "state": "Šiaulių apskritis",
+     "country": "Lietuva",
+     "postcode": "78322",
+     "countrycode": "LT",
+     "extent": [
+      23.2590979,
+      55.9085815,
+      23.2624854,
+      55.9066955
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.2607916,
+      55.9076385
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 10127869409,
+     "osm_key": "amenity",
+     "osm_value": "parcel_locker",
+     "type": "house",
+     "name": "PC Akropolis Venipak paštomatas",
+     "street": "Tilžės g.",
+     "locality": "Senieji Dainai",
+     "district": "Lieporiai",
+     "city": "Šiauliai",
+     "county": "Šiaulių miesto savivaldybė",
+     "state": "Šiaulių apskritis",
+     "country": "Lietuva",
+     "postcode": "78321",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.262406,
+      55.9075122
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 930867323,
+     "osm_key": "place",
+     "osm_value": "village",
+     "type": "city",
+     "name": "Aktapolis",
+     "county": "Luokesos seniūnija",
+     "state": "Utenos apskritis",
+     "country": "Lietuva",
+     "postcode": "33150",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.3498031,
+      55.2351223
+     ]
+    }
+   }
+  ]
+ }
+}

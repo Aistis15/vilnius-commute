@@ -8,7 +8,10 @@ app would download it and route people wrongly.
 The checks are deliberately about *meaning*, not just structure. The one that
 matters most is `night_service`: if after-midnight times were parsed as a wall
 clock they would wrap to early morning, the database would still look
-perfectly well-formed, and the entire night network would be gone.
+perfectly well-formed, and the entire night network would be gone. The second
+is that every city is present and self-contained: a merge that shifted one
+feed's ids by a single row would also look well-formed, and would route Kaunas
+buses through Vilnius stops.
 
 Usage: verify_db.py <db.sqlite>
 Exits non-zero, listing every failure, if anything is wrong.
@@ -16,23 +19,40 @@ Exits non-zero, listing every failure, if anything is wrong.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
 
 KNOWN_CATEGORIES = {"bus", "expressBus", "nightBus", "trolleybus", "ferry", "other"}
 
-# Floors, not exact counts: the feed changes daily and the point is to catch a
-# collapse (a parse that dropped most rows), not to pin today's numbers.
+# Floors, not exact counts: the feeds change daily and the point is to catch a
+# collapse (a parse that dropped most rows), not to pin today's numbers. These
+# are for all five cities together, roughly 60% of the 2026-09-26 build.
 MINIMUMS = {
-    "stop": 1_000,
-    "route": 80,
-    "pattern": 400,
-    "trip": 15_000,
-    "trip_time": 300_000,
-    "service": 50,
-    "transfer": 1_000,
+    "stop": 2_500,
+    "route": 190,
+    "pattern": 850,
+    "trip": 25_000,
+    "trip_time": 550_000,
+    "service": 150,
+    "transfer": 5_000,
 }
+
+# route_id / gtfs_id prefix -> (stop.city, min stops, min routes, min trips).
+# Same ~60% rule per city, so one feed collapsing cannot hide behind the others.
+# Measured 2026-09-26: Vilnius 1 548/115/20 846, Kaunas 966/69/7 191,
+# Klaipėda 928/69/7 049, Šiauliai 471/44/2 871, Panevėžys 252/21/1 757.
+CITIES = {
+    "vilnius": ("Vilnius", 1_000, 80, 15_000),
+    "kaunas": ("Kaunas", 600, 40, 4_300),
+    "klaipeda": ("Klaipėda", 550, 40, 4_200),
+    "siauliai": ("Šiauliai", 280, 25, 1_700),
+    "panevezys": ("Panevėžys", 150, 12, 1_000),
+}
+
+# The city a route belongs to, from its id: `kaunas_bus_3` -> `kaunas`.
+ROUTE_CITY = "substr(r.gtfs_id, 1, instr(r.gtfs_id, '_') - 1)"
 
 
 def check(db: sqlite3.Connection) -> list[str]:
@@ -57,10 +77,10 @@ def check(db: sqlite3.Connection) -> list[str]:
         problems.append("meta.schema_version is missing")
 
     # --- the night network --------------------------------------------------
-    # GTFS expresses after-midnight service as hours >= 24. The feed reaches
-    # 30:11:00. If the maximum sits at or below 86400 the times were wrapped
-    # and every night trip now claims to run in the early morning of the wrong
-    # service day.
+    # GTFS expresses after-midnight service as hours >= 24. The Vilnius feed
+    # reaches 30:11:00. If the maximum sits at or below 86400 the times were
+    # wrapped and every night trip now claims to run in the early morning of
+    # the wrong service day.
     max_departure = one("SELECT max(departure) FROM trip_time")
     if max_departure <= 86_400:
         problems.append(
@@ -101,6 +121,9 @@ def check(db: sqlite3.Connection) -> list[str]:
     if uncoloured:
         problems.append(f"{uncoloured} routes have no colour at all")
 
+    # --- cities ---------------------------------------------------------------
+    problems += check_cities(db)
+
     # --- referential integrity ---------------------------------------------
     orphans = [
         ("pattern.route_id", "SELECT count(*) FROM pattern p LEFT JOIN route r ON r.id=p.route_id WHERE r.id IS NULL"),
@@ -110,11 +133,19 @@ def check(db: sqlite3.Connection) -> list[str]:
         ("trip.service_id", "SELECT count(*) FROM trip t LEFT JOIN service s ON s.id=t.service_id WHERE s.id IS NULL"),
         ("trip_time.trip_id", "SELECT count(*) FROM trip_time tt LEFT JOIN trip t ON t.id=tt.trip_id WHERE t.id IS NULL"),
         ("transfer.from_stop", "SELECT count(*) FROM transfer x LEFT JOIN stop s ON s.id=x.from_stop WHERE s.id IS NULL"),
+        ("transfer.to_stop", "SELECT count(*) FROM transfer x LEFT JOIN stop s ON s.id=x.to_stop WHERE s.id IS NULL"),
     ]
     for label, sql in orphans:
         count = one(sql)
         if count:
             problems.append(f"{count} orphan rows in {label}")
+
+    # The app indexes arrays by these ids (TimetableLoader.swift), so a gap
+    # would shift every row after it.
+    for table in ("stop", "service"):
+        count, low, high = db.execute(f"SELECT count(*), min(id), max(id) FROM {table}").fetchone()
+        if count and (low != 0 or high != count - 1):
+            problems.append(f"{table} ids are not dense 0..{count - 1} (min {low}, max {high})")
 
     # --- routing invariants -------------------------------------------------
     short_patterns = one("SELECT count(*) FROM pattern WHERE num_stops < 2")
@@ -161,10 +192,101 @@ def check(db: sqlite3.Connection) -> list[str]:
     if self_transfer:
         problems.append(f"{self_transfer} transfers go from a stop to itself")
 
+    # A walk longer than the build's own limit means the grid or the distance
+    # maths broke, and could join stops in different cities.
+    limit = db.execute("SELECT value FROM meta WHERE key='max_transfer_m'").fetchone()
+    if limit:
+        too_far = one("SELECT count(*) FROM transfer WHERE meters > ?", int(limit[0]))
+        if too_far:
+            problems.append(f"{too_far} transfers are longer than max_transfer_m ({limit[0]} m)")
+
+    return problems
+
+
+def check_cities(db: sqlite3.Connection) -> list[str]:
+    """Every city present, big enough, labelled, and not tangled with another."""
+    problems: list[str] = []
+    one = lambda sql, *a: db.execute(sql, a).fetchone()[0]
+
+    columns = {row[1] for row in db.execute("PRAGMA table_info(stop)")}
+    if "city" not in columns:
+        return ["stop.city column is missing: built by a pre-merge build_db.py?"]
+
+    unlabelled = one("SELECT count(*) FROM stop WHERE city IS NULL OR trim(city) = ''")
+    if unlabelled:
+        problems.append(f"{unlabelled} stops have no city")
+
+    names = {name for name, *_ in CITIES.values()}
+    for (city, count) in db.execute("SELECT city, count(*) FROM stop GROUP BY city"):
+        if city and city not in names:
+            problems.append(f"{count} stops belong to an unknown city {city!r}")
+
+    stops = dict(db.execute("SELECT city, count(*) FROM stop GROUP BY city").fetchall())
+    routes = dict(db.execute(f"SELECT {ROUTE_CITY}, count(*) FROM route r GROUP BY 1").fetchall())
+    trips = dict(db.execute(f"""
+        SELECT {ROUTE_CITY}, count(*) FROM trip t
+        JOIN pattern p ON p.id = t.pattern_id
+        JOIN route r ON r.id = p.route_id
+        GROUP BY 1
+    """).fetchall())
+    for slug, (name, min_stops, min_routes, min_trips) in CITIES.items():
+        for label, have, floor in (("stops", stops.get(name, 0), min_stops),
+                                   ("routes", routes.get(slug, 0), min_routes),
+                                   ("trips", trips.get(slug, 0), min_trips)):
+            if have < floor:
+                problems.append(f"{name}: only {have:,} {label}, expected at least {floor:,}")
+
+    unknown_routes = set(routes) - set(CITIES)
+    if unknown_routes:
+        problems.append(f"routes from unknown cities: {sorted(unknown_routes)}")
+
+    # A pattern must stay inside its own feed. If one feed's stop ids were
+    # offset during the merge, its buses would visit another city's stops.
+    case = " ".join(f"WHEN '{slug}' THEN '{name}'" for slug, (name, *_) in CITIES.items())
+    tangled = one(f"""
+        SELECT count(DISTINCT p.id) FROM pattern p
+        JOIN route r ON r.id = p.route_id
+        JOIN pattern_stop ps ON ps.pattern_id = p.id
+        JOIN stop s ON s.id = ps.stop_id
+        WHERE s.city != CASE {ROUTE_CITY} {case} END
+    """)
+    if tangled:
+        problems.append(f"{tangled} patterns visit stops of a different city than their route")
+
+    # Stop ids are namespaced by feed; the namespace must agree with the label.
+    slug_case = " ".join(f"WHEN '{name}' THEN '{slug}:'" for slug, (name, *_) in CITIES.items())
+    mislabelled = one(f"""
+        SELECT count(*) FROM stop
+        WHERE substr(gtfs_id, 1, length(CASE city {slug_case} END)) != CASE city {slug_case} END
+    """)
+    if mislabelled:
+        problems.append(f"{mislabelled} stops have a gtfs_id namespace that disagrees with their city")
+
+    # meta.cities is what the manifest and the app read; it must match the rows.
+    raw = db.execute("SELECT value FROM meta WHERE key='cities'").fetchone()
+    if raw is None:
+        problems.append("meta.cities is missing")
+    else:
+        try:
+            listed = {c["name"]: c for c in json.loads(raw[0])}
+        except (ValueError, TypeError, KeyError) as error:
+            problems.append(f"meta.cities is not a list of cities: {error}")
+        else:
+            if set(listed) != set(stops):
+                problems.append(f"meta.cities lists {sorted(listed)}, stops have {sorted(stops)}")
+            for name, entry in listed.items():
+                if entry.get("stops") != stops.get(name):
+                    problems.append(f"meta.cities says {name} has {entry.get('stops')} stops, "
+                                    f"the stop table has {stops.get(name)}")
     return problems
 
 
 def main() -> None:
+    # City names need UTF-8; a Windows pipe would otherwise encode cp1252 and
+    # crash on 'Klaipėda'.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")
+
     if len(sys.argv) != 2:
         raise SystemExit("usage: verify_db.py <db.sqlite>")
 
@@ -179,11 +301,17 @@ def main() -> None:
             " (SELECT count(*) FROM pattern), (SELECT count(*) FROM trip),"
             " (SELECT max(departure) FROM trip_time)"
         ).fetchone()
+        has_city = any(row[1] == "city" for row in db.execute("PRAGMA table_info(stop)"))
+        per_city = db.execute(
+            "SELECT city, count(*) FROM stop GROUP BY city ORDER BY min(id)"
+        ).fetchall() if has_city else []
 
     stops, routes, patterns, trips, max_departure = summary
     print(f"{path.name}: {stops:,} stops, {routes} routes, {patterns} patterns, "
           f"{trips:,} trips, latest departure "
           f"{max_departure // 3600:02d}:{(max_departure % 3600) // 60:02d}")
+    if per_city:
+        print("stops by city: " + ", ".join(f"{city} {count:,}" for city, count in per_city))
 
     if problems:
         print(f"\nFAILED — {len(problems)} problem(s):", file=sys.stderr)

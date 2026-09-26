@@ -1,0 +1,321 @@
+{
+ "query": "ISM",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=ISM&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-26",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 24569625,
+     "osm_key": "building",
+     "osm_value": "university",
+     "type": "house",
+     "housenumber": "7",
+     "name": "ISM Vadybos ir ekonomikos universitetas",
+     "street": "Gedimino pr.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01103",
+     "countrycode": "LT",
+     "extent": [
+      25.2821818,
+      54.6872256,
+      25.2833402,
+      54.6866613
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2827027,
+      54.6868825
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 420780231,
+     "osm_key": "place",
+     "osm_value": "village",
+     "type": "city",
+     "name": "Ismonys",
+     "county": "Rūdiškių seniūnija",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "21109",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.7332234,
+      54.57026
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 711227996,
+     "osm_key": "highway",
+     "osm_value": "residential",
+     "type": "street",
+     "name": "Ismonių g.",
+     "locality": "Kalvų terasos",
+     "district": "Panerių seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "25128",
+     "countrycode": "LT",
+     "extent": [
+      25.0831643,
+      54.6419237,
+      25.0872932,
+      54.6417972
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.0852281,
+      54.6418371
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 35958472,
+     "osm_key": "highway",
+     "osm_value": "secondary",
+     "type": "street",
+     "name": "Ismonių g.",
+     "district": "Ulkiškės",
+     "city": "Rūdiškės",
+     "county": "Rūdiškių seniūnija",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "21172",
+     "countrycode": "LT",
+     "extent": [
+      24.8141121,
+      54.52345,
+      24.8266104,
+      54.5157732
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.8211144,
+      54.5208136
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 124871111,
+     "osm_key": "water",
+     "osm_value": "lake",
+     "type": "other",
+     "name": "Ismonių ež.",
+     "city": "Ismonys",
+     "county": "Rūdiškių seniūnija",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "countrycode": "LT",
+     "extent": [
+      24.7352792,
+      54.5677826,
+      24.7403674,
+      54.5657074
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.7376234,
+      54.5667423
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 3805446047,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Ismonys",
+     "street": "Bartų g.",
+     "city": "Aleksandriškės",
+     "county": "Rūdiškių seniūnija",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "21109",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.745832,
+      54.5666222
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 12598589711,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Ismonių mokykla",
+     "street": "Bartų g.",
+     "city": "Ismonys",
+     "county": "Rūdiškių seniūnija",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "21109",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.7364742,
+      54.570555
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 6918748569,
+     "osm_key": "tourism",
+     "osm_value": "artwork",
+     "type": "house",
+     "housenumber": "4",
+     "name": "Išminčius",
+     "street": "Gaono g.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01131",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2866904,
+      54.6809804
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 14160310993,
+     "osm_key": "craft",
+     "osm_value": "electronics_repair",
+     "type": "house",
+     "housenumber": "1",
+     "name": "Išmani taisykla",
+     "street": "S. Konarskio g.",
+     "locality": "Naujamiestis",
+     "district": "Naujamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "03103",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2575169,
+      54.6793687
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 2518321280,
+     "osm_key": "place",
+     "osm_value": "village",
+     "type": "city",
+     "name": "Išmanai",
+     "county": "Balbieriškio seniūnija",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "59235",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9130115,
+      54.5679398
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 872313764,
+     "osm_key": "highway",
+     "osm_value": "proposed",
+     "type": "house",
+     "name": "Išminties al.",
+     "street": "Smiltynų kel.",
+     "city": "Šatijai",
+     "county": "Lapių seniūnija",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "54346",
+     "countrycode": "LT",
+     "extent": [
+      23.9681387,
+      54.9989926,
+      23.9721825,
+      54.9987955
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.9701606,
+      54.9988941
+     ]
+    }
+   }
+  ]
+ }
+}

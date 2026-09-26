@@ -1,13 +1,14 @@
 name: GTFS data
 
-# The Vilnius feed's licence requires keeping the data current, and parsing a
-# 3.7 MB zip into 34 MB of CSV on an iPhone every launch would be wasteful. So
-# the database is built here, daily, and published as a release asset the app
-# downloads when the digest changes.
+# The feeds' licence requires keeping the data current, and parsing ~7.5 MB of
+# zipped GTFS into ~70 MB of CSV on an iPhone every launch would be wasteful.
+# So the database is built here, daily, from all five stops.lt cities merged
+# into one file, and published as a release asset the app downloads when the
+# digest changes.
 
 on:
   schedule:
-    # 03:20 UTC. The feed's Last-Modified has been in the evening (Vilnius
+    # 03:20 UTC. The feeds' Last-Modified has been in the evening (Vilnius
     # time), so this picks up the previous day's publication without racing it.
     - cron: "20 3 * * *"
   workflow_dispatch:
@@ -31,13 +32,16 @@ permissions:
   contents: write        # needed to create/update the release
 
 env:
-  FEED_URL: https://www.stops.lt/vilnius/vilnius/gtfs.zip
+  # stops.lt serves every city's feed at /<city>/<city>/gtfs.zip. The order
+  # here is the order of the merged ids, and of the combined digest below.
+  CITIES: vilnius kaunas klaipeda siauliai panevezys
+  FEED_BASE: https://www.stops.lt
   RELEASE_TAG: data-latest
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v5
@@ -46,16 +50,25 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download the feed
+      - name: Download the feeds
         run: |
           mkdir -p build
-          curl -sSL --fail --max-time 300 -o build/gtfs.zip "${FEED_URL}" -D build/headers.txt
-          echo "--- server said ---"
-          grep -iE '^HTTP|^last-modified|^content-length' build/headers.txt | tr -d '\r'
-          echo "FEED_SHA=$(sha256sum build/gtfs.zip | cut -c1-16)" >> "$GITHUB_ENV"
-          echo "bytes: $(stat -c%s build/gtfs.zip)"
+          for city in ${CITIES}; do
+            curl -sSL --fail --retry 3 --retry-delay 10 --max-time 300 \
+              -o "build/${city}.zip" "${FEED_BASE}/${city}/${city}/gtfs.zip" \
+              -D "build/${city}.headers"
+            echo "--- ${city}: server said ---"
+            grep -iE '^HTTP|^last-modified|^content-length' "build/${city}.headers" | tr -d '\r'
+            echo "bytes: $(stat -c%s "build/${city}.zip")"
+          done
+          # One digest over every feed, so a change in any city rebuilds.
+          # build_db.py writes the identical value to meta.feed_digest.
+          digest=$(for city in ${CITIES}; do
+                     echo "${city} $(sha256sum "build/${city}.zip" | cut -d' ' -f1)"
+                   done | sha256sum | cut -c1-16)
+          echo "FEED_SHA=${digest}" >> "$GITHUB_ENV"
 
-      - name: Has the feed actually changed?
+      - name: Have the feeds actually changed?
         id: changed
         run: |
           published=$(gh release view "${RELEASE_TAG}" --json body -q .body 2>/dev/null \
@@ -73,7 +86,12 @@ jobs:
 
       - name: Build the database
         if: steps.changed.outputs.skip != 'true'
-        run: python Tools/gtfs/build_db.py build/gtfs.zip build/vilnius.sqlite
+        run: |
+          feeds=()
+          for city in ${CITIES}; do
+            feeds+=(--feed "${city}=build/${city}.zip")
+          done
+          python Tools/gtfs/build_db.py "${feeds[@]}" build/vilnius.sqlite
 
       # A daily job that silently publishes a broken database is worse than one
       # that fails: the app would download it and route people wrongly.
@@ -105,6 +123,7 @@ jobs:
               "stops": int(meta["stops"]),
               "patterns": int(meta["patterns"]),
               "trips": int(meta["trips"]),
+              "cities": json.loads(meta["cities"]),
           }, indent=2))
           PY
           cat build/manifest.json
@@ -114,8 +133,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes=$(printf 'Built from the live Vilnius GTFS feed.\n\nfeed_digest: %s\n\n```json\n%s\n```\n' \
-                    "${FEED_SHA}" "$(cat build/manifest.json)")
+          notes=$(printf 'Built from the live stops.lt GTFS feeds: %s.\n\nfeed_digest: %s\n\n```json\n%s\n```\n' \
+                    "${CITIES}" "${FEED_SHA}" "$(cat build/manifest.json)")
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release edit "${RELEASE_TAG}" --notes "${notes}"
           else
@@ -132,7 +151,7 @@ jobs:
           {
             echo "### GTFS data"
             if [ "${{ steps.changed.outputs.skip }}" = "true" ]; then
-              echo "Feed unchanged (\`${FEED_SHA}\`) — nothing published."
+              echo "Feeds unchanged (\`${FEED_SHA}\`) — nothing published."
             else
               echo '```json'
               cat build/manifest.json 2>/dev/null || echo "(build did not complete)"

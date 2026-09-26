@@ -1,0 +1,332 @@
+{
+ "query": "OZAS",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=OZAS&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-26",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 12008087503,
+     "osm_key": "place",
+     "osm_value": "quarter",
+     "type": "locality",
+     "name": "Ozas",
+     "district": "Verkių seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "08247",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2804878,
+      54.7204083
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 4610263753,
+     "osm_key": "amenity",
+     "osm_value": "food_court",
+     "type": "house",
+     "housenumber": "18",
+     "name": "Ozas food court",
+     "street": "Ozo g.",
+     "locality": "Ozas",
+     "district": "Verkių seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "08243",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2753317,
+      54.7147277
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 2073668916,
+     "osm_key": "place",
+     "osm_value": "isolated_dwelling",
+     "type": "locality",
+     "name": "Ogas",
+     "city": "Bebrenes pagasts",
+     "country": "Latvija",
+     "postcode": "LV-5439",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      26.0629699,
+      56.0305466
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 2073668919,
+     "osm_key": "place",
+     "osm_value": "isolated_dwelling",
+     "type": "locality",
+     "name": "Ogas",
+     "city": "Zasas pagasts",
+     "country": "Latvija",
+     "postcode": "LV-5239",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      26.0501064,
+      56.3117808
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 2073668922,
+     "osm_key": "place",
+     "osm_value": "isolated_dwelling",
+     "type": "locality",
+     "name": "Ogas",
+     "district": "Mucenieki",
+     "city": "Ceraukstes pagasts",
+     "country": "Latvija",
+     "postcode": "LV-3908",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.2797614,
+      56.3324633
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 2073668924,
+     "osm_key": "place",
+     "osm_value": "isolated_dwelling",
+     "type": "locality",
+     "name": "Ogas",
+     "city": "Vadakstes pagasts",
+     "country": "Latvija",
+     "postcode": "LV-3895",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      22.7574817,
+      56.3818625
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 2073668927,
+     "osm_key": "place",
+     "osm_value": "isolated_dwelling",
+     "type": "locality",
+     "name": "Ogas",
+     "district": "Pērkone",
+     "city": "Pērkone",
+     "country": "Latvija",
+     "postcode": "LV-3473",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      20.9971662,
+      56.4237396
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 9884901920,
+     "osm_key": "place",
+     "osm_value": "house",
+     "type": "house",
+     "name": "Ogas",
+     "street": "Līksna - Kalupe - Upmale - Rožupe",
+     "district": "Baltakrogs",
+     "city": "Aizupieši",
+     "country": "Latvija",
+     "postcode": "LV-5450",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      26.536561,
+      56.0790169
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 1343853531,
+     "osm_key": "building",
+     "osm_value": "yes",
+     "type": "house",
+     "name": "Ogas",
+     "street": "Viroveika–Juriši",
+     "district": "Zabornaja",
+     "city": "Daniševka",
+     "country": "Latvija",
+     "postcode": "LV-5481",
+     "countrycode": "LV",
+     "extent": [
+      26.7938673,
+      56.0767685,
+      26.7940642,
+      56.0766684
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      26.7939658,
+      56.0767145
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 9887114622,
+     "osm_key": "place",
+     "osm_value": "house",
+     "type": "house",
+     "name": "Ogas",
+     "street": "Zasa — Vandāni",
+     "district": "Zasa",
+     "city": "Zasas pagasts",
+     "country": "Latvija",
+     "postcode": "LV-5239",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      26.0495163,
+      56.3120356
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 9980493279,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Ogas",
+     "street": "Zasa — Vandāni",
+     "district": "Zasa",
+     "city": "Zasas pagasts",
+     "country": "Latvija",
+     "postcode": "LV-5239",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      26.0480409,
+      56.3126607
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 9887969864,
+     "osm_key": "place",
+     "osm_value": "house",
+     "type": "house",
+     "name": "Ogas",
+     "district": "Mazie Pupoji",
+     "city": "Lielie Pupāji",
+     "country": "Latvija",
+     "postcode": "LV-5301",
+     "countrycode": "LV"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      26.63021,
+      56.3190804
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 901956159,
+     "osm_key": "building",
+     "osm_value": "yes",
+     "type": "house",
+     "name": "Olas",
+     "street": "Nīca — Otaņķi — Grobiņa",
+     "district": "Otaņķi",
+     "city": "Otaņķi",
+     "country": "Latvija",
+     "postcode": "LV-3474",
+     "countrycode": "LV",
+     "extent": [
+      21.1042227,
+      56.4227833,
+      21.1044072,
+      56.4226457
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      21.1043163,
+      56.4227133
+     ]
+    }
+   }
+  ]
+ }
+}

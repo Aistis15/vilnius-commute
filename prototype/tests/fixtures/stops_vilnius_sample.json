@@ -1,0 +1,125 @@
+{
+ "source": "prototype/.data/vilnius.sqlite (Vilnius timetable, built 2026-09-26T08:41:00+00:00), table stop, a sample by name",
+ "stops": [
+  {
+   "name": "Vilniaus universitetas",
+   "lat": 54.72454,
+   "lon": 25.33199
+  },
+  {
+   "name": "Vilniaus universitetas",
+   "lat": 54.72489,
+   "lon": 25.33134
+  },
+  {
+   "name": "Mykolo Romerio universitetas",
+   "lat": 54.73517,
+   "lon": 25.25795
+  },
+  {
+   "name": "Mykolo Romerio universitetas",
+   "lat": 54.73531,
+   "lon": 25.25976
+  },
+  {
+   "name": "Gedimino technikos universitetas",
+   "lat": 54.72385,
+   "lon": 25.33566
+  },
+  {
+   "name": "Gedimino technikos universitetas",
+   "lat": 54.72412,
+   "lon": 25.33451
+  },
+  {
+   "name": "Vismaliukai",
+   "lat": 54.75228,
+   "lon": 25.41632
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67106,
+   "lon": 25.28399
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67085,
+   "lon": 25.28336
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67108,
+   "lon": 25.2842
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67025,
+   "lon": 25.28349
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67077,
+   "lon": 25.28326
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67071,
+   "lon": 25.2849
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.6711,
+   "lon": 25.28443
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67115,
+   "lon": 25.28328
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67147,
+   "lon": 25.28327
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.6714,
+   "lon": 25.283
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67066,
+   "lon": 25.28313
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67115,
+   "lon": 25.28513
+  },
+  {
+   "name": "Stotis",
+   "lat": 54.67191,
+   "lon": 25.28338
+  },
+  {
+   "name": "Žaliasis tiltas",
+   "lat": 54.69234,
+   "lon": 25.28003
+  },
+  {
+   "name": "Žaliasis tiltas",
+   "lat": 54.69236,
+   "lon": 25.28048
+  },
+  {
+   "name": "Žaliasis tiltas",
+   "lat": 54.69118,
+   "lon": 25.27932
+  },
+  {
+   "name": "Žaliasis tiltas",
+   "lat": 54.69303,
+   "lon": 25.28092
+  }
+ ]
+}

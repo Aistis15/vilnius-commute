@@ -3,7 +3,12 @@
 Two sources, merged:
 - the timetable's own stop names, instantly and offline;
 - Photon, a free OpenStreetMap geocoder, for addresses and places anywhere in
-  Lithuania. No key needed. Biased to Vilnius but not limited to it.
+  Lithuania. No key needed. Biased to where you are (Vilnius by default).
+
+Ranking is about not lying. "ISM universitetas" must never become Vilniaus
+universitetas because both are universities: only "ISM" tells them apart, so a
+name without it ranks below every name with it, and every result says how
+sure we are ("confidence") so the app can ask instead of guessing.
 """
 
 from __future__ import annotations
@@ -23,6 +28,9 @@ PHOTON = "https://photon.komoot.io/api/?"
 # Lithuania, as min lon, min lat, max lon, max lat. Without it "Akropolis"
 # returns Athens and Šiauliai before the mall on Ozo g.
 LITHUANIA_BBOX = "20.9,53.89,26.84,56.45"
+# Within this of the origin counts as "here": a city and its suburbs, not the
+# next city (Kaunas is about 90 km from Vilnius).
+LOCAL_KM = 25
 
 # What people travel to, versus what merely shares the name.
 IMPORTANT = {
@@ -30,78 +38,342 @@ IMPORTANT = {
     "station", "stadium", "sports_centre", "cinema", "theatre", "marketplace",
     "museum", "attraction", "library", "townhall", "supermarket", "office",
     "arts_centre", "church", "cathedral", "park", "airport", "aerodrome",
+    "bus_station", "train_station",
 }
 INCIDENTAL = {
     "construction", "parking", "parking_space", "parcel_locker", "atm",
     "vending_machine", "bench", "waste_basket", "bicycle_parking", "isolated_dwelling",
-    "post_box", "telephone", "charging_station", "toilets",
+    "post_box", "telephone", "charging_station", "toilets", "industrial", "railway",
 }
+# OSM's own copy of a stop: dropped when the timetable has the same stop.
+TRANSIT_STOPS = {"bus_stop", "platform", "stop_position", "tram_stop", "stop"}
 KINDS = {"mall": "Prekybos centras", "university": "Universitetas", "college": "Kolegija",
          "school": "Mokykla", "hospital": "Ligoninė", "station": "Stotis", "cinema": "Kinas",
          "stadium": "Stadionas", "museum": "Muziejus", "supermarket": "Parduotuvė"}
 
+# Words that say what kind of place it is, not which one. Matched in any case
+# ("universitetą", "stoties"), so only the base form is listed.
+GENERIC = [fold(w) for w in """
+    universitetas akademija kolegija mokykla gimnazija progimnazija licėjus darželis fakultetas
+    gatvė g prospektas pr alėja al aikštė a plentas pl skersgatvis skg kelias tiltas
+    prekybos centras plc pc tc ppc parduotuvė turgus parkas
+    stotelė stotis ligoninė poliklinika klinika
+    ir
+""".split()]
+
+# How well one query word is covered. A name word counts for more than the
+# city or street the place is in.
+EXACT, STEM, INITIALS, CONTEXT, PREFIX = 1.0, 0.9, 0.85, 0.6, 0.5
+TIERS = {"full": 3, "partial": 2, "generic": 1, "none": 0}
+CLOSE = 0.15     # scores this near are a coin toss
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[^\W_]+", fold(text or ""))
+
+
+def _same_word(a: str, b: str) -> bool:
+    """Equal, or the same word in another case: of two words of five letters
+    or more, only the last two letters of the longer may differ (Akropolį and
+    Akropolis, Kauno and Kaunas, universitetą and universitetas)."""
+    if a == b:
+        return True
+    if len(a) < 5 or len(b) < 5:
+        return False
+    common = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        common += 1
+    return common >= max(len(a), len(b)) - 2
+
+
+def is_generic(word: str) -> bool:
+    return any(_same_word(word, g) for g in GENERIC)
+
+
+def _genitive(word: str) -> str:
+    """Vilnius -> Vilniaus, Kaunas -> Kauno, Klaipėda -> Klaipėdos, Šiauliai ->
+    Šiaulių, Panevėžys -> Panevėžio: "Kauno Akropolis" names the city that way."""
+    for ending, genitive in (("ius", "iaus"), ("iai", "iu"), ("ys", "io"), ("is", "io"),
+                             ("as", "o"), ("us", "aus"), ("a", "os"), ("e", "es")):
+        if word.endswith(ending):
+            return word[: -len(ending)] + genitive
+    return word
+
+
+def query_terms(query: str) -> tuple[list[str], list[str]]:
+    """(distinctive, generic) words of a query. Letters spelled one by one
+    ("k t u") count as the abbreviation they spell; any other lone letter
+    ("į", "g") says nothing about which place."""
+    distinctive, generic, letters = [], [], []
+
+    def flush():
+        if len(letters) > 1:
+            distinctive.append("".join(letters))
+        letters.clear()
+
+    for word in _words(query):
+        if len(word) == 1 and word.isalpha():
+            letters.append(word)
+            continue
+        flush()
+        target = generic if is_generic(word) else distinctive
+        if word not in target:
+            target.append(word)
+    flush()
+    return distinctive, generic
+
+
+def _word_quality(word: str, name_words: list[str], initials: str, last: bool, caps: bool) -> float:
+    if word in name_words:
+        return EXACT
+    if any(_same_word(word, n) for n in name_words):
+        return STEM
+    # VU, KTU, VGTU: the first letters of consecutive words of the name.
+    if 2 <= len(word) <= 5 and word.isalpha() and word in initials:
+        return INITIALS
+    # Still being typed ("akrop"). Never for a capitalised abbreviation: ISM
+    # is not the start of Ismonys.
+    if last and not caps and len(word) >= 3 and any(n.startswith(word) for n in name_words):
+        return PREFIX
+    return 0.0
+
+
+def assess(query: str, candidate: dict) -> dict:
+    """How well a candidate's name covers the query.
+
+    Returns covered (distinctive words found in the name, city or street),
+    quality (their summed quality), generic (generic words found), match and
+    confidence. The city and street count ("Kauno Akropolis" is the Akropolis
+    in Kaunas) but only the name can make a match "full".
+    """
+    distinctive, generic = query_terms(query)
+    raw_words = re.findall(r"[^\W_]+", query or "")
+    caps_words = {fold(w) for w in raw_words if len(w) > 1 and w.isupper()}
+    name_words = _words(candidate["name"])
+    initials = "".join(w[0] for w in name_words if w != "ir")
+    context = []
+    for word in _words(candidate.get("city", "")):
+        context += [word, _genitive(word)]
+    context += _words(candidate.get("street", ""))
+
+    qualities = []
+    for i, word in enumerate(distinctive):
+        in_name = _word_quality(word, name_words, initials, i == len(distinctive) - 1, word in caps_words)
+        in_context = CONTEXT if any(_same_word(word, c) for c in context) else 0.0
+        qualities.append((in_name, in_context))
+
+    generic_hits = sum(1 for g in generic if any(_same_word(g, n) for n in name_words))
+    generic_share = generic_hits / len(generic) if generic else 0.0
+    exact_name = fold(candidate["name"]).strip() == fold(query or "").strip()
+
+    if distinctive:
+        best = [max(pair) for pair in qualities]
+        covered = sum(1 for q in best if q > 0)
+        quality = sum(best)
+        strong_in_name = sum(1 for n, _ in qualities if n >= INITIALS)
+        complete = all(n >= INITIALS or c > 0 for n, c in qualities)
+        if covered == len(distinctive) and complete and strong_in_name:
+            match = "full"
+        elif covered:
+            match = "partial"
+        else:
+            match = "none"
+        score = quality / len(distinctive)
+        if generic:
+            score = 0.85 * score + 0.15 * generic_share
+    else:
+        # Only generic words ("universitetas"): every university fits equally.
+        covered, quality = 0, 0.0
+        match = "generic" if generic_hits or exact_name else "none"
+        score = 0.4 * generic_share + (0.1 if exact_name else 0.0)
+
+    if match == "full":
+        confidence = "high"
+    elif match == "partial" or (match == "generic" and exact_name):
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    distinct_name = [w for w in name_words if len(w) > 1 and not is_generic(w)]
+    matched = sum(1 for n in distinct_name if any(_same_word(n, d) or n.startswith(d) for d in distinctive))
+    precision = matched / len(distinct_name) if distinct_name else 0.0
+    return {"covered": covered, "quality": round(quality, 3), "generic": generic_hits,
+            "match": match, "confidence": confidence, "score": round(score, 3),
+            "precision": precision, "exact": exact_name}
+
+
+def rank(query: str, candidates: list[dict], origin: tuple[float, float] = VILNIUS) -> list[dict]:
+    """Order stops and places for a query. Pure: no network, no timetable.
+
+    Each candidate has kind, name, subtitle, lat, lon, and optionally city,
+    street, category (the OSM value) and, for stops, strength (0 exact name,
+    1 name starts with the query, 2 a word does, 3 the letters are merely
+    inside). Returns the public results, best first, each with a score (0..1,
+    higher is better), match ("full", "partial", "generic", "none") and
+    confidence ("high", "medium", "low").
+    """
+    looks_like_address = any(ch.isdigit() for ch in query)
+    strong_seen = 0
+    keyed = []
+    for index, item in enumerate(candidates):
+        a = assess(query, item)
+        distance = distance_km(item["lat"], item["lon"], origin)
+        # The order the merge used before ranking by match: a stop that
+        # matches from the start of a word beats a place of equal match, one
+        # that only contains the letters ("ism" in "Vismaliukai") does not.
+        if item["kind"] == "stop":
+            strong = item.get("strength", 3) <= 2
+            if looks_like_address:
+                group = 1 if strong else 2
+            elif strong:
+                group = 0 if strong_seen < 3 else 2
+                strong_seen += 1
+            else:
+                group = 3
+            local_score = 0.0
+        else:
+            group = 0 if looks_like_address else 1
+            local_score = _place_score(item, a, distance)
+        key = (-a["covered"], -a["quality"], -a["generic"], distance > LOCAL_KM, group, local_score, index)
+        keyed.append((key, item, a))
+    keyed.sort(key=lambda entry: entry[0])
+
+    out = []
+    for _, item, a in keyed:
+        result = {k: v for k, v in item.items() if k not in ("strength", "category")}
+        result.update(score=a["score"], match=a["match"], confidence=a["confidence"])
+        out.append(result)
+    return out
+
+
+def _place_score(item: dict, a: dict, distance: float) -> float:
+    """Among places that match equally well and are as near, lower is better."""
+    score = 0.0
+    kind = item.get("category", "")
+    if kind in IMPORTANT:
+        score -= 2
+    if kind in INCIDENTAL:
+        score += 3
+    if a["exact"]:
+        score -= 1
+    # "Akropolis" is the mall; "Apollo Kinas Akropolis" is something in it.
+    # Worth as much as being a mall: "Žaliasis tiltas" is the bridge, not the
+    # IKI Express named after it.
+    score -= 2 * a["precision"]
+    return score + distance / 50
+
+
+def is_ambiguous(results: list[dict]) -> bool:
+    """The two best are about as good and neither is what was asked for."""
+    if len(results) < 2:
+        return False
+    first, second = results[0], results[1]
+    if "full" in (first["match"], second["match"]):
+        return False
+    return abs(first["score"] - second["score"]) <= CLOSE
+
+
+def _where_stops_are(cities: list[str], lats: list[float], lons: list[float]) -> list[str]:
+    """The city a stop is in, not just the feed it came from.
+
+    A city's feed also has its intercity stops (Šiauliai's buses end at Vilnius
+    AS), and "Stotelė · Šiauliai" on a Vilnius stop would be a lie. Most of a
+    feed's stops lie in its city, so the feed's median point stands for the
+    city; a stop far from its own feed's city but near another's belongs there.
+    """
+    centres = {}
+    for city in set(cities):
+        points = [(lats[i], lons[i]) for i, c in enumerate(cities) if c == city]
+        centres[city] = (sorted(p[0] for p in points)[len(points) // 2],
+                         sorted(p[1] for p in points)[len(points) // 2])
+    if len(centres) < 2:
+        return cities
+    out = []
+    for city, lat, lon in zip(cities, lats, lons):
+        if distance_km(lat, lon, centres[city]) > LOCAL_KM:
+            nearest = min(centres, key=lambda c: distance_km(lat, lon, centres[c]))
+            if distance_km(lat, lon, centres[nearest]) <= LOCAL_KM:
+                city = nearest
+        out.append(city)
+    return out
+
 
 class StopIndex:
-    """Stops grouped by name: "Žaliasis tiltas" is one place to a person, even
-    though the timetable has a stop for each direction."""
+    """Stops grouped by name and city: "Žaliasis tiltas" is one place to a
+    person, even though the timetable has a stop for each direction, but a
+    "Stotis" in Kaunas is not the one in Vilnius."""
 
     def __init__(self, t: Timetable):
-        groups: dict[str, list[int]] = {}
+        cities = getattr(t, "stop_city", None)
+        if not cities or len(cities) != len(t.stop_names):
+            cities = ["Vilnius"] * len(t.stop_names)
+        cities = [c or "Vilnius" for c in cities]
+        cities = _where_stops_are(cities, t.stop_lat, t.stop_lon)
+        groups: dict[tuple[str, str], list[int]] = {}
         for stop, name in enumerate(t.stop_names):
-            groups.setdefault(name, []).append(stop)
+            groups.setdefault((name, cities[stop]), []).append(stop)
         self.entries = []
-        for name, ids in groups.items():
+        for (name, city), ids in groups.items():
             lat = sum(t.stop_lat[i] for i in ids) / len(ids)
             lon = sum(t.stop_lon[i] for i in ids) / len(ids)
-            self.entries.append((fold(name), name, lat, lon))
+            context = [w for word in _words(city) for w in (word, _genitive(word))]
+            self.entries.append((fold(name), name, city, lat, lon, context))
+        self.by_name: dict[str, list[tuple[float, float]]] = {}
+        for folded, _, _, lat, lon, _ in self.entries:
+            self.by_name.setdefault(folded, []).append((lat, lon))
 
-    def search(self, query: str, limit: int = 5) -> list[dict]:
-        """Stops whose name matches, each tagged with how well."""
+    def has_stop_near(self, name: str, lat: float, lon: float, km: float = 0.3) -> bool:
+        return any(distance_km(lat, lon, where) <= km for where in self.by_name.get(fold(name), []))
+
+    def search(self, query: str, limit: int = 5, origin: tuple[float, float] = VILNIUS) -> list[dict]:
+        """Stops whose name matches, each tagged with how strongly."""
         q = fold(query).strip()
         if len(q) < 2:
             return []
         words = q.split()
         scored = []
-        for folded, name, lat, lon in self.entries:
-            if all(word in folded for word in words):
-                if folded == q:
-                    score = 0
-                elif folded.startswith(q):
-                    score = 1
-                elif any(part.startswith(words[0]) for part in folded.split()):
-                    score = 2
-                else:
-                    score = 3
-                scored.append((score, len(folded), name, lat, lon))
+        for folded, name, city, lat, lon, context in self.entries:
+            in_name = [w for w in words if w in folded]
+            # "Kauno Akropolis": a word may name the stop's city instead.
+            rest = [w for w in words if w not in folded]
+            if not in_name or not all(any(_same_word(w, c) for c in context) for w in rest):
+                continue
+            named = " ".join(in_name)
+            if folded == named:
+                strength = 0
+            elif folded.startswith(named):
+                strength = 1
+            elif any(part.startswith(in_name[0]) for part in folded.split()):
+                strength = 2
+            else:
+                strength = 3
+            distance = distance_km(lat, lon, origin)
+            scored.append((strength, distance > LOCAL_KM, len(folded), distance, name, city, lat, lon))
         scored.sort()
         return [
-            {"kind": "stop", "name": name, "subtitle": "Stotelė", "lat": lat, "lon": lon, "score": score}
-            for score, _, name, lat, lon in scored[:limit]
+            {"kind": "stop", "name": name, "subtitle": f"Stotelė · {city}", "lat": lat, "lon": lon,
+             "city": city, "strength": strength}
+            for strength, _, _, _, name, city, lat, lon in scored[:limit]
         ]
 
 
-_cache: dict[str, list[dict]] = {}
+_cache: dict[tuple, list[dict]] = {}
 _lock = threading.Lock()
 
 
-def places(query: str, limit: int = 7) -> list[dict]:
-    key = fold(query).strip()
-    if len(key) < 2:
-        return []
-    with _lock:
-        if key in _cache:
-            return _cache[key]
-
+def _fetch_photon(query: str, origin: tuple[float, float]) -> dict:
     url = PHOTON + urllib.parse.urlencode(
-        {"q": query, "lat": VILNIUS[0], "lon": VILNIUS[1], "limit": 15, "bbox": LITHUANIA_BBOX}
+        {"q": query, "lat": origin[0], "lon": origin[1], "limit": 15, "bbox": LITHUANIA_BBOX}
     )
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=6) as response:
-            data = json.loads(response.read())
-    except Exception:  # noqa: BLE001 - offline or throttled: stops still work
-        return []
+    with urllib.request.urlopen(request, timeout=6) as response:
+        return json.loads(response.read())
 
+
+def photon_candidates(data: dict) -> list[dict]:
+    """Photon's GeoJSON as rank() candidates, in Photon's order."""
     found, seen = [], set()
     for feature in data.get("features", []):
         p = feature.get("properties", {})
@@ -124,46 +396,67 @@ def places(query: str, limit: int = 7) -> list[dict]:
         if identity in seen:
             continue
         seen.add(identity)
+        # Only a real city names the place: "Vilniaus apskritis" must not make
+        # every village around Vilnius match "Vilniaus universitetas".
+        found.append({"kind": "place", "name": name, "subtitle": subtitle, "lat": lat, "lon": lon,
+                      "city": p.get("city") or "", "street": street, "category": kind})
+    return found
 
-        score = 0.0
-        if fold(where) == "vilnius":
-            score -= 2
-        if kind in IMPORTANT:
-            score -= 2
-        if kind in INCIDENTAL:
-            score += 3
-        if fold(name) == key:
-            score -= 1
-        score += distance_km(lat, lon) / 50
-        found.append({"kind": "place", "name": name, "subtitle": subtitle, "lat": lat, "lon": lon, "score": score})
 
-    found.sort(key=lambda item: item["score"])   # stable: Photon's order breaks ties
-    found = found[:limit]
-
+def places(query: str, origin: tuple[float, float] = VILNIUS) -> list[dict]:
+    """Photon candidates for a query, unranked. Empty when offline."""
+    key = (fold(query).strip(), round(origin[0], 2), round(origin[1], 2))
+    if len(key[0]) < 2:
+        return []
+    with _lock:
+        if key in _cache:
+            return _cache[key]
+    try:
+        found = photon_candidates(_fetch_photon(query, origin))
+    except Exception:  # noqa: BLE001 - offline or throttled: stops still work
+        return []
     with _lock:
         _cache[key] = found
     return found
 
 
-def distance_km(lat: float, lon: float) -> float:
-    dlat = (lat - VILNIUS[0]) * 111.2
-    dlon = (lon - VILNIUS[1]) * 111.2 * math.cos(math.radians(VILNIUS[0]))
+def distance_km(lat: float, lon: float, origin: tuple[float, float] = VILNIUS) -> float:
+    dlat = (lat - origin[0]) * 111.2
+    dlon = (lon - origin[1]) * 111.2 * math.cos(math.radians(origin[0]))
     return math.hypot(dlat, dlon)
 
 
-def search(index: StopIndex, query: str) -> list[dict]:
-    stops = index.search(query)
-    found = places(query)
-    # A stop that matches from the start of a word is probably what was
-    # meant; one that only contains the letters ("ism" in "Vismaliukai") is not.
-    strong = [s for s in stops if s["score"] <= 2]
-    weak = [s for s in stops if s["score"] > 2]
-    looks_like_address = any(ch.isdigit() for ch in query)
-    merged = found + strong + weak if looks_like_address else strong[:3] + found + strong[3:] + weak
+def search(index: StopIndex, query: str, lat: float | None = None, lon: float | None = None) -> dict:
+    """{"results": [...], "ambiguous": bool}, biased to (lat, lon), or to the
+    centre of Vilnius when no position is known."""
+    origin = (lat, lon) if lat is not None and lon is not None else VILNIUS
+    found = [p for p in places(query, origin)
+             if not (p["category"] in TRANSIT_STOPS and index.has_stop_near(p["name"], p["lat"], p["lon"]))]
+    candidates = index.search(query, origin=origin) + found
+    ranked = rank(query, candidates, origin)
     seen, out = set(), []
-    for item in merged:
+    for item in ranked:
         identity = (fold(item["name"]), round(item["lat"], 3), round(item["lon"], 3))
         if identity not in seen:
             seen.add(identity)
             out.append(item)
-    return out[:10]
+    out = out[:10]
+    return {"results": out, "ambiguous": is_ambiguous(out)}
+
+
+def resolve(index: StopIndex, candidates: list[str], lat: float | None = None,
+            lon: float | None = None) -> dict:
+    """The best reading of a spoken destination. Speech gives several spellings
+    ("ISM universitetas", "i SM universitetas"); each is searched in turn,
+    stopping at the first whose best result is a clear, full match."""
+    best, best_key = None, None
+    for query in candidates[:4]:
+        found = search(index, query, lat, lon)
+        found["query"] = query
+        top = found["results"][0] if found["results"] else None
+        if top and top["match"] == "full" and not found["ambiguous"]:
+            return found
+        key = (TIERS[top["match"]], top["score"]) if top else (-1, 0.0)
+        if best_key is None or key > best_key:
+            best, best_key = found, key
+    return best or {"results": [], "ambiguous": False, "query": None}

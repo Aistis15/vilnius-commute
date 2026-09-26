@@ -93,6 +93,61 @@ class Parsed:
 _TOKEN = re.compile(r"\d{1,2}[:.]\d{2}|\d+|[^\W\d_]+", re.UNICODE)
 
 
+def _letter_runs(text: str) -> list[tuple[int, int, list[str]]]:
+    """Letters spelled out one at a time, as (start, end, letters).
+
+    Recognisers write an abbreviation said letter by letter as "i s m". Only
+    single letters separated by spaces count: "M. K. Čiurlionio" keeps its
+    initials. "į" with its hook is the preposition, never part of a name.
+    """
+    runs, current = [], []
+
+    def close():
+        letters = current[1:] if current and current[0].group().casefold() == "į" else current
+        if len(letters) > 1:
+            runs.append((letters[0].start(), letters[-1].end(), [m.group() for m in letters]))
+
+    for match in _TOKEN.finditer(text):
+        letter = len(match.group()) == 1 and match.group().isalpha()
+        if letter and current and text[current[-1].end():match.start()].isspace():
+            current.append(match)
+            continue
+        close()
+        current = [match] if letter else []
+    close()
+    return runs
+
+
+def spelled_readings(text: str) -> list[str]:
+    """The text with spelled letters joined: "i s m universitetą" ->
+    ["ISM universitetą", "i SM universitetą"].
+
+    A leading plain "i" is either a letter or "į" without its hook. Three
+    letters read as one abbreviation first (ISM); from four on, the "i" is
+    more likely the preposition ("i k t u" -> "i KTU"). The other reading
+    comes second, when there is one.
+    """
+    runs = _letter_runs(text)
+
+    def build(flip: bool) -> str:
+        out, last = [], 0
+        for start, end, letters in runs:
+            lead = ""
+            if letters[0].casefold() == "i" and len(letters) >= 3:
+                doubled = letters[1].casefold() == "i"   # "i i s m": preposition, then ISM
+                if doubled or (len(letters) >= 4) != flip:
+                    lead, letters = letters[0] + " ", letters[1:]
+            out.append(text[last:start] + lead + "".join(letters).upper())
+            last = end
+        out.append(text[last:])
+        return "".join(out)
+
+    readings = [build(False)]
+    if runs and build(True) != readings[0]:
+        readings.append(build(True))
+    return readings
+
+
 def parse(text: str, now_minutes: int | None = None) -> Parsed:
     """`now_minutes` (minutes since midnight) resolves "pusę trijų" to 14:30
     rather than 02:30 when it is ten in the morning."""
@@ -100,6 +155,7 @@ def parse(text: str, now_minutes: int | None = None) -> Parsed:
     parts = re.split(r"(?i)\bpo\s+to\b", text, maxsplit=1)
     main = parts[0]
     then = parts[1] if len(parts) > 1 else ""
+    main, *other_readings = spelled_readings(main)
     tokens = _TOKEN.findall(main)
     folded = [fold(t) for t in tokens]
 
@@ -125,6 +181,16 @@ def parse(text: str, now_minutes: int | None = None) -> Parsed:
         phrase = " ".join(words)
         result.destination = phrase
         result.candidates = nominative_candidates(phrase)
+        # The other way to read spelled letters ("i v u": IVU or "į VU"),
+        # searched only after the first reading.
+        for reading in other_readings:
+            other = _TOKEN.findall(reading)
+            other_folded = [fold(t) for t in other]
+            _, other_used = _find_time(other_folded)
+            other_words = [other[i] for i, f in enumerate(other_folded) if i not in other_used and f not in FILLER]
+            if other_words:
+                seen = {fold(c) for c in result.candidates}
+                result.candidates += [c for c in nominative_candidates(" ".join(other_words)) if fold(c) not in seen]
 
     if then.strip():
         rest = parse(then, now_minutes)
