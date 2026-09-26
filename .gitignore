@@ -36,3 +36,7 @@ __pycache__/
 
 # Local scratch (GTFS downloads, whisper source)
 .build/
+
+# Prototype: downloaded timetable and Python caches
+prototype/.data/
+__pycache__/

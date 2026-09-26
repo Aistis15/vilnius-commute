@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="lt">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Vilnius Commute</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="device" aria-label="iPhone">
+    <div class="screen" id="screen">
+      <div class="statusbar" id="statusbar">
+        <span class="num" id="status-time">9:41</span>
+        <span class="right"><span>LTE</span><span class="battery"></span></span>
+      </div>
+      <div class="island" id="island" role="button" aria-label="Dynamic Island"></div>
+      <div class="app" id="app"></div>
+      <div class="lock" id="lock" hidden></div>
+      <div id="overlay"></div>
+    </div>
+  </div>
+
+  <aside class="panel" aria-label="Bandymų pultas">
+    <h1>Vilnius Commute</h1>
+    <p>Veikianti programėlės versija naršyklėje. Viskas telefono rėme veikia kaip iPhone: užrakto ekranas, baneris, Dynamic Island, balsas.</p>
+
+    <div class="box">
+      <h2>Laikas bandymui</h2>
+      <div class="sim-clock num" id="sim-clock">--:--</div>
+      <div class="buttons" id="speed-buttons">
+        <button data-speed="1" aria-pressed="true">1×</button>
+        <button data-speed="10">10×</button>
+        <button data-speed="60">60×</button>
+        <button id="jump-5">+5 min</button>
+        <button id="jump-stage">Kitas etapas</button>
+        <button id="reset-clock">Dabar</button>
+      </div>
+      <div class="status">Pagreitink laiką, kad matytum, kaip baneris keičiasi kelionės metu.</div>
+    </div>
+
+    <div class="box">
+      <h2>Telefonas</h2>
+      <div class="buttons">
+        <button id="toggle-lock">Užrakinti</button>
+        <button id="toggle-theme">Tamsi / šviesi</button>
+      </div>
+    </div>
+
+    <div class="box">
+      <h2>Iš kur keliauji</h2>
+      <select id="origin-select" aria-label="Pradžios vieta"></select>
+      <div class="status" id="origin-status"></div>
+    </div>
+
+    <div class="box">
+      <h2>Balsas be mikrofono</h2>
+      <input type="text" id="typed-voice" placeholder="Pvz.: Į Akropolį keturiolika dvidešimt" aria-label="Tai, ką pasakytum">
+      <div class="status">Enter — lyg būtum pasakęs balsu. Tinka, jei naršyklė neatpažįsta lietuviškos kalbos.</div>
+    </div>
+
+    <div class="status" id="server-status">Jungiamasi…</div>
+  </aside>
+
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
