@@ -44,6 +44,7 @@ final class CapabilityProbe {
 
     func runAll() async {
         results = [
+            probeDevice(),
             probeAppGroup(),
             probeLiveActivities(),
             probeAlarmKit(),
@@ -51,6 +52,29 @@ final class CapabilityProbe {
             probeLockScreenAudioIntent(),
         ]
         lastRun = .now
+    }
+
+    // MARK: - 0. What this is running on
+
+    /// Model and OS, so a screenshot of this screen is self-describing.
+    ///
+    /// Worth a row of its own: whether the device even has a Dynamic Island
+    /// changes what "the banner does not show" can mean, and that is not
+    /// something a screenshot of a settings page reveals.
+    private func probeDevice() -> ProbeResult {
+        var system = utsname()
+        uname(&system)
+        let identifier = withUnsafeBytes(of: &system.machine) { raw in
+            raw.prefix { $0 != 0 }.map { String(UnicodeScalar(UInt8($0))) }.joined()
+        }
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+
+        return ProbeResult(
+            id: "device",
+            title: "Įrenginys",
+            outcome: .pass,
+            detail: "\(identifier) · iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+        )
     }
 
     // MARK: - 1. App Groups
@@ -109,26 +133,58 @@ final class CapabilityProbe {
 
     // MARK: - 2. Live Activities
 
+    /// Reports the *state* of each Activity, not just how many exist.
+    ///
+    /// "One Activity exists" and "the banner is on screen" are different
+    /// claims, and the first was being reported as if it settled the second.
+    /// `ActivityState` distinguishes them: `.pending` means iOS accepted the
+    /// request but has not shown it, `.dismissed` means the user swiped it
+    /// away, `.stale` means its content aged out. Each points somewhere
+    /// different, and none of them is visible from a count.
     private func probeLiveActivities() -> ProbeResult {
         let info = ActivityAuthorizationInfo()
-        let live = Activity<TripActivityAttributes>.activities.count
+        let activities = Activity<TripActivityAttributes>.activities
 
         guard info.areActivitiesEnabled else {
             return ProbeResult(
                 id: "liveactivity",
                 title: "Gyvosios veiklos",
                 outcome: .needsUser,
-                detail: "Išjungta. Nustatymai → Vilnius → Gyvosios veiklos."
+                detail: "Išjungta. Settings → Vilnius → Live Activities."
             )
         }
 
-        let suffix = live > 0 ? " Šiuo metu veikia: \(live)." : ""
+        guard !activities.isEmpty else {
+            return ProbeResult(
+                id: "liveactivity",
+                title: "Gyvosios veiklos",
+                outcome: .pass,
+                detail: "Sistema leidžia. Šiuo metu nė viena neveikia — paleisk skiltyje „Gyvoji veikla“."
+            )
+        }
+
+        let states = activities.map { Self.describe($0.activityState) }.joined(separator: ", ")
+        let allActive = activities.allSatisfy { $0.activityState == .active }
+
         return ProbeResult(
             id: "liveactivity",
             title: "Gyvosios veiklos",
-            outcome: .pass,
-            detail: "Sistema leidžia.\(suffix) Paleisk skiltyje „Gyvoji veikla“, kad pamatytum tikrą banerį."
+            outcome: allActive ? .pass : .needsUser,
+            detail: allActive
+                ? "Sistema leidžia. Veikia \(activities.count), būsena: \(states)."
+                : "Sukurta \(activities.count), bet būsena: \(states). Todėl baneris ir nesimato."
         )
+    }
+
+    private static func describe(_ state: ActivityState) -> String {
+        switch state {
+        case .active:    "aktyvi"
+        case .dismissed: "atmesta (nubraukta)"
+        case .ended:     "užbaigta"
+        case .stale:     "pasenusi"
+        case .pending:   "laukia (iOS dar neparodė)"
+        @unknown default: "nežinoma"
+        }
     }
 
     // MARK: - 3. AlarmKit
