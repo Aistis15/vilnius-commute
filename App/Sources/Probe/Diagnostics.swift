@@ -199,33 +199,27 @@ struct Diagnostics {
 
         // Alarms — the capability the whole "get ready" feature rests on.
         let alarm = AlarmManager.shared.authorizationState
-        lines.append(Line(
-            label: "AlarmKit",
-            value: switch alarm {
-            case .authorized: "suteikta"
-            case .denied: "ATMESTA"
-            case .notDetermined: "dar neklausta"
-            @unknown default: "nežinoma"
-            },
-            ok: alarm == .authorized
-        ))
+        let alarmText: String = switch alarm {
+        case .authorized: "suteikta"
+        case .denied: "ATMESTA"
+        case .notDetermined: "dar neklausta"
+        @unknown default: "nežinoma"
+        }
+        lines.append(Line(label: "AlarmKit", value: alarmText, ok: alarm == .authorized))
 
         // Location, including accuracy: reduced accuracy would break boarding
         // detection even though the permission itself looks granted.
         let manager = CLLocationManager()
         let status = manager.authorizationStatus
-        lines.append(Line(
-            label: "Vieta",
-            value: switch status {
-            case .authorizedAlways: "visada"
-            case .authorizedWhenInUse: "tik naudojant"
-            case .denied: "ATMESTA"
-            case .restricted: "apribota"
-            case .notDetermined: "dar neklausta"
-            @unknown default: "nežinoma"
-            },
-            ok: status == .authorizedAlways
-        ))
+        let statusText: String = switch status {
+        case .authorizedAlways: "visada"
+        case .authorizedWhenInUse: "tik naudojant"
+        case .denied: "ATMESTA"
+        case .restricted: "apribota"
+        case .notDetermined: "dar neklausta"
+        @unknown default: "nežinoma"
+        }
+        lines.append(Line(label: "Vieta", value: statusText, ok: status == .authorizedAlways))
         lines.append(Line(
             label: "Vietos tikslumas",
             value: manager.accuracyAuthorization == .fullAccuracy ? "tikslus" : "SUMAŽINTAS",
@@ -233,32 +227,27 @@ struct Diagnostics {
         ))
 
         let mic = AVAudioApplication.shared.recordPermission
-        lines.append(Line(
-            label: "Mikrofonas",
-            value: switch mic {
-            case .granted: "leista"
-            case .denied: "ATMESTA"
-            case .undetermined: "dar neklausta"
-            @unknown default: "nežinoma"
-            },
-            ok: mic == .granted
-        ))
+        let micText: String = switch mic {
+        case .granted: "leista"
+        case .denied: "ATMESTA"
+        case .undetermined: "dar neklausta"
+        @unknown default: "nežinoma"
+        }
+        lines.append(Line(label: "Mikrofonas", value: micText, ok: mic == .granted))
 
         // Notifications matter beyond alerts: time-sensitive delivery is what
         // gets a departure warning through a Focus mode.
         let settings = await UNUserNotificationCenter.current().notificationSettings()
-        lines.append(Line(
-            label: "Pranešimai",
-            value: switch settings.authorizationStatus {
-            case .authorized: "leista"
-            case .provisional: "laikinai"
-            case .denied: "ATMESTA"
-            case .notDetermined: "dar neklausta"
-            case .ephemeral: "trumpalaikiai"
-            @unknown default: "nežinoma"
-            },
-            ok: settings.authorizationStatus == .authorized
-        ))
+        let notifyText: String = switch settings.authorizationStatus {
+        case .authorized: "leista"
+        case .provisional: "laikinai"
+        case .denied: "ATMESTA"
+        case .notDetermined: "dar neklausta"
+        case .ephemeral: "trumpalaikiai"
+        @unknown default: "nežinoma"
+        }
+        lines.append(Line(label: "Pranešimai", value: notifyText,
+                          ok: settings.authorizationStatus == .authorized))
         lines.append(Line(label: "  Garsas",
                           value: settings.soundSetting == .enabled ? "taip" : "ne", ok: nil))
         lines.append(Line(label: "  Užrakto ekrane",
@@ -291,17 +280,14 @@ struct Diagnostics {
     @MainActor
     private static func background() -> Section {
         let refresh = UIApplication.shared.backgroundRefreshStatus
+        let refreshText: String = switch refresh {
+        case .available: "įjungta"
+        case .denied: "IŠJUNGTA"
+        case .restricted: "apribota"
+        @unknown default: "nežinoma"
+        }
         return Section(title: "Fonas", lines: [
-            Line(
-                label: "Background App Refresh",
-                value: switch refresh {
-                case .available: "įjungta"
-                case .denied: "IŠJUNGTA"
-                case .restricted: "apribota"
-                @unknown default: "nežinoma"
-                },
-                ok: refresh == .available
-            ),
+            Line(label: "Background App Refresh", value: refreshText, ok: refresh == .available),
             // Low Power Mode suspends background refresh and throttles
             // location, so a trip that tracks correctly on a full battery can
             // silently stop doing so.
