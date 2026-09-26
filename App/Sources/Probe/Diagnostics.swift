@@ -136,7 +136,7 @@ struct Diagnostics {
                 WidgetCenter.shared.getCurrentConfigurations { continuation.resume(with: $0) }
             }
             widgets = infos.isEmpty
-                ? "užregistruota, bet nė vieno nepridėta"
+                ? "nė vieno pridėto (tai nerodo, ar plėtinys registruotas)"
                 : infos.map(\.kind).joined(separator: ", ")
         } catch {
             widgets = "klaida: \(error.localizedDescription)"

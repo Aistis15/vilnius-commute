@@ -276,3 +276,32 @@ Python in a `run:` block and broke the workflow parse.
 - Whether transcription can complete while the phone is locked. Needs Phase 5.
 - Every route category, colour and `route_id` prefix in the live feed. Phase 2.
 - Real badge geometry against Trafi reference screenshots. Phase 2.
+
+## D12 — Install with AltStore, not Sideloadly (2026-09-26)
+
+**Finding, measured on the phone** (Diagnostics → Pasirašymas, Sideloadly
+v0.60, free Apple ID, iOS 27.0):
+
+```
+Plėtinys: com.vilniuscommute.app.<TEAM>.widgets
+[!!] parašas: <TEAM>.com.vilniuscommute.app.<TEAM>  ← NESUTAMPA su bundle id
+[!!] profilis: NĖRA
+```
+
+Sideloadly signs the widget extension with the *app's* application-identifier
+and embeds no provisioning profile in it, so iOS never runs the extension:
+Live Activities start (the Dynamic Island even widens) but draw nothing, and
+no widget or control appears in any gallery. Its "9 App IDs Remaining" after
+installing an app plus an extension fits: only one App ID was registered.
+Sideloadly's own site describes extensions only as something to remove
+("Remove individual or all app extensions (PlugIns) before install").
+
+**AltStore provisions each extension separately** — read from its source,
+`AltStore/Operations/FetchProvisioningProfilesOperation.swift`:
+`for appExtension in app.appExtensions` → `prepareProvisioningProfile(for:
+appExtension, …)` → `profiles[appExtension.bundleIdentifier] = profile`, and
+`let requiredAppIDs = 1 + application.appExtensions.count`.
+
+**Decision:** install through AltServer for Windows (free). Everything the app
+is — banner, lock-screen control, widget — lives in the extension, so an
+installer that cannot sign one is not usable for this project.
