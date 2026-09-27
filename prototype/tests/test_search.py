@@ -48,6 +48,12 @@ def ranked(query, origin=search.VILNIUS, index=None):
     return search.rank(query, index.search(query, origin=origin) + places(query), origin)
 
 
+def ranked_as(query, recorded, origin=search.VILNIUS):
+    """A query ranked over the places recorded for another one: ranking is
+    pure, so what Photon found for "Akropolis" can answer "Omniva"."""
+    return search.rank(query, vilnius_index().search(query, origin=origin) + places(recorded), origin)
+
+
 class Recorded(unittest.TestCase):
 
     def test_ism_universitetas_is_ism(self):
@@ -73,8 +79,47 @@ class Recorded(unittest.TestCase):
         for query in PHOTON:
             with self.subTest(query=query):
                 results = ranked(query)
-                covered = [search.assess(query, r)["covered"] for r in results]
-                self.assertEqual(covered, sorted(covered, reverse=True))
+                order = [(search.assess(query, r)["named"] > 0, search.assess(query, r)["covered"]) for r in results]
+                self.assertEqual(order, sorted(order, reverse=True))
+
+    def test_a_name_without_the_query_ranks_below_every_name_with_it(self):
+        # The pharmacy in Akropolis, recorded at "Ozo g. 25", matches two of
+        # the three words by its address. Every Akropolis, even the one in
+        # Kaunas that matches only one, still comes first.
+        results = ranked_as("Akropolis Ozo 25", "Akropolis")
+        names = [r["name"] for r in results]
+        pharmacy = names.index("Eurovaistinė")
+        self.assertEqual(search.assess("Akropolis Ozo 25", results[pharmacy])["covered"], 2)
+        kaunas = next(i for i, r in enumerate(results) if r["name"] == "Akropolis" and r["city"] == "Kaunas")
+        self.assertLess(kaunas, pharmacy)
+        self.assertTrue(all("Akropolis" in n for n in names[:pharmacy]))
+
+    def test_parcel_lockers_are_not_places(self):
+        # Recorded: "Omniva PC AKROPOLIS" in Kaunas and "PC Akropolis Venipak
+        # paštomatas" in Šiauliai are parcel lockers named after the malls.
+        lockers = {"Omniva PC AKROPOLIS", "PC Akropolis Venipak paštomatas"}
+        for query in ("Akropolis", "Kauno Akropolis"):
+            with self.subTest(query=query):
+                self.assertTrue(lockers & {p["name"] for p in places(query)})
+                names = [r["name"] for r in ranked(query)]
+                self.assertFalse(lockers & set(names))
+                self.assertEqual(names[0], "Akropolis")
+        self.assertEqual([r["name"] for r in ranked("Kauno Akropolis")], ["Akropolis"])
+
+    def test_a_parcel_locker_is_the_last_resort(self):
+        # Asked for by what only the locker's name has, it is the answer.
+        for query in ("Omniva", "Omniva Akropolis", "Venipak paštomatas"):
+            with self.subTest(query=query):
+                top = ranked_as(query, "Akropolis")[0]
+                self.assertIn(top["name"], {"Omniva PC AKROPOLIS", "PC Akropolis Venipak paštomatas"})
+
+    def test_information_boards_give_way_to_places(self):
+        # Recorded: two OSM information boards about the Nemirseta rescue
+        # station near Palanga, found for "Klaipėdos stotis".
+        where = lambda r: (r["name"], r["lat"], r["lon"])  # noqa: E731
+        boards = {where(p) for p in places("Klaipėdos stotis") if p["category"] == "board"}
+        self.assertEqual(len(boards), 2)
+        self.assertFalse(boards & {where(r) for r in ranked("Klaipėdos stotis")})
 
     def test_ism_alone_is_not_ismonys(self):
         results = ranked("ISM")
@@ -230,12 +275,62 @@ class Stops(unittest.TestCase):
                                ("Katedros g.", "Panevėžys", 55.72291, 24.36194)])
         for query, name in (("Europos a.", "Europos aikštė"), ("Europos aikštė", "Europos aikštė"),
                             ("Vinco Kudirkos aikštėje", "Vinco Kudirkos aikštė"),
-                            ("Laisvės al.", "Laisvės alėja A"), ("Laisvės alėja", "Laisvės alėja A"),
+                            ("Laisvės al.", "Laisvės alėja"), ("Laisvės alėja", "Laisvės alėja"),
                             ("Prisikėlimo a.", "Prisikėlimo aikštės st."),
                             ("Katedros gatvė", "Katedros g.")):
             with self.subTest(query=query):
                 self.assertEqual(index.search(query)[0]["name"], name)
         self.assertEqual(index.search("Katedros aikštė"), [])
+
+    def test_kaunas_platforms_are_one_stop(self):
+        # Real Kaunas stops: every platform has a letter, and the two sides of
+        # Laisvės alėja are one place to a person.
+        kaunas = [("Laisvės alėja A", "Kaunas", 54.89804, 23.89972),
+                  ("Laisvės alėja B", "Kaunas", 54.89864, 23.90229),
+                  ("Geležinkelio stotis A", "Kaunas", 54.8874, 23.93028),
+                  ("Geležinkelio stotis B", "Kaunas", 54.88798, 23.92892),
+                  ("Geležinkelio stotis C", "Kaunas", 54.88786, 23.9331),
+                  ("Geležinkelio stotis D", "Kaunas", 54.88729, 23.93227),
+                  ("Geležinkelio stotis E", "Kaunas", 54.88752, 23.9337)]
+        index = vilnius_index(kaunas)
+        for query, name, platforms in (("Laisvės alėja", "Laisvės alėja", 2), ("Laisvės al.", "Laisvės alėja", 2),
+                                       ("Geležinkelio stotis", "Geležinkelio stotis", 5)):
+            with self.subTest(query=query):
+                found = [s for s in index.search(query, origin=KAUNAS) if s["city"] == "Kaunas"]
+                self.assertEqual([(s["name"], s["subtitle"]) for s in found], [(name, "Stotelė · Kaunas")])
+                where = [s for s in kaunas if s[0].startswith(name)]
+                self.assertEqual(len(where), platforms)
+                self.assertAlmostEqual(found[0]["lat"], sum(s[2] for s in where) / platforms)
+                self.assertAlmostEqual(found[0]["lon"], sum(s[3] for s in where) / platforms)
+
+    def test_a_letter_is_a_platform_only_where_platforms_have_letters(self):
+        # Synthetic: a Vilnius stop whose name ends in a capital letter. The
+        # Vilnius feed does not letter its platforms, so the letter stays.
+        index = vilnius_index([("Blokas C", "Vilnius", 54.70, 25.25)])
+        self.assertEqual([s["name"] for s in index.search("Blokas")], ["Blokas C"])
+
+    def test_same_name_far_apart_is_two_places(self):
+        # Real Kaunas stops: "Vienybės g." D is 10 km from A and B, and the
+        # "Malūnas" without a letter 12 km from C and D.
+        index = vilnius_index([("Vienybės g. A", "Kaunas", 54.8332, 23.87587),
+                               ("Vienybės g. B", "Kaunas", 54.83205, 23.87522),
+                               ("Vienybės g. D", "Kaunas", 54.90264, 23.97395),
+                               ("Malūnas", "Kaunas", 54.88821, 23.90488),
+                               ("Malūnas C", "Kaunas", 54.86812, 24.08539),
+                               ("Malūnas D", "Kaunas", 54.86756, 24.08619)])
+        vienybes = sorted((round(s["lat"], 5), round(s["lon"], 5)) for s in index.search("Vienybės g.", origin=KAUNAS))
+        self.assertEqual(vienybes, [(round((54.8332 + 54.83205) / 2, 5), round((23.87587 + 23.87522) / 2, 5)),
+                                    (54.90264, 23.97395)])
+        malunas = index.search("Malūnas", origin=KAUNAS)
+        self.assertEqual(len(malunas), 2)
+        self.assertEqual({s["name"] for s in malunas}, {"Malūnas"})
+
+    def test_osm_may_name_a_platform_either_way(self):
+        index = vilnius_index([("Laisvės alėja A", "Kaunas", 54.89804, 23.89972),
+                               ("Laisvės alėja B", "Kaunas", 54.89864, 23.90229)])
+        self.assertTrue(index.has_stop_near("Laisvės alėja", 54.89805, 23.89975))
+        self.assertTrue(index.has_stop_near("Laisvės alėja B", 54.89865, 23.9023))
+        self.assertFalse(index.has_stop_near("Laisvės alėja", 54.8874, 23.93028))
 
     def test_city_defaults_to_vilnius(self):
         t = SimpleNamespace(stop_names=["Žaliasis tiltas"], stop_lat=[54.6922], stop_lon=[25.2802])

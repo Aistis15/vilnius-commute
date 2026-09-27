@@ -10,7 +10,8 @@ import unittest
 from datetime import datetime, timedelta
 
 from vc import data
-from vc.planner import Point, intercity_patterns, plan, stops_near
+from vc.planner import EXTRA_STOPS, Point, intercity_patterns, plan, stops_near, usable_patterns
+from vc.router import DESTINATION, ORIGIN, Access, Leg, Router, merge_walks
 
 TIMETABLE = data.load_timetable() if data.DB_PATH.exists() else None
 
@@ -20,6 +21,7 @@ AKROPOLIS = Point(54.71051, 25.26314, "Akropolis")    # Ozo g. 25
 # Šiauliai city stop 300 m from the bus station there.
 STOTIS = Point(54.67104, 25.28376, "Stotis")
 SIAULIAI = Point(55.93047, 23.30905, "Dvaro st.")
+ZALIASIS_TILTAS = Point(54.6922, 25.2802, "Žaliasis tiltas")
 
 
 def busy_weekday() -> datetime:
@@ -79,9 +81,119 @@ class Planner(unittest.TestCase):
                     self.assertLess(a["arrive_s"], b["arrive_s"] - 60,
                                     f"{a['id']} adds changes for nothing over {b['id']}")
 
+    def test_never_two_walks_in_a_row(self):
+        # Off the bus, across to another stop and on to the destination on
+        # foot is one walk, with the time and metres of both parts.
+        when = busy_weekday()
+        for origin, destination in ((ISM, AKROPOLIS), (AKROPOLIS, STOTIS), (ZALIASIS_TILTAS, ISM)):
+            for arrive_by in (False, True):
+                result = plan(TIMETABLE, origin, destination, when, arrive_by=arrive_by)
+                for option in result["options"]:
+                    kinds = [leg["kind"] for leg in option["legs"]]
+                    with self.subTest(trip=f"{origin.name}-{destination.name}", arrive_by=arrive_by, id=option["id"]):
+                        self.assertNotIn(("walk", "walk"), list(zip(kinds, kinds[1:])))
+                        self.assertEqual(option["walk_m"], sum(leg["metres"] for leg in option["legs"] if leg["kind"] == "walk"))
+
 
 def seconds_of(moment: datetime) -> int:
     return moment.hour * 3600 + moment.minute * 60 + moment.second
+
+
+@unittest.skipIf(TIMETABLE is None, "timetable not downloaded yet")
+class NearbyStops(unittest.TestCase):
+    """The dozen nearest platforms, and any farther one with a line of its own."""
+
+    POINTS = (STOTIS, ISM, AKROPOLIS, ZALIASIS_TILTAS)
+
+    def test_a_farther_stop_is_kept_only_for_a_line_of_its_own(self):
+        for point in self.POINTS:
+            for role in ("origin", "destination"):
+                kept = stops_near(TIMETABLE, point, 800, role=role)
+                coaches = intercity_patterns(TIMETABLE)
+                served, extra = set(), 0
+                for rank, access in enumerate(kept):
+                    usable = usable_patterns(TIMETABLE, access.stop, role)
+                    new = usable - served
+                    if rank >= 12:
+                        with self.subTest(point=point.name, role=role, stop=access.stop):
+                            self.assertTrue(new)
+                        if new.isdisjoint(coaches.get(access.stop, ())):
+                            extra += 1
+                    served |= usable
+                self.assertLessEqual(extra, EXTRA_STOPS)
+
+    def test_every_line_in_reach_stays_in_reach(self):
+        # Unless the cap is reached, the kept stops serve every pattern that
+        # all the stops within walking reach serve together.
+        for point in self.POINTS:
+            for role in ("origin", "destination"):
+                kept = stops_near(TIMETABLE, point, 800, role=role)
+                if len(kept) >= 12 + EXTRA_STOPS:
+                    continue
+                every = stops_near(TIMETABLE, point, 800, max_count=10_000, role=role)
+                union = lambda stops: set().union(*(usable_patterns(TIMETABLE, a.stop, role) for a in stops))  # noqa: E731
+                with self.subTest(point=point.name, role=role):
+                    self.assertEqual(union(kept), union(every))
+
+    def test_the_dozen_nearest_do_not_serve_all_of_stotis(self):
+        # Several city lines end at a "Stotis" platform farther than the
+        # twelve nearest: getting off there must stay possible.
+        kept = stops_near(TIMETABLE, STOTIS, 800, role="destination")
+        self.assertGreater(len(kept), 12)
+
+    def test_a_line_that_ends_takes_nobody_away(self):
+        for access in stops_near(TIMETABLE, STOTIS, 800):
+            for pattern in usable_patterns(TIMETABLE, access.stop, "origin"):
+                self.assertNotEqual(TIMETABLE.pattern_stops[pattern][-1], access.stop)
+            for pattern in usable_patterns(TIMETABLE, access.stop, "destination"):
+                self.assertNotEqual(TIMETABLE.pattern_stops[pattern][0], access.stop)
+
+
+class Walks(unittest.TestCase):
+    """Walks merged in the router, on a made-up three-stop network."""
+
+    def network(self):
+        # A -> X by one bus at 08:00, arriving 08:10; X and Y 200 m apart.
+        return data.Timetable(
+            stop_names=["A", "X", "Y"], stop_lat=[0.0, 0.0, 0.0], stop_lon=[0.0, 0.0, 0.0],
+            stop_city=["Vilnius"] * 3,
+            routes=[data.Route(0, "1", "bus", "0073AC", "FFFFFF")],
+            pattern_route=[0], pattern_headsign=["X"], pattern_stops=[[0, 1]],
+            pattern_trips=[[(0, [8 * 3600, 8 * 3600 + 600], [8 * 3600, 8 * 3600 + 600])]],
+            patterns_at_stop=[[(0, 0)], [(0, 1)], []],
+            transfers=[[], [(2, 200)], [(1, 200)]],
+            services=[(0b1111111, 20260101, 20271231)],
+        )
+
+    def test_a_transfer_walk_then_the_walk_to_the_destination_is_one_walk(self):
+        router = Router(self.network())
+        # The destination is in reach of Y only: off at X, walk to Y, walk on.
+        journeys = router.journeys([Access(0, 135)], [Access(2, 270)], 7 * 3600 + 50 * 60,
+                                   (20260928, 0), (20260927, 6))
+        self.assertEqual(len(journeys), 1)
+        legs = journeys[0].legs
+        self.assertEqual([leg.kind for leg in legs], ["walk", "ride", "walk"])
+        last = legs[-1]
+        ride_arrival = 8 * 3600 + 600
+        # 200 m at 1.35 m/s is 149 s, plus the 60 s buffer at Y; 270 m is 200 s.
+        self.assertEqual((last.from_stop, last.to_stop), (1, DESTINATION))
+        self.assertEqual((last.departure, last.arrival, last.metres), (ride_arrival, ride_arrival + 149 + 60 + 200, 470))
+        self.assertEqual(journeys[0].arrival, last.arrival)
+        self.assertEqual(journeys[0].walk_metres, 135 + 470)
+
+    def test_merge_walks(self):
+        legs = [
+            Leg("walk", ORIGIN, 0, 100, 200, 100),
+            Leg("ride", 0, 1, 260, 900, pattern=0, trip=0, board_index=0, alight_index=1),
+            Leg("walk", 1, 2, 900, 1000, 120),
+            Leg("walk", 2, 3, 1000, 1100, 80),
+            Leg("walk", 3, DESTINATION, 1100, 1300, 150),
+        ]
+        merged = merge_walks(legs)
+        self.assertEqual([leg.kind for leg in merged], ["walk", "ride", "walk"])
+        self.assertEqual((merged[2].from_stop, merged[2].to_stop, merged[2].departure, merged[2].arrival, merged[2].metres),
+                         (1, DESTINATION, 900, 1300, 350))
+        self.assertEqual(merged[:2], legs[:2])
 
 
 @unittest.skipIf(TIMETABLE is None, "timetable not downloaded yet")

@@ -40,11 +40,16 @@ IMPORTANT = {
     "arts_centre", "church", "cathedral", "park", "airport", "aerodrome",
     "bus_station", "train_station",
 }
-INCIDENTAL = {
-    "construction", "parking", "parking_space", "parcel_locker", "atm",
-    "vending_machine", "bench", "waste_basket", "bicycle_parking", "isolated_dwelling",
-    "post_box", "telephone", "charging_station", "toilets", "industrial", "railway",
+# Things, not places: a parcel locker in Akropolis is not where anyone is
+# going. Shown only when nothing else matches as well ("Omniva Akropolis").
+OBJECTS = {
+    "parcel_locker", "atm", "vending_machine", "bench", "waste_basket", "bicycle_parking",
+    "parking_space", "post_box", "telephone", "charging_station", "toilets", "board",
+    "guidepost", "map", "recycling", "drinking_water", "defibrillator", "payment_terminal",
 }
+# The same things by name, when OSM files them under something else.
+OBJECT_WORDS = {"pastomatas", "bankomatas", "paketomatas"}
+INCIDENTAL = OBJECTS | {"construction", "parking", "isolated_dwelling", "industrial", "railway"}
 # OSM's own copy of a stop: dropped when the timetable has the same stop.
 TRANSIT_STOPS = {"bus_stop", "platform", "stop_position", "tram_stop", "stop"}
 KINDS = {"mall": "Prekybos centras", "university": "Universitetas", "college": "Kolegija",
@@ -194,8 +199,8 @@ def assess(query: str, candidate: dict) -> dict:
     """How well a candidate's name covers the query.
 
     Returns covered (distinctive words found in the name, city or street),
-    quality (their summed quality), generic (generic words found), match and
-    confidence. The city and street count ("Kauno Akropolis" is the Akropolis
+    named (those found in the name itself), quality (their summed quality),
+    generic (generic words found), match and confidence. The city and street count ("Kauno Akropolis" is the Akropolis
     in Kaunas) but only the name can make a match "full".
     """
     distinctive, generic = query_terms(query)
@@ -214,6 +219,7 @@ def assess(query: str, candidate: dict) -> dict:
         in_context = CONTEXT if any(_same_word(word, c) for c in context) else 0.0
         qualities.append((in_name, in_context))
 
+    named = sum(1 for n, _ in qualities if n > 0)
     generic_hits = sum(1 for g in generic if any(_same_word(g, n) for n in name_words))
     generic_share = generic_hits / len(generic) if generic else 0.0
     exact_name = _plain(candidate["name"]) == _plain(query)
@@ -249,7 +255,7 @@ def assess(query: str, candidate: dict) -> dict:
     distinct_name = [w for w in name_words if len(w) > 1 and not is_generic(w)]
     matched = sum(1 for n in distinct_name if any(_same_word(n, d) or n.startswith(d) for d in distinctive))
     precision = matched / len(distinct_name) if distinct_name else 0.0
-    return {"covered": covered, "quality": round(quality, 3), "generic": generic_hits,
+    return {"covered": covered, "named": named, "quality": round(quality, 3), "generic": generic_hits,
             "match": match, "confidence": confidence, "score": round(score, 3),
             "precision": precision, "exact": exact_name}
 
@@ -286,9 +292,23 @@ def rank(query: str, candidates: list[dict], origin: tuple[float, float] = VILNI
         else:
             group = 0 if looks_like_address else 1
             local_score = _place_score(item, a, distance)
-        key = (-a["covered"], -a["quality"], -a["generic"], distance > LOCAL_KM, group, local_score, index)
+        # A name without a single distinctive word of the query is something
+        # else that happens to be there: the pharmacy in Akropolis, at Ozo g.
+        # 25, or anything in Kaunas for "Kauno ...". It goes below every
+        # result whose name has one, however well its address matches.
+        key = (not a["named"], -a["covered"], -a["quality"], -a["generic"], distance > LOCAL_KM,
+               group, local_score, index)
         keyed.append((key, item, a))
     keyed.sort(key=lambda entry: entry[0])
+
+    # A parcel locker or a cash machine named after the place is not the
+    # place: while a real place matches as well, the object is left out.
+    real = [(bool(a["named"]), a["covered"]) for _, item, a in keyed
+            if a["match"] != "none" and not is_object(item)]
+    best_real = max(real, default=None)
+    keyed = [entry for entry in keyed
+             if not is_object(entry[1]) or best_real is None
+             or (bool(entry[2]["named"]), entry[2]["covered"]) > best_real]
 
     out = []
     for _, item, a in keyed:
@@ -296,6 +316,13 @@ def rank(query: str, candidates: list[dict], origin: tuple[float, float] = VILNI
         result.update(score=a["score"], match=a["match"], confidence=a["confidence"])
         out.append(result)
     return out
+
+
+def is_object(item: dict) -> bool:
+    """A thing in a place rather than a place: a parcel locker, a cash machine."""
+    if item.get("kind") == "stop":
+        return False
+    return item.get("category") in OBJECTS or not OBJECT_WORDS.isdisjoint(_words(item["name"]))
 
 
 def _place_score(item: dict, a: dict, distance: float) -> float:
@@ -350,29 +377,71 @@ def _where_stops_are(cities: list[str], lats: list[float], lons: list[float]) ->
     return out
 
 
+# Kaunas letters every platform of a stop: "Laisvės alėja A" and "Laisvės
+# alėja B" are the two sides of one street. A capital letter at the end is a
+# platform only in a feed where most names end in one (Kaunas: 837 of 966);
+# elsewhere it may be part of the name, and stays.
+_PLATFORM = re.compile(r"^(.*\S)\s+[A-Z]$")
+# Platforms of one stop stand within a few hundred metres of one another. Two
+# stops of one name farther apart are two places: Kaunas has a "Vienybės g. D"
+# 10 km from A and B, Vilnius two "Slėnis" 16 km apart.
+SAME_STOP_KM = 0.6
+
+
+def _lettered_feeds(names: list[str], feeds: list[str]) -> set[str]:
+    """The feeds that name their platforms with a letter."""
+    total: dict[str, int] = {}
+    lettered: dict[str, int] = {}
+    for name, feed in zip(names, feeds):
+        total[feed] = total.get(feed, 0) + 1
+        if _PLATFORM.match(name):
+            lettered[feed] = lettered.get(feed, 0) + 1
+    return {feed for feed, count in lettered.items() if 2 * count > total[feed]}
+
+
+def _nearby_groups(ids: list[int], lats: list[float], lons: list[float]) -> list[list[int]]:
+    """Stops chained within SAME_STOP_KM of one another: one place each."""
+    groups: list[list[int]] = []
+    for stop in ids:
+        near = [g for g in groups
+                if any(distance_km(lats[stop], lons[stop], (lats[o], lons[o])) <= SAME_STOP_KM for o in g)]
+        groups = [g for g in groups if all(g is not n for n in near)]
+        groups.append([o for g in near for o in g] + [stop])
+    return sorted(groups, key=min)
+
+
 class StopIndex:
     """Stops grouped by name and city: "Žaliasis tiltas" is one place to a
-    person, even though the timetable has a stop for each direction, but a
-    "Stotis" in Kaunas is not the one in Vilnius."""
+    person, even though the timetable has a stop for each direction, and so
+    is "Laisvės alėja" in Kaunas with its platforms A and B. A "Stotis" in
+    Kaunas is not the one in Vilnius, and two stops of one name far apart in
+    one city are two places."""
 
     def __init__(self, t: Timetable):
-        cities = getattr(t, "stop_city", None)
-        if not cities or len(cities) != len(t.stop_names):
-            cities = ["Vilnius"] * len(t.stop_names)
-        cities = [c or "Vilnius" for c in cities]
-        cities = _where_stops_are(cities, t.stop_lat, t.stop_lon)
+        feeds = getattr(t, "stop_city", None)
+        if not feeds or len(feeds) != len(t.stop_names):
+            feeds = ["Vilnius"] * len(t.stop_names)
+        feeds = [c or "Vilnius" for c in feeds]
+        cities = _where_stops_are(feeds, t.stop_lat, t.stop_lon)
+        lettered = _lettered_feeds(t.stop_names, feeds)
         groups: dict[tuple[str, str], list[int]] = {}
         for stop, name in enumerate(t.stop_names):
+            if feeds[stop] in lettered:
+                name = _PLATFORM.sub(r"\1", name)
             groups.setdefault((name, cities[stop]), []).append(stop)
         self.entries = []
-        for (name, city), ids in groups.items():
-            lat = sum(t.stop_lat[i] for i in ids) / len(ids)
-            lon = sum(t.stop_lon[i] for i in ids) / len(ids)
-            context = [w for word in _words(city) for w in (word, _genitive(word))]
-            self.entries.append((_plain(name), name, city, lat, lon, context))
+        # Every stop under its own name and its place's: OSM may call the
+        # platform either way.
         self.by_name: dict[str, list[tuple[float, float]]] = {}
-        for folded, _, _, lat, lon, _ in self.entries:
-            self.by_name.setdefault(folded, []).append((lat, lon))
+        for (name, city), ids in groups.items():
+            context = [w for word in _words(city) for w in (word, _genitive(word))]
+            for group in _nearby_groups(ids, t.stop_lat, t.stop_lon):
+                lat = sum(t.stop_lat[i] for i in group) / len(group)
+                lon = sum(t.stop_lon[i] for i in group) / len(group)
+                self.entries.append((_plain(name), name, city, lat, lon, context))
+            for stop in ids:
+                for label in {_plain(name), _plain(t.stop_names[stop])}:
+                    self.by_name.setdefault(label, []).append((t.stop_lat[stop], t.stop_lon[stop]))
 
     def has_stop_near(self, name: str, lat: float, lon: float, km: float = 0.3) -> bool:
         return any(distance_km(lat, lon, where) <= km for where in self.by_name.get(_plain(name), []))

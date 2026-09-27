@@ -60,7 +60,27 @@ def intercity_patterns(t: Timetable) -> dict[int, frozenset[int]]:
     return frozen
 
 
-def stops_near(t: Timetable, point: Point, limit_m: int, max_count: int = 12) -> list[Access]:
+# Past the dozen nearest stops, this many more city platforms at most, each
+# kept only for a line no nearer platform has.
+EXTRA_STOPS = 8
+
+
+def usable_patterns(t: Timetable, stop: int, role: str | None = None) -> set[int]:
+    """The patterns a rider can use at a stop: to board at the start of a trip
+    ("origin"), to get off at its end ("destination"), or either (None). A
+    line that ends at a platform takes nobody away from it."""
+    usable = set()
+    for pattern, index in t.patterns_at_stop[stop]:
+        if role == "origin" and index == len(t.pattern_stops[pattern]) - 1:
+            continue
+        if role == "destination" and index == 0:
+            continue
+        usable.add(pattern)
+    return usable
+
+
+def stops_near(t: Timetable, point: Point, limit_m: int, max_count: int = 12,
+               role: str | None = None) -> list[Access]:
     found = []
     for stop, (lat, lon) in enumerate(zip(t.stop_lat, t.stop_lon)):
         # Cheap reject before the trigonometry: 0.02° is > 1.2 km here.
@@ -71,17 +91,24 @@ def stops_near(t: Timetable, point: Point, limit_m: int, max_count: int = 12) ->
             found.append(Access(stop, metres))
     found.sort(key=lambda a: a.metres)
     chosen = found[:max_count]
-    # A coach stand is rarely among the dozen nearest platforms of a busy
-    # interchange: Vilnius AS is the 14th nearest stop to "Stotis". A stop
-    # with an intercity line that no nearer stop has is kept, whatever its
-    # rank. City lines are left alone, so city trips plan as before.
+    # The dozen nearest platforms of a busy interchange do not serve every
+    # line there. At Vilnius "Stotis" the platform where lines 3, 4, 41, 42,
+    # 54 and 78 end is the 13th nearest, and the coach stand of Vilnius AS
+    # the 14th. A farther stop is kept when it serves a pattern none of the
+    # kept ones do: a coach stand whatever its rank, city platforms up to
+    # EXTRA_STOPS of them, nearest first.
     coaches = intercity_patterns(t)
-    served = set().union(*(coaches.get(a.stop, ()) for a in chosen))
+    served = set().union(*(usable_patterns(t, a.stop, role) for a in chosen))
+    extra = 0
     for access in found[max_count:]:
-        extra = coaches.get(access.stop, frozenset()) - served
-        if extra:
+        new = usable_patterns(t, access.stop, role) - served
+        if not new:
+            continue
+        coach = not new.isdisjoint(coaches.get(access.stop, ()))
+        if coach or extra < EXTRA_STOPS:
             chosen.append(access)
-            served |= extra
+            served |= new
+            extra += not coach
     return chosen
 
 
@@ -162,8 +189,8 @@ def _options(
     # Widen the net if nothing is in reach: better a longer walk than no answer.
     origins = destinations = []
     for factor in (1.0, 1.6, 2.5):
-        origins = stops_near(t, origin, int(prefs.max_walk_metres * factor))
-        destinations = stops_near(t, destination, int(prefs.max_walk_metres * factor))
+        origins = stops_near(t, origin, int(prefs.max_walk_metres * factor), role="origin")
+        destinations = stops_near(t, destination, int(prefs.max_walk_metres * factor), role="destination")
         if origins and destinations:
             break
 

@@ -391,28 +391,45 @@ async function planTrip(place, mode, time) {
     mode: mode === 'arrive' ? 'arrive' : 'depart',
     priority: prefs.priority, walk: prefs.walk,
   });
-  plan.options = (plan.options || []).map(mergeWalks);
+  plan.options = (plan.options || []).map(mergeWalks).map(wholeMinutes);
   return plan;
 }
 
 /* The router can hand back two walks in a row: to a stop, then on to the
    destination without boarding anything there. To the rider that is one
-   walk, and its distance may only ever go down. */
+   walk, and its distance may only ever go down. (The server now merges them
+   itself; this stays as a safety net for older plans.) */
 function mergeWalks(option) {
   if (!option || !option.legs) return option;
   const legs = [];
   for (const leg of option.legs) {
     const prev = legs[legs.length - 1];
     if (prev && prev.kind === 'walk' && leg.kind === 'walk') {
-      legs[legs.length - 1] = {
-        ...prev, to: leg.to, arrival: leg.arrival, metres: prev.metres + leg.metres,
-        minutes: Math.max(1, Math.round((new Date(leg.arrival.iso) - new Date(prev.departure.iso)) / 60_000)),
-      };
+      legs[legs.length - 1] = { ...prev, to: leg.to, arrival: leg.arrival, metres: prev.metres + leg.metres };
     } else {
       legs.push(leg);
     }
   }
   return legs.length === option.legs.length ? option : { ...option, legs };
+}
+
+/* Every time the rider sees is a whole minute, and the parts add up to the
+   total: starts round down (leave a little early), ends round up (arrive a
+   little late), and each leg lasts exactly the difference. "09:03 + 7 min"
+   then arrives at 09:10, never 09:09. Bus times are whole minutes already. */
+const MINUTE = 60_000;
+const atMinute = (ms) => { const d = new Date(ms); return { iso: localIso(d), hm: hm(d) }; };
+function wholeMinutes(option) {
+  if (!option || !option.legs) return option;
+  const floor = (x) => atMinute(Math.floor(new Date(x.iso).getTime() / MINUTE) * MINUTE);
+  const ceil = (x) => atMinute(Math.ceil(new Date(x.iso).getTime() / MINUTE) * MINUTE);
+  const legs = option.legs.map((leg) => {
+    const departure = floor(leg.departure), arrival = ceil(leg.arrival);
+    const minutes = Math.max(1, Math.round((new Date(arrival.iso) - new Date(departure.iso)) / MINUTE));
+    return { ...leg, departure, arrival, minutes };
+  });
+  const leave = floor(option.leave), arrive = ceil(option.arrive);
+  return { ...option, legs, leave, arrive, duration_min: Math.round((new Date(arrive.iso) - new Date(leave.iso)) / MINUTE) };
 }
 
 /* Earliest arrival first: what "you will not make it" should offer. */
@@ -455,10 +472,41 @@ function shortAddress(subtitle) {
   return parts.find((x) => /\d|(^|\s)(g|pr|al|pl|a)\.(\s|$)/.test(x)) || parts[0] || '';
 }
 
-/* Some sources write names in capitals ("AKROPOLIS"); show them as names.
-   Short words stay as they are: "PC", "UAB" are abbreviations. */
-const nameCase = (name) => (name === name.toUpperCase()
-  ? name.replace(/\p{Lu}{4,}/gu, (w) => w[0] + w.slice(1).toLowerCase()) : name);
+/* Some sources write names in capitals ("AKROPOLIS", "PC AKROPOLIS"); show
+   them as names. Short words stay as they are: "PC", "UAB", "VGTU" are
+   abbreviations. */
+const nameCase = (name) => String(name || '').replace(name === String(name).toUpperCase() ? /\p{Lu}{4,}/gu : /\p{Lu}{5,}/gu,
+  (w) => w[0] + w.slice(1).toLowerCase());
+
+/* What search returns, as a rider would want it: no parcel lockers (nobody
+   travels to a paštomatas), and one row per address, so the shops inside a
+   mall fold under the mall. The row kept is the one whose name is closest to
+   what was asked; saved places come first and win their address. */
+const LOCKER = /pa[sš]tomat|omniva|venipak|lp express|dpd pickup|smartpost|siunt\S* terminal/i;
+function cleanResults(results, query = '', saved = []) {
+  const q = fold(query);
+  const score = (r) => { const n = fold(r.name); return n === q ? 3 : n.startsWith(q) ? 2 : n.includes(q) ? 1 : 0; };
+  const address = (r) => {
+    const street = shortAddress(r.subtitle);
+    return /\d/.test(street) ? `${fold(street)}|${fold(r.city || String(r.subtitle || '').split(',').pop())}` : null;
+  };
+  const taken = new Set(saved.map(address).filter(Boolean));
+  const best = new Map();
+  const kept = [];
+  for (const r of results) {
+    if (!r || LOCKER.test(`${r.name} ${r.subtitle || ''}`)) continue;
+    const key = address(r);
+    if (key && taken.has(key)) continue;
+    if (key && best.has(key)) {
+      const slot = best.get(key);
+      if (score(r) > score(kept[slot])) kept[slot] = r;
+      continue;
+    }
+    if (key) best.set(key, kept.length);
+    kept.push(r);
+  }
+  return kept.map((r) => ({ ...r, name: nameCase(r.name) }));
+}
 
 function placeIcon(place) {
   const name = fold(place.name);
@@ -638,7 +686,7 @@ function homeView() {
       <div class="search-row">
         <label class="search">
           ${icon('search')}
-          <input id="search" type="search" placeholder="${state.searchActive ? 'Adresas, vieta ar stotelė' : 'Arba įrašyk adresą ar stotelę'}" value="${esc(state.query)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Kur keliausi">
+          <input id="search" type="search" placeholder="${state.searchActive ? 'Adresas, vieta ar stotelė' : 'Arba įvesk adresą ar stotelę'}" value="${esc(state.query)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Kur keliausi">
         </label>
         <button class="search-cancel" data-action="search-cancel" tabindex="${state.searchActive ? 0 : -1}" aria-hidden="${!state.searchActive}">Atšaukti</button>
       </div>
@@ -707,7 +755,7 @@ function searchResultsHtml(action) {
   return `${heard}<div class="group stagger" style="margin-top:14px">${items.map((item, i) => `
     <button class="row" data-action="${action}" data-index="${i}" data-key="${esc(item.saved ? `saved-${item.id}` : placeKey(item))}">
       <span class="lead">${placeIcon(item)}</span>
-      <span class="main"><div class="title">${esc(nameCase(item.name))}</div><div class="sub">${esc(placeSubtitle(item))}</div></span>
+      <span class="main"><div class="title">${esc(item.name)}</div><div class="sub">${esc(placeSubtitle(item))}</div></span>
     </button>`).join('')}</div>`;
 }
 
@@ -743,7 +791,7 @@ function onSearchInput(value) {
 function currentItems() {
   const q = state.query.trim();
   const saved = state.places.filter((p) => fold(p.name).includes(fold(q)) || sameName(p.name, q)).map((p) => ({ ...p, saved: true }));
-  return [...saved, ...state.results.filter((r) => !saved.some((s) => sameName(s.name, r.name)))];
+  return [...saved, ...cleanResults(state.results.filter((r) => !saved.some((s) => sameName(s.name, r.name))), q, saved)];
 }
 
 // ---- results
@@ -769,9 +817,18 @@ const leaveCaption = (o) => (isLate(o)
 /* A row like Apple Maps' transit rows: the time span and how long, the
    vehicles, one line of detail. Where to board is on the route screen. The
    first row is the recommended one, and only it says why. */
-function optionCard(o, i) {
+/* A chip says what sets this option apart. One whose fact is already in the
+   line above it ("be persėdimų"), or that another option shares, tells the
+   options apart on nothing. */
+function distinctTags(o, all) {
+  const others = all.filter((x) => x !== o);
+  return (o.tags || []).filter((tag) => fold(tag) !== fold(transfersText(0)) && !others.some((x) => (x.tags || []).includes(tag)));
+}
+
+function optionCard(o, i, all) {
   const when = isLate(o) ? '<span class="late">Reikėjo išeiti</span>' : `Išeik ${esc(inText(new Date(o.leave.iso).getTime()))}`;
   const meta = [when, `${metresText(o.walk_m)} pėsčiomis`, o.walk_only ? '' : transfersText(o.transfers)].filter(Boolean).join(' · ');
+  const tags = i === 0 ? distinctTags(o, all) : [];
   return `<button class="option${isLate(o) ? ' late' : ''}" data-action="open-option" data-index="${i}" data-key="${esc(o.id)}">
       <div class="top">
         <div class="span">${esc(o.leave.hm)}–<span class="${o.late ? 'late' : ''}">${esc(o.arrive.hm)}</span></div>
@@ -779,7 +836,7 @@ function optionCard(o, i) {
       </div>
       <div class="route-line">${routeLine(o)}</div>
       <div class="meta">${meta}</div>
-      ${i === 0 && o.tags && o.tags.length ? `<div class="tags">${o.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+      ${tags.length ? `<div class="tags">${tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
     </button>`;
 }
 
@@ -1046,12 +1103,12 @@ function minutesUntil(ms, at) { return Math.max(0, Math.ceil((ms - at) / 60_000)
 
 /* "12 min", or "9 val. 12 min" once it is over an hour: a bare 552 min is
    a number nobody can read at a glance. Units always attached. */
-function durationHtml(minutes) {
-  if (minutes < 60) return `${roll(minutes)}<small>min</small>`;
+function durationHtml(minutes, rolling = true) {
+  const n = rolling ? roll : esc;
+  if (minutes < 60) return `${n(minutes)}<small>min</small>`;
   const h = Math.floor(minutes / 60), m = minutes % 60;
-  return `${roll(h)}<small>val.</small>${m ? ` ${roll(m)}<small>min</small>` : ''}`;
+  return `${n(h)}<small>val.</small>${m ? ` ${n(m)}<small>min</small>` : ''}`;
 }
-const metresHtml = (m) => `${roll(roundMetres(m))}<small>${m >= 1000 ? 'km' : 'm'}</small>`;
 
 function dayWord(ms) {
   const today = now(); today.setHours(0, 0, 0, 0);
@@ -1148,7 +1205,7 @@ function activityContent(where) {
       return `<div class="question">Kur keliausime šiandien?${state.listening === 'lock' ? dotsHtml : ''}</div>
         <div class="heard">${b.problem ? esc(b.problem) : state.interim ? `„${esc(state.interim)}“` : state.listening === 'lock' ? 'Klausau…' : 'Paliesk, kad rašytum'}</div>
         ${b.problem
-          ? actions([['Rašyti', 'banner-open-search', true], ['Bandyti dar', 'lock-button']])
+          ? actions([['Rašyti', 'banner-open-search', true], ['Bandyti dar kartą', 'lock-button']])
           : actions([['Rašyti', 'banner-open-search'], ['Atšaukti', 'banner-cancel']])}`;
     case 'late':
       // "Be there by 9" that cannot be kept: say so, and offer the earliest
@@ -1174,12 +1231,12 @@ function activityContent(where) {
     case 'askTime':
       return `<div class="question">Kada turi būti vietoje?${state.listening === 'lock' ? dotsHtml : ''}</div>
         <div class="heard">${b.problem ? esc(b.problem) : state.interim ? `„${esc(state.interim)}“` : `${esc(b.place.name)} · pasakyk laiką, pvz., „keturiolika dvidešimt“`}</div>
-        ${actions([['Dabar', 'banner-now', !!b.problem], b.problem ? ['Bandyti dar', 'banner-plan'] : ['Atšaukti', 'banner-cancel']])}`;
+        ${actions([['Dabar', 'banner-now', !!b.problem], b.problem ? ['Bandyti dar kartą', 'banner-plan'] : ['Atšaukti', 'banner-cancel']])}`;
     case 'error':
       return `<div class="question small">${esc(b.message)}</div>
         ${b.detail ? `<div class="heard wrap">${esc(b.detail)}</div>` : ''}
         ${b.code === 'no-origin' ? actions([['Pasirinkti vietą', 'banner-pick-origin', true], ['Atšaukti', 'banner-cancel']])
-          : actions([['Bandyti dar', 'banner-retry', true], ['Rašyti', 'banner-open-search']])}`;
+          : actions([['Bandyti dar kartą', 'banner-retry', true], ['Rašyti', 'banner-open-search']])}`;
     case 'saved':
       return `<div class="question small">Išsaugota: ${esc(b.name)}</div>`;
     case 'suggestSave':
@@ -1494,10 +1551,9 @@ function renderLock() {
   }
   if (!state.locked) return;
   const d = now();
-  // iOS: "Šeštadienis, rugsėjo 26".
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('lt-LT', { weekday: 'long', month: 'long', day: 'numeric' })
-    .formatToParts(d).map((p) => [p.type, p.value]));
-  const date = `${capital(parts.weekday)}, ${parts.month} ${parts.day}`;
+  // The locale's own order and its "d." ("rugsėjo 28 d., pirmadienis"),
+  // capitalised at the start of the line, as iOS does.
+  const date = capital(new Intl.DateTimeFormat('lt-LT', { weekday: 'long', month: 'long', day: 'numeric' }).format(d));
   const dateEl = $('.date', lock);
   if (dateEl.textContent !== date) dateEl.textContent = date;
   rollTo($('.clock .roll', lock), hm(d));
@@ -1718,7 +1774,7 @@ async function resolvePlace(parsed) {
   let unsure = null;
   for (const candidate of candidates) {
     const data = await api('/api/search', { q: candidate, ...near() });
-    const results = data.results || [];
+    const results = cleanResults(data.results || [], candidate);
     if (!results.length) continue;
     const top = results[0];
     const sure = !data.ambiguous && (top.confidence == null || top.confidence === 'high');
@@ -2220,7 +2276,7 @@ function fillOrigins() {
   // A trip survives a reload, like a Live Activity survives the app quitting.
   const trip = store.get('trip', null);
   if (trip && new Date(trip.option.arrive.iso).getTime() > Date.now() - 2 * 3600_000) {
-    state.trip = { ...trip, option: mergeWalks(trip.option) };
+    state.trip = { ...trip, option: wholeMinutes(mergeWalks(trip.option)) };
     state.banner = { stage: 'trip' };
   }
   // Once set up, the phone starts locked: the banner is the product, and the

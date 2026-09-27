@@ -8,6 +8,7 @@ way each round, so one round's pictures can be compared with the last.
 Needs the server running (python prototype/server.py) and Playwright with
 Chromium. The clock is pinned to a weekday morning so routes are daytime
 routes whatever the real time is; the origin is ISM (Gedimino pr. 7).
+--quick captures dark mode only, at both sizes.
 """
 
 from __future__ import annotations
@@ -22,6 +23,26 @@ from playwright.sync_api import sync_playwright
 URL = "http://localhost:8765"
 ISM = {"latitude": 54.68688, "longitude": 25.2827}
 MORNING = datetime(2026, 9, 28, 8, 0)   # a Monday
+
+# A microphone that listens and never hears anything. Headless Chromium has
+# no speech service, so without it the banner only ever shows why listening
+# failed, never the listening itself.
+LISTENING = """
+(() => {
+  class Listening {
+    constructor() {
+      this.lang = ''; this.interimResults = false; this.maxAlternatives = 1;
+      this.onresult = null; this.onerror = null; this.onend = null;
+    }
+    start() {}
+    stop() {}
+    abort() {}
+  }
+  for (const name of ['SpeechRecognition', 'webkitSpeechRecognition']) {
+    Object.defineProperty(window, name, { value: Listening, configurable: true, writable: true });
+  }
+})();
+"""
 
 
 def seed(page, prefs=True):
@@ -51,8 +72,8 @@ def shot(page, out: Path, name: str, errors: list):
     print("  ", name)
 
 
-def run(browser, out: Path, width: int, height: int, scheme: str, errors: list):
-    tag = f"{width}-{scheme}"
+def open_page(browser, width: int, height: int, scheme: str, errors: list, tag: str):
+    """A fresh browser context at this size and scheme, clock at MORNING."""
     context = browser.new_context(
         viewport={"width": width, "height": height},
         color_scheme=scheme,
@@ -67,8 +88,14 @@ def run(browser, out: Path, width: int, height: int, scheme: str, errors: list):
     page.on("pageerror", lambda e: errors.append(f"[{tag}] pageerror {e}"))
     page.clock.install(time=MORNING)
     page.clock.resume()
+    return context, page
+
+
+def run(browser, out: Path, width: int, height: int, scheme: str, errors: list):
+    tag = f"{width}-{scheme}"
 
     # First run: onboarding.
+    context, page = open_page(browser, width, height, scheme, errors, tag)
     seed(page, prefs=False)
     page.goto(URL)
     ready(page)
@@ -77,16 +104,22 @@ def run(browser, out: Path, width: int, height: int, scheme: str, errors: list):
     shot(page, out, f"{tag}-02-onboarding-walk", errors)
     context.close()
 
+    # The banner while it listens: "Kur keliausime šiandien?" and the dots.
+    context, page = open_page(browser, width, height, scheme, errors, tag)
+    page.add_init_script(LISTENING)
+    seed(page)
+    page.goto(URL)
+    ready(page)
+    page.click('[data-action="lock-button"]')
+    try:
+        page.wait_for_selector(".question .listening-dots", state="visible", timeout=5_000)
+    except Exception:  # noqa: BLE001 - still take the picture; the log says why
+        errors.append(f"[{tag}] the listening banner did not appear")
+    shot(page, out, f"{tag}-04b-banner-listening", errors)
+    context.close()
+
     # Returning user.
-    context = browser.new_context(
-        viewport={"width": width, "height": height}, color_scheme=scheme, geolocation=ISM,
-        permissions=["geolocation"], locale="lt-LT", timezone_id="Europe/Vilnius", device_scale_factor=1,
-    )
-    page = context.new_page()
-    page.on("console", lambda m: errors.append(f"[{tag}] {m.text}") if m.type == "error" else None)
-    page.on("pageerror", lambda e: errors.append(f"[{tag}] pageerror {e}"))
-    page.clock.install(time=MORNING)
-    page.clock.resume()
+    context, page = open_page(browser, width, height, scheme, errors, tag)
     seed(page)
     page.goto(URL)
     ready(page)
@@ -141,14 +174,19 @@ def run(browser, out: Path, width: int, height: int, scheme: str, errors: list):
 
 
 def main():
+    global URL
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True)
-    parser.add_argument("--quick", action="store_true", help="dark desktop only")
+    parser.add_argument("--quick", action="store_true", help="dark only: 1440 and 390 wide")
+    parser.add_argument("--url", default=URL, help=f"the running prototype (default {URL})")
     args = parser.parse_args()
+    URL = args.url.rstrip("/")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
-    runs = [(1440, 900, "dark")] if args.quick else [(1440, 900, "dark"), (1440, 900, "light"), (390, 844, "dark")]
+    runs = [(1440, 900, "dark"), (390, 844, "dark")]
+    if not args.quick:
+        runs.insert(1, (1440, 900, "light"))
     with sync_playwright() as p:
         # The full Chromium build in new headless mode; the separate
         # headless shell is not installed on this machine.

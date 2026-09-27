@@ -272,4 +272,23 @@ class Router:
         last = legs[-1]
         legs.append(Leg("walk", destination.stop, DESTINATION, last.arrival,
                         last.arrival + p.walk_seconds(destination.metres), destination.metres))
-        return Journey(legs)
+        return Journey(merge_walks(legs))
+
+
+def merge_walks(legs: list[Leg]) -> list[Leg]:
+    """Two walks in a row as the one walk the rider takes.
+
+    A foot transfer to a stop the rider then leaves on foot (off the tram,
+    across to the other stop, on to the destination) is one walk to a person.
+    Its time is honest: it starts when the first walk starts and ends when the
+    last one ends, and its distance is the sum of the parts.
+    """
+    merged: list[Leg] = []
+    for leg in legs:
+        previous = merged[-1] if merged else None
+        if previous is not None and previous.kind == "walk" and leg.kind == "walk":
+            merged[-1] = Leg("walk", previous.from_stop, leg.to_stop, previous.departure,
+                             leg.arrival, previous.metres + leg.metres)
+        else:
+            merged.append(leg)
+    return merged
