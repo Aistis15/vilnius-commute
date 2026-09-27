@@ -259,6 +259,91 @@ const now = () => new Date(clock.sim + (Date.now() - clock.base) * clock.speed);
 function setSpeed(speed) { clock.sim = now().getTime(); clock.base = Date.now(); clock.speed = speed; }
 function jumpTo(ms) { clock.sim = ms; clock.base = Date.now(); }
 
+// ---------------------------------------------------------------- palettes
+//
+// The banner sits on the rider's own wallpaper, so it can take one of these
+// colourways. Presets, never a colour wheel: each is three colours that were
+// chosen together (60-30-10: the base, the ink, one accent) and checked for
+// contrast (WCAG: ink 7:1 or more, secondary text 4.5:1, accent 3:1, and a
+// red that still reads as a problem on that base). Route colours never
+// change, and neither does the map: they mean the same thing everywhere.
+const PALETTES = [
+  { id: 'grafitas', name: 'Grafitas', base: '#1C1C1E', ink: '#FFFFFF', accent: '#FFFFFF', red: '#FF453A' },
+  { id: 'balta', name: 'Balta', base: '#F5F5F7', ink: '#1C1C1E', accent: '#1C1C1E', red: '#D70015' },
+  { id: 'smelis', name: 'Smėlis', base: '#E6D8C4', ink: '#33271E', accent: '#8A5E3B', red: '#B00020' },
+  { id: 'nude', name: 'Nude', base: '#EAD3C3', ink: '#3E2A22', accent: '#A2604B', red: '#B00020' },
+  { id: 'linas', name: 'Linas', base: '#EDE6DA', ink: '#2B2620', accent: '#6F5F4C', red: '#B00020' },
+  { id: 'popierius', name: 'Popierius', base: '#FAF6EF', ink: '#1E1A15', accent: '#8C7150', red: '#D70015' },
+  { id: 'kakava', name: 'Kakava', base: '#3A2A22', ink: '#F4E8DC', accent: '#D9A77E', red: '#FF6B61' },
+  { id: 'gintaras', name: 'Gintaras', base: '#2A1C0F', ink: '#F7E6CC', accent: '#F0A43A', red: '#FF453A' },
+  { id: 'molis', name: 'Molis', base: '#7E3B2A', ink: '#FFF1E8', accent: '#F5B899', red: '#FFB0A6' },
+  { id: 'salavijas', name: 'Šalavijas', base: '#C8D2BF', ink: '#26301F', accent: '#4F6443', red: '#B00020' },
+  { id: 'alyvuoge', name: 'Alyvuogė', base: '#4A4E36', ink: '#F2EFDD', accent: '#D4CF8E', red: '#FFB0A6' },
+  { id: 'miskas', name: 'Miškas', base: '#1E3226', ink: '#E6F0E6', accent: '#86C08D', red: '#FF6B61' },
+  { id: 'rukas', name: 'Rūkas', base: '#D6DDE4', ink: '#1C2733', accent: '#4C6680', red: '#B00020' },
+  { id: 'ledas', name: 'Ledas', base: '#E6EFF6', ink: '#102636', accent: '#336E9C', red: '#D70015' },
+  { id: 'jura', name: 'Jūra', base: '#0F3A44', ink: '#E3F1F0', accent: '#62C2C6', red: '#FF8F85' },
+  { id: 'naktis', name: 'Naktis', base: '#151C2E', ink: '#E9EDF6', accent: '#93A7D6', red: '#FF453A' },
+  { id: 'roze', name: 'Rožė', base: '#DDB9B5', ink: '#3A1E22', accent: '#8E3F4A', red: '#8E0012' },
+  { id: 'levanda', name: 'Levanda', base: '#D3CBE6', ink: '#282140', accent: '#5E4E94', red: '#B00020' },
+  { id: 'bordo', name: 'Bordo', base: '#4A1620', ink: '#F8E6E9', accent: '#E39AA7', red: '#FF6B61' },
+  { id: 'slyva', name: 'Slyva', base: '#3B2340', ink: '#F3E7F5', accent: '#C9A1D6', red: '#FF6B61' },
+  { id: 'anglis', name: 'Anglis', base: '#202124', ink: '#F2F2F2', accent: '#C8E86A', red: '#FF453A' },
+];
+const paletteOf = (id) => PALETTES.find((p) => p.id === id) || PALETTES[0];
+
+const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const rgba = (h, a) => `rgba(${hexRgb(h).join(', ')}, ${a})`;
+function luminance(h) {
+  const [r, g, b] = hexRgb(h).map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+const contrastOf = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+const bestOn = (fill, choices) => choices.slice().sort((a, b) => contrastOf(b, fill) - contrastOf(a, fill))[0];
+
+/* The banner's colours as custom properties. Grafitas is the banner as it
+   always was, to the value; the others derive their secondary text, fills
+   and track from their own ink, so three colours are all there is. */
+function paletteVars(p) {
+  if (p.id === 'grafitas') return {};
+  return {
+    '--act-bg': rgba(p.base, 0.94), '--act-solid': p.base,
+    '--act-ink': p.ink, '--act-ink2': rgba(p.ink, 0.8), '--act-ink3': rgba(p.ink, 0.64),
+    '--act-fill': rgba(p.ink, 0.12), '--act-fill2': rgba(p.ink, 0.22), '--act-track': rgba(p.ink, 0.2),
+    '--act-accent': p.accent, '--act-on-accent': bestOn(p.accent, [p.ink, p.base, '#000000', '#FFFFFF']),
+    '--act-problem': p.red,
+  };
+}
+const varsStyle = (vars) => Object.entries(vars).map(([k, v]) => `${k}:${v}`).join(';');
+
+function applyPalette() {
+  const p = paletteOf(state.palette);
+  const lock = $('#lock');
+  if (lock) {
+    for (const name of ['--act-bg', '--act-solid', '--act-ink', '--act-ink2', '--act-ink3', '--act-fill', '--act-fill2', '--act-track', '--act-accent', '--act-on-accent', '--act-problem']) lock.style.removeProperty(name);
+    for (const [k, v] of Object.entries(paletteVars(p))) lock.style.setProperty(k, v);
+  }
+  applyAppAccent();
+}
+
+/* The app takes the colourway as its accent: the buttons that act. Of the
+   palette's base and ink, the one that stands out on the page fills the
+   button, and the other writes on it, so it reads in light and dark alike.
+   Grafitas leaves the system's own black and white. */
+function applyAppAccent() {
+  const root = document.documentElement;
+  const p = paletteOf(state.palette);
+  if (p.id === 'grafitas' || p.id === 'balta') {
+    root.style.removeProperty('--prominent'); root.style.removeProperty('--on-prominent');
+    return;
+  }
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const page = dark ? '#1C1C1E' : '#F2F2F7';
+  const fill = contrastOf(p.base, page) >= contrastOf(p.ink, page) ? p.base : p.ink;
+  root.style.setProperty('--prominent', fill);
+  root.style.setProperty('--on-prominent', fill === p.base ? p.ink : p.base);
+}
+
 // ------------------------------------------------------------------- state
 
 const HOME = () => ({ name: 'home', id: 'home' });
@@ -299,6 +384,8 @@ const state = {
   nearby: null,
   // Per saved place, when to leave for it now (see refreshPlaceTimes).
   placeTimes: {},
+  // The banner's colourway (see PALETTES).
+  palette: store.get('palette', 'grafitas'),
 };
 
 const save = () => {
@@ -1400,6 +1487,31 @@ function drawVehicles() {
 
 // ---- settings, places, pick
 
+/* The colourways as small banners, the chosen one on top at full size: what
+   you pick is what the lock screen will show, before you lock it. */
+function paletteSection() {
+  const chosen = paletteOf(state.palette);
+  const sample = (p, big) => `<div class="activity trip palette-card${big ? '' : ' mini'}" style="${varsStyle(paletteVars(p))}${p.id === 'grafitas' ? ';--act-bg:rgba(28,28,30,.94)' : ''}">
+      <div class="act-body">${stageHtml({
+        title: 'Išeik 08:12',
+        meta: `${badge({ name: '53', color: '0073AC', text_color: 'FFFFFF' }, true)}${clip('Vinco Kudirkos aikštė')}`,
+        hero: { label: 'išvyksta po', hero: durationHtml(6, false), sub: '08:18' },
+        foot: progressHtml(0.38, [0.55]),
+      })}</div></div>`;
+  return `<div class="section-title"><span>Banerio spalvos</span></div>
+    <div class="palette-stage" data-key="palette-${chosen.id}">${sample(chosen, true)}</div>
+    <div class="palettes" role="radiogroup" aria-label="Banerio spalvos">
+      ${PALETTES.map((p) => `<button class="swatch" role="radio" aria-checked="${p.id === chosen.id}" data-action="palette" data-id="${p.id}" data-key="sw-${p.id}">
+          <span class="swatch-card" style="background:${p.base};color:${p.ink}">
+            <span class="sw-num">6<small>min</small></span>
+            <span class="sw-bar" style="background:${rgba(p.ink, 0.2)}"><i style="background:${p.accent}"></i></span>
+          </span>
+          <span class="swatch-name">${esc(p.name)}</span>
+        </button>`).join('')}
+    </div>
+    <p class="footnote inset">Autobusų spalvos ir žemėlapis nesikeičia: visur reiškia tą patį.</p>`;
+}
+
 function settingsView() {
   const p = state.prefs;
   const choice = (key, value, title) =>
@@ -1417,8 +1529,9 @@ function settingsView() {
         <button class="row" data-action="places"><span class="lead">${icon('star')}</span><span class="main"><div class="title">Tavo vietos</div></span><span class="trail">${placesText(state.places.length)}${icon('chevron')}</span></button>
         <button class="row" data-action="pick-origin"><span class="lead">${icon('location')}</span><span class="main"><div class="title">Iš kur keliauji</div></span><span class="trail">${esc(origin() ? origin().name : 'nežinoma')}${icon('chevron')}</span></button>
       </div>
+      ${paletteSection()}
       <div class="section-title"><span>Duomenys</span></div>
-      <div class="group"><div class="row plain"><span class="main"><div class="title">Vilniaus tvarkaraščiai</div><div class="sub" id="data-info">${esc(state.dataInfo || '')}</div></span></div></div>
+      <div class="group"><div class="row plain"><span class="main"><div class="title">Vilniaus, Kauno ir Klaipėdos tvarkaraščiai</div><div class="sub" id="data-info">${esc(state.dataInfo || '')}</div></span></div></div>
       <div style="margin-top:24px"><button class="secondary" style="width:100%" data-action="reset">Pradėti iš naujo</button></div>
     </div>`;
 }
@@ -2770,6 +2883,12 @@ const actions = {
     renderLock(); renderIsland();
   },
   'trip-replan': () => replanTrip(),
+  palette: (el) => {
+    state.palette = el.dataset.id;
+    store.set('palette', state.palette);
+    applyPalette();
+    renderAll();
+  },
   'trip-done': () => {
     const trip = state.trip;
     const place = trip.place;
@@ -2949,6 +3068,7 @@ $('#toggle-theme').addEventListener('click', () => {
   const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   root.dataset.theme = dark ? 'light' : 'dark';
   store.set('theme', root.dataset.theme);
+  applyAppAccent();
 });
 $('#typed-voice').addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') return;
@@ -3010,6 +3130,8 @@ function fillOrigins() {
 (function start() {
   const theme = store.get('theme', null);
   if (theme) document.documentElement.dataset.theme = theme;
+  applyPalette();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyAppAccent);
   // A trip survives a reload, like a Live Activity survives the app quitting.
   const trip = store.get('trip', null);
   if (trip && new Date(trip.option.arrive.iso).getTime() > Date.now() - 2 * 3600_000) {

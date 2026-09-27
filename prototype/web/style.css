@@ -717,3 +717,58 @@ svg.turn.small { width: 1.05em; height: 1.05em; margin-right: 4px; stroke-width:
 .minimap .mm-bus { stroke: #000; stroke-width: 1.5; }
 .minimap .mm-me { pointer-events: none; }
 .minimap .mm-me path { fill: #fff; stroke: #1c1c1e; stroke-width: 1.2; stroke-linejoin: round; }
+
+/* ==== Banner colourways ====================================================
+   Every colour of the banner goes through a custom property; the fallbacks
+   are the Grafitas banner, to the value. The lock screen sets them from the
+   chosen palette (applyPalette). The island never does: on the iPhone it is
+   always black. The minimap keeps its own colours whatever the palette. */
+.activity { color: var(--act-ink, #fff); background: var(--act-bg, rgba(28, 28, 30, 0.82)); }
+.island .activity { background: none; }
+.activity:focus-visible { outline-color: var(--act-ink, #fff); }
+:is(.activity, .island) .caption { color: var(--act-ink3, rgba(235, 235, 245, 0.62)); }
+:is(.activity, .island) .problem-text { color: var(--act-problem, #FF453A); }
+:is(.activity, .island) .heard { color: var(--act-ink2, rgba(235, 235, 245, 0.8)); }
+:is(.activity, .island) .actions button { background: var(--act-fill, rgba(255, 255, 255, 0.16)); color: var(--act-ink, #fff); }
+:is(.activity, .island) .actions button.primary { background: var(--act-accent, #fff); color: var(--act-on-accent, #000); }
+:is(.activity, .island) .walk-glyph { color: var(--act-ink2, rgba(235, 235, 245, 0.8)); }
+:is(.activity, .island) .route-line .sep { color: var(--act-ink3, rgba(235, 235, 245, 0.4)); }
+.choices button { background: var(--act-fill, rgba(255, 255, 255, 0.14)); }
+.choices button:active { background: var(--act-fill2, rgba(255, 255, 255, 0.24)); }
+.choices .s { color: var(--act-ink3, rgba(235, 235, 245, 0.62)); }
+.link-button { color: var(--act-ink2, rgba(235, 235, 245, 0.8)); }
+.stage-meta, .stage-foot, .leg-row { color: var(--act-ink2, rgba(235, 235, 245, 0.8)); }
+.stage-label, .stage-sub { color: var(--act-ink3, rgba(235, 235, 245, 0.62)); }
+.leg-row.now { background: var(--act-fill, rgba(255, 255, 255, 0.12)); color: var(--act-ink, #fff); }
+.pager-next { background: var(--act-fill, rgba(255, 255, 255, 0.14)); color: var(--act-ink, #fff); }
+.pager-next:active { background: var(--act-fill2, rgba(255, 255, 255, 0.26)); }
+.pdots i { background: var(--act-track, rgba(255, 255, 255, 0.35)); }
+.pdots i.on { background: var(--act-ink, #fff); }
+.progress { background: var(--act-track, rgba(255, 255, 255, 0.2)); }
+.progress i { background: var(--act-accent, #fff); }
+.progress .tick { background: var(--act-solid, rgb(28, 28, 30)); }
+.island .progress .tick { background: #000; }
+.approach-track::before { background: var(--act-track, rgba(255, 255, 255, 0.28)); }
+.approach-track > i { background: var(--act-ink3, rgba(255, 255, 255, 0.5)); }
+.approach-track > i.approach-you { background: none; box-shadow: inset 0 0 0 2px var(--act-ink, #fff); }
+.foot-action { background: var(--act-accent, #fff); color: var(--act-on-accent, #000); }
+.done-check { stroke: var(--act-ink, #fff); }
+/* The map is a map: the same dark inset on every colourway. */
+.minimap { background: #2B2D31; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+
+/* Settings: the chosen colourway at full size, the rest as small cards. */
+.palette-stage { margin: 2px 0 14px; }
+.palette-card { cursor: default; }
+.palette-card .act-body { height: 106px; display: flex; flex-direction: column; }
+.palettes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 10px; }
+.swatch { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; }
+.swatch-card { height: 64px; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between;
+  box-shadow: inset 0 0 0 0.5px var(--separator); transition: transform var(--t-release) var(--ease-out), box-shadow var(--t-fade) var(--ease-out); }
+.swatch:active .swatch-card { transform: scale(.96); transition-duration: var(--t-press); }
+.sw-num { font: 700 20px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.sw-num small { font-size: 12px; font-weight: 600; margin-left: 2px; }
+.sw-bar { display: block; height: 4px; border-radius: 2px; overflow: hidden; }
+.sw-bar i { display: block; width: 45%; height: 100%; border-radius: 2px; }
+.swatch-name { font-size: 13px; color: var(--label2); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swatch[aria-checked="true"] .swatch-card { box-shadow: 0 0 0 2px var(--page), 0 0 0 4px var(--label); }
+.swatch[aria-checked="true"] .swatch-name { color: var(--label); font-weight: 600; }
