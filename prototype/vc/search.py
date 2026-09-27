@@ -127,14 +127,32 @@ def street_variants(query: str) -> list[str]:
     return [v for v in dict.fromkeys((" ".join(short), " ".join(full))) if v != original]
 
 
+# Case endings as matching sees them (folded, no hooks), longest first:
+# "progimnazijoje" and "progimnazija" are one word, and so are "Akropolyje"
+# and "Akropolis".
+_CASE_ENDINGS = sorted({fold(e) for e in (
+    "uose ėse ose oje ėje yje uje džio čio ies aus io ių ų į ą ę es os ės o e "
+    "as is ys us ius a ė ai iai ui ams oms".split())}, key=len, reverse=True)
+
+
+def _stem(word: str) -> str:
+    for ending in _CASE_ENDINGS:
+        if word.endswith(ending) and len(word) - len(ending) >= 4:
+            return word[: -len(ending)]
+    return word
+
+
 def _same_word(a: str, b: str) -> bool:
     """Equal, or the same word in another case: of two words of five letters
     or more, only the last two letters of the longer may differ (Akropolį and
-    Akropolis, Kauno and Kaunas, universitetą and universitetas)."""
+    Akropolis, Kauno and Kaunas, universitetą and universitetas), or the two
+    are one stem with case endings (progimnazijoje and progimnazija)."""
     if a == b:
         return True
     if len(a) < 5 or len(b) < 5:
         return False
+    if _stem(a) == _stem(b) and len(_stem(a)) >= 4:
+        return True
     common = 0
     for x, y in zip(a, b):
         if x != y:
@@ -574,6 +592,20 @@ def search(index: StopIndex, query: str, lat: float | None = None, lon: float | 
         if more:
             candidates += more
             out = _best(rank(query, candidates, origin))
+    # Typed the way it is said ("ISM universitete", "Akropolyje"): ask again
+    # with the name's own form, and keep that answer when it is surer.
+    if not (out and out[0]["confidence"] == "high"):
+        from .speech_lt import nominative_candidates
+        for form in nominative_candidates(query)[:3]:
+            if fold(form) == fold(query):
+                continue
+            more = index.search(form, origin=origin) + found(form)
+            if not more:
+                continue
+            ranked = _best(rank(form, candidates + more, origin))
+            if ranked and ranked[0]["confidence"] == "high":
+                out = ranked
+                break
     return {"results": out, "ambiguous": is_ambiguous(out)}
 
 
@@ -596,7 +628,7 @@ def resolve(index: StopIndex, candidates: list[str], lat: float | None = None,
     word. "Katedra aikštė" finds a cathedral but not the square, so
     "Katedros aikštė", read next, gets its turn."""
     best, best_key = None, None
-    for query in candidates[:4]:
+    for query in candidates[:6]:
         found = search(index, query, lat, lon)
         found["query"] = query
         top = found["results"][0] if found["results"] else None

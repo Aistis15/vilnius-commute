@@ -144,5 +144,46 @@ class SpelledLetters(unittest.TestCase):
         self.assertEqual(parse("Ozo g. 25", TEN_AM).destination, "Ozo g 25")
 
 
+
+class SaidLikePeople(unittest.TestCase):
+    """People say where they need to be, not what the map calls it."""
+
+    def test_locative_with_a_genitive_before_it(self):
+        r = parse("aš noriu būti Versmės progimnazijoje keturiolika dvidešimt", TEN_AM)
+        self.assertEqual(r.candidates[0], "Versmės progimnazija")
+        self.assertEqual((r.time, r.mode), ("14:20", "arrive"))
+
+    def test_hesitation_keeps_the_settled_name(self):
+        r = parse("tenai man reikia būti universitete, kokiam nors, tarkim, ISM universitete", TEN_AM)
+        self.assertEqual(r.candidates[0], "ISM universitetas")
+
+    def test_said_twice_keeps_the_fuller(self):
+        self.assertEqual(parse("reikia būti universitete ISM universitete", TEN_AM).candidates[0], "ISM universitetas")
+
+    def test_locative_forms(self):
+        for said, name in (("Akropolyje", "Akropolis"), ("Fabijoniškėse", "Fabijoniškės"),
+                           ("Pašilaičiuose", "Pašilaičiai"), ("Kalvarijų turguje", "Kalvarijų turgus"),
+                           ("Žaliajame tilte", "Žaliasis tiltas"), ("Didžiojoje gatvėje", "Didžioji gatvė"),
+                           ("Katedros aikštėje", "Katedros aikštė"), ("senamiestyje", "senamiestis"),
+                           ("Naujojoje Vilnioje", "Naujoji Vilnia")):
+            with self.subTest(said=said):
+                self.assertIn(name, nominative_candidates(said))
+                self.assertEqual(parse(f"noriu būti {said}", TEN_AM).candidates[0], name)
+
+    def test_genitive_forms(self):
+        for said, name in (("iki Akropolio", "Akropolis"), ("prie Katedros aikštės", "Katedros aikštė"),
+                           ("iki senamiesčio", "senamiestis"), ("prie stoties", "stotis"),
+                           ("netoli Kalvarijų turgaus", "Kalvarijų turgus")):
+            with self.subTest(said=said):
+                self.assertEqual(parse(said, TEN_AM).candidates[0], name)
+
+    def test_a_name_with_ir_stays_whole(self):
+        r = parse("noriu būti Operos ir baleto teatre", TEN_AM)
+        self.assertEqual(r.candidates[0], "Operos ir baleto teatras")
+
+    def test_i_am_is_not_a_place(self):
+        self.assertEqual(parse("aš būsiu Akropolyje", TEN_AM).candidates[0], "Akropolis")
+
+
 if __name__ == "__main__":
     unittest.main()

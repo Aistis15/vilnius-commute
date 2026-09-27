@@ -51,7 +51,7 @@ _NUMBER_FORMS = {
 }
 NUMBERS = {fold(word): value for value, forms in _NUMBER_FORMS.items() for word in forms.split()}
 
-ARRIVE_WORDS = {fold(w) for w in "būti būt atvykti atvažiuoti nuvykti nukakti iki".split()}
+ARRIVE_WORDS = {fold(w) for w in "būti būt būsiu būčiau atvykti atvažiuoti nuvykti nukakti atsidurti susitikti iki".split()}
 DEPART_WORDS = {fold(w) for w in "išvykti išvažiuoti išeiti išeinu išvykstu išvažiuoju".split()}
 HOME_WORDS = {"namo", "namus", "namai", "namuose"}
 PART_OF_DAY = {
@@ -64,7 +64,10 @@ PART_OF_DAY = {fold(k): v for k, v in PART_OF_DAY.items()}
 
 # Words that carry the request rather than the destination.
 FILLER = {fold(w) for w in """
-    man mums reikia reik reikės noriu norėčiau norečiau norim norime
+    aš man mums reikia reik reikės reiktų reikėtų noriu norėčiau norečiau norim norime
+    turiu turėsiu turėčiau privalau būsiu būčiau atsidurti susitikti
+    nusigauti nukeliauti patekti pasiekti vykti vykstu keliauju einu einam važiuojam važiuojame
+    netoli šalia arti ties yra galėtum galėtumėte nuvesti parodyti rask rasti surask ieškok
     būti būt buti nuvykti nuvažiuoti važiuoti važiuoju vaziuoti keliauti
     keliausime eiti nueiti atvykti atvažiuoti nukakti išvykti išvažiuoti išeiti
     į i iki prie pas link ligi nuo kaip dabar šiandien rytoj
@@ -72,6 +75,17 @@ FILLER = {fold(w) for w in """
     ryto rytą ryte dienos popiet vakaro vakare vakarą nakties naktį
     pusę pusė pusei be po to pietų
     prašau gal nuvesk parodyk
+""".split()}
+
+
+# Words people say while they think ("universitete, kokiam nors, tarkim, ISM
+# universitete"). Each ends what was said before it: the place is in the last
+# stretch of words, the one the speaker settled on.
+HESITATION = {fold(w) for w in """
+    tenai ten tai nu na va tipo žinai tarkim tarkime pavyzdžiui pvz tiksliau
+    koks kokia kokį kokią kokiam kokioj kokioje kokiame kažkoks kažkokia
+    kažkokiam kažkokioje kažkur nors arba ar šitas šita šitam šitoj šitoje
+    tas ta tą tam toj tame toje kur
 """.split()}
 
 
@@ -171,16 +185,24 @@ def parse(text: str, now_minutes: int | None = None) -> Parsed:
     elif result.time is not None or any(f in ARRIVE_WORDS - {"iki"} for f in folded):
         result.mode = "arrive"
 
-    words = [tokens[i] for i, f in enumerate(folded) if i not in used and f not in FILLER]
+    segments = _segments(tokens, folded, used)
+    words = [w for segment in segments for w in segment]
     if any(f in HOME_WORDS for f in folded):
         result.home = True
         words = [w for w in words if fold(w) not in HOME_WORDS]
         result.destination = "Namai"
         result.candidates = ["Namai"]
     if words and not result.home:
-        phrase = " ".join(words)
+        # The last stretch first: what the speaker settled on. All of it
+        # together after, for a name the pauses happened to split.
+        last = _settled(segments[-1])
+        phrase = " ".join(last)
         result.destination = phrase
         result.candidates = nominative_candidates(phrase)
+        whole = " ".join(words)
+        if fold(whole) != fold(phrase):
+            seen = {fold(c) for c in result.candidates}
+            result.candidates += [c for c in nominative_candidates(whole) if fold(c) not in seen]
         # The other way to read spelled letters ("i v u": IVU or "į VU"),
         # searched only after the first reading.
         for reading in other_readings:
@@ -196,6 +218,41 @@ def parse(text: str, now_minutes: int | None = None) -> Parsed:
         rest = parse(then, now_minutes)
         result.then = rest.destination
     return result
+
+
+def _segments(tokens: list[str], folded: list[str], used: set[int]) -> list[list[str]]:
+    """The words that can name a place, in stretches split where the speaker
+    hesitated. Request words ("man reikia būti") are dropped without ending a
+    stretch; "ir" stays when it joins two words of a name ("Operos ir baleto
+    teatras")."""
+    segments: list[list[str]] = [[]]
+    for i, (token, word) in enumerate(zip(tokens, folded)):
+        if i in used:
+            continue
+        if word in HESITATION:
+            if segments[-1]:
+                segments.append([])
+            continue
+        if word == "ir":
+            before = i > 0 and folded[i - 1] not in FILLER | HESITATION and (i - 1) not in used and segments[-1]
+            after = i + 1 < len(folded) and folded[i + 1] not in FILLER | HESITATION and (i + 1) not in used
+            if before and after:
+                segments[-1].append(token)
+            continue
+        if word in FILLER:
+            continue
+        segments[-1].append(token)
+    return [segment for segment in segments if segment] or [[]]
+
+
+def _settled(words: list[str]) -> list[str]:
+    """A name said twice keeps the second, fuller saying: "universitete ISM
+    universitete" -> "ISM universitete"."""
+    folded = [fold(w) for w in words]
+    for i, word in enumerate(folded[:-1]):
+        if word in folded[i + 1:]:
+            return _settled(words[i + 1:])
+    return words
 
 
 def _number_at(folded: list[str], i: int) -> tuple[int, int] | None:
@@ -290,33 +347,52 @@ def _resolve_hour(hour: int, minute: int, part: str | None, now_minutes: int | N
     return hour
 
 
+# The endings a name's last word (the noun it is named after) takes in the
+# cases a destination is said in, each with the nominative forms it can come
+# from, likeliest first. Locative: "būti progimnazijoje, universitete,
+# Akropolyje, Fabijoniškėse, Pašilaičiuose". Accusative: "į Akropolį". Genitive:
+# "iki Akropolio, prie stoties, netoli turgaus". The longest ending wins.
+NOUN_ENDINGS = {
+    "uose": ["ai"], "ėse": ["ės"], "ose": ["os"],
+    "oje": ["a"], "ėje": ["ė"], "yje": ["is", "ys"], "uje": ["us"],
+    "džio": ["dis"], "čio": ["tis"], "ies": ["is"], "aus": ["us"], "io": ["is", "ys", "ius"],
+    "ių": ["ės", "iai"], "ų": ["ai", "os", "us"],
+    "į": ["is", "ys"], "ą": ["as", "a"], "ę": ["ė"], "es": ["ės"],
+    "os": ["a"], "ės": ["ė"], "o": ["as"], "e": ["as"],
+}
+# Adjectives before it agree with it ("Žaliajame tilte", "Didžiojoje
+# gatvėje"). A genitive before it ("Vilniaus", "Versmės", "Katedros") names
+# whose it is and never changes.
+ADJECTIVE_ENDINGS = {
+    "ajame": ["asis"], "ojoje": ["oji"], "ąjį": ["asis"], "ąją": ["oji"],
+    "ojo": ["asis"], "osios": ["oji"], "ųjų": ["ieji"], "uosiuose": ["ieji"],
+}
+
+
+def _forms(word: str, endings: dict[str, list[str]]) -> list[str]:
+    low = word.casefold()
+    for ending in sorted(endings, key=len, reverse=True):
+        if low.endswith(ending) and len(low) > len(ending) + 1:
+            return [word[: -len(ending)] + r for r in endings[ending]]
+    return []
+
+
 def nominative_candidates(phrase: str) -> list[str]:
     """Search terms for a place named in another grammatical case.
 
-    "į Akropolį" is accusative; the place is called "Akropolis". A handful of
-    endings covers the common cases, and the original is always kept.
+    "į Akropolį", "būti Versmės progimnazijoje", "iki Katedros aikštės": the
+    places are called "Akropolis", "Versmės progimnazija", "Katedros aikštė".
+    The last word is the noun that takes the case; adjectives before it agree
+    with it; the rest are genitives that stay. The phrase as said is always
+    the last candidate.
     """
-    # Longest endings first: "Žaliąjį" must become "Žaliasis", not "Žaliąjis".
-    rules = [
-        ("ąjį", ["asis"]), ("ąją", ["oji"]), ("ųjų", ["ieji"]),
-        ("į", ["is"]), ("ą", ["as", "a"]), ("ę", ["ė"]), ("io", ["is"]),
-        ("o", ["as"]), ("os", ["a"]), ("ės", ["ė"]), ("ų", ["ai", "os"]),
-    ]
-
-    def forms_of(word: str) -> list[str]:
-        low = word.casefold()
-        for ending, replacements in rules:
-            if low.endswith(ending) and len(low) > len(ending) + 1:
-                stem = word[: -len(ending)]
-                return [stem + r for r in replacements]
-        return []
-
     words = phrase.split()
-    # Every word takes the case, adjectives included: "į Žaliąjį tiltą".
-    first_choice = " ".join((forms_of(w) or [w])[0] for w in words)
-    last_only = " ".join(words[:-1] + [(forms_of(words[-1]) or [words[-1]])[-1]])
+    if not words:
+        return []
+    before = [(_forms(w, ADJECTIVE_ENDINGS) or [w])[0] for w in words[:-1]]
+    heads = _forms(words[-1], NOUN_ENDINGS)
     seen, out = set(), []
-    for candidate in (first_choice, last_only, phrase):
+    for candidate in [" ".join(before + [h]) for h in heads] + [phrase]:
         if fold(candidate) not in seen:
             seen.add(fold(candidate))
             out.append(candidate)
