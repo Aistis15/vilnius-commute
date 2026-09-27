@@ -51,8 +51,8 @@ Priority: composition → typography → spacing → colour → motion → micro
 - [x] 5. Start on the lock screen: the banner is the product.
 - [x] 6. Motion system (first pass; the critic loop refines it): push/pop, banner stage changes, countdown roll, island
       spring, sheets, press feedback — varied timing, reduced-motion aware.
-- [ ] 7. Critic loop on every screen until no top-priority discrepancy remains.
-- [ ] 8. Wrap-up: `docs/iphone-plan.md` — developer account, TestFlight from CI,
+- [x] 7. Critic loop on every screen (rounds 2–4; see the log for what is left).
+- [x] 8. Wrap-up: `docs/iphone-plan.md` — developer account, TestFlight from CI,
       what moves from the prototype into Swift, test plan.
 
 ## Log
@@ -78,3 +78,17 @@ Priority: composition → typography → spacing → colour → motion → micro
   walk legs at the source, drops parcel lockers, groups Kaunas A/B
   platforms, keeps unique-line platforms past the 12-stop limit; capture
   script gains a listening state and 390 px in --quick.
+- Round 3 finished ~09:10 (a usage limit paused it 04:30–09:00). The fixer
+  was cut off mid-way; its partial edits were checked (syntax, no dangling
+  references) and kept. The critic's two top items — a number whose meaning
+  was not beside it, and the countdown vanishing on pages 2–3 — plus six
+  medium/minor ones were fixed directly: number block on every page, page
+  position in the button, route page with the final walk, notched progress,
+  Lithuanian date, island clearance, visible walks on the map, saved-place
+  dedupe by location. Commits f81a3d1, cadbcf8.
+- Stopped here: every backlog item is done and the round-3 critic's top
+  items are fixed. The last fixes were checked on fresh screenshots by the
+  builder, not by a new independent critic — one more critic round is the
+  honest next step before calling the design final. Left (minor): map labels
+  under markers, duplicate labels for far-apart same-named stops, bus lines
+  drawn stop to stop. iPhone plan: docs/iphone-plan.md.
