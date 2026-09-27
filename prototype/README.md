@@ -59,6 +59,12 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
   bus moves the walk earlier by all of it. A connection the new times break
   is marked, sorted last in the results, and the banner says "Nespėsi
   persėsti" with one button that plans the rest from that stop.
+- **Directions are turns, not compass points.** Each walk of a trip gets its
+  street path and turns from OpenStreetMap's foot router (`/api/walk`); the
+  banner's arrow is bent by the turn's real angle ("↰ Kairėn · po 130 m"),
+  a street that only changes its name is not a turn, and the round minimap
+  turns with the phone so the path ahead always runs up. Offline, the walk
+  is a straight line and the arrow says "Tiesiai".
 - **The board at the stop is on the home screen** (`/api/nearby`): the three
   nearest stops, their lines and the next times, live where known.
 

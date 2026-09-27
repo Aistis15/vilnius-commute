@@ -67,8 +67,6 @@ const ICONS = {
   live: '<circle cx="6.5" cy="17.5" r="2" class="fill"/><path d="M5 11.5a7.5 7.5 0 0 1 7.5 7.5M5 5a14 14 0 0 1 14 14"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
-// Filled, so it reads as a direction rather than a line drawing. Points north.
-const ARROW = '<path d="M12 2.5 19.5 20.5 12 16.3 4.5 20.5z"/>';
 const dotsHtml = '<span class="listening-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
 // A number whose digits roll when it changes (see rollTo).
 const roll = (value) => `<span class="roll">${esc(value)}</span>`;
@@ -1349,7 +1347,7 @@ function drawMap() {
   }).addTo(map);
   const bounds = [];
   o.legs.forEach((leg) => {
-    const points = leg.kind === 'ride' ? leg.stops.map((s) => [s.lat, s.lon]) : [[leg.from.lat, leg.from.lon], [leg.to.lat, leg.to.lon]];
+    const points = leg.kind === 'ride' ? leg.stops.map((s) => [s.lat, s.lon]) : walkRoute(leg).coords;
     bounds.push(...points);
     L.polyline(points, leg.kind === 'ride'
       ? { color: '#' + leg.route.color, weight: 6, opacity: 0.95 }
@@ -1494,6 +1492,7 @@ function recordVisit(place) {
 
 function startTrip(option, place) {
   state.trip = { option: withLive(option), planned: option, place, startedAt: now().getTime(), snoozeUntil: 0, page: 0 };
+  fetchWalks(option);
   state.banner = { stage: 'trip' };
   store.set('trip', state.trip);
   recordVisit(place);
@@ -1527,6 +1526,7 @@ async function replanTrip() {
     });
     for (const l of next.legs) { const r = refOf(l); if (r) state.live[r] = l.live || null; }
     refreshTripOption();
+    fetchWalks(trip.planned);
     store.set('trip', state.trip);
     toast(`Naujas kelias: atvyksi ${state.trip.option.arrive.hm}`);
   } catch (e) {
@@ -1601,11 +1601,8 @@ function straightMetres(a, b) {
   return Math.hypot(dx, dy);
 }
 
-// Which way, as the rider would say it: "į šiaurės vakarus".
-const TOWARDS = ['į šiaurę', 'į šiaurės rytus', 'į rytus', 'į pietryčius', 'į pietus', 'į pietvakarius', 'į vakarus', 'į šiaurės vakarus'];
-const towards = (deg) => TOWARDS[Math.round(deg / 45) % 8];
 
-/* The needle turns the short way round: 350° to 10° is 20°, not 340°. */
+/* The map turns the short way round: 350° to 10° is 20°, not 340°. */
 const needleTurns = {};
 function needleAngle(where, deg) {
   const prev = needleTurns[where];
@@ -1613,8 +1610,110 @@ function needleAngle(where, deg) {
   const delta = ((((deg - prev) % 360) + 540) % 360) - 180;
   return (needleTurns[where] = prev + delta);
 }
-const needle = (where, deg) => `<svg class="needle" viewBox="0 0 24 24" aria-hidden="true" style="transform:rotate(${needleAngle(where, deg).toFixed(1)}deg)">${ARROW}</svg>`;
-const pointer = (deg) => `<span class="pointer" aria-hidden="true"><svg viewBox="0 0 24 24" style="transform:rotate(${deg.toFixed(0)}deg)">${ARROW}</svg></span>`;
+
+// ---- walking directions: the street path, its turns, a map that turns with you
+
+/* Each walk of a trip gets its real path along the streets (/api/walk,
+   OpenStreetMap's foot router), fetched once when the trip starts. Until it
+   arrives, or without the internet, the walk is a straight line to the stop
+   and the arrow says "tiesiai": nothing invented. */
+const walkRoutes = {};
+const walkKey = (leg) => `${leg.from.lat.toFixed(5)},${leg.from.lon.toFixed(5)}>${leg.to.lat.toFixed(5)},${leg.to.lon.toFixed(5)}`;
+function fetchWalks(option) {
+  if (!option || !option.legs) return Promise.resolve();
+  return Promise.all(option.legs.map((leg) => {
+    if (leg.kind !== 'walk' || leg.metres < 40) return null;
+    const key = walkKey(leg);
+    if (key in walkRoutes) return null;
+    walkRoutes[key] = null;
+    return api('/api/walk', { from: `${leg.from.lat},${leg.from.lon}`, to: `${leg.to.lat},${leg.to.lon}` })
+      .then((route) => { walkRoutes[key] = route; }).catch(() => {});
+  }));
+}
+function straightRoute(a, b) {
+  const metres = straightMetres(a, b);
+  return { metres, coords: [[a.lat, a.lon], [b.lat, b.lon]], along: [0, metres], turns: [], straight: true };
+}
+const walkRoute = (leg) => walkRoutes[walkKey(leg)] || straightRoute(leg.from, leg.to);
+// A ride's path is its stops in order.
+function rideRoute(leg) {
+  const coords = leg.stops.map((stop) => [stop.lat, stop.lon]);
+  const along = [0];
+  for (let i = 1; i < coords.length; i++) {
+    along.push(along[i - 1] + straightMetres({ lat: coords[i - 1][0], lon: coords[i - 1][1] }, { lat: coords[i][0], lon: coords[i][1] }));
+  }
+  return { metres: along[along.length - 1], coords, along, turns: [] };
+}
+
+/* The point `d` metres along a path, and which way the path runs there. */
+function pointAlong(route, d) {
+  const { coords, along } = route;
+  let i = 0;
+  while (i < along.length - 2 && along[i + 1] < d) i++;
+  const a = { lat: coords[i][0], lon: coords[i][1] }, b = { lat: coords[i + 1][0], lon: coords[i + 1][1] };
+  const f = clamp01((d - along[i]) / Math.max(0.01, along[i + 1] - along[i]));
+  return { ...lerp(a, b, f), heading: bearing(a, b) };
+}
+
+/* A turn as it is said. The word comes from the angle; the arrow is drawn
+   at the angle itself, bent as much as the street bends. */
+function turnWords(angle) {
+  const a = Math.abs(angle), side = angle < 0 ? 'kairėn' : 'dešinėn';
+  if (a < 20) return 'tiesiai';
+  if (a < 60) return `šiek tiek ${side}`;
+  if (a < 125) return side;
+  if (a < 165) return `staigiai ${side}`;
+  return 'apsisuk';
+}
+function turnArrow(angle, cls = '') {
+  const a = Math.max(-179, Math.min(179, angle));
+  let d;
+  if (Math.abs(a) < 20) d = 'M12 22V4M6.5 9.5 12 4l5.5 5.5';
+  else if (a <= -165) d = 'M16 22V11a4 4 0 0 0-8 0v6M4.5 13.5 8 17.5l3.5-4';
+  else if (a >= 165) d = 'M8 22V11a4 4 0 0 1 8 0v6M12.5 13.5 16 17.5l3.5-4';
+  else {
+    const r = rad(a), ex = 12 + 9 * Math.sin(r), ey = 12 - 9 * Math.cos(r);
+    const back = (k) => `${(ex - 5.5 * Math.sin(r + rad(k))).toFixed(2)} ${(ey + 5.5 * Math.cos(r + rad(k))).toFixed(2)}`;
+    d = `M12 22V12L${ex.toFixed(2)} ${ey.toFixed(2)}M${back(38)}L${ex.toFixed(2)} ${ey.toFixed(2)}L${back(-38)}`;
+  }
+  return `<svg class="turn${cls ? ` ${cls}` : ''}" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+}
+
+/* A small round map that turns with you, the way a game's minimap does: you
+   in the middle pointing up, the path ahead as a line, where you are going
+   as a ring. "Which way?" is answered by turning until the line runs up;
+   no north, south or compass words to decode. Only lines and dots, so the
+   real Live Activity can draw it natively. */
+function minimapHtml(where, { route, here, heading, target, color, done = 0, bus = null }) {
+  const R = 40;
+  const start = { lat: route.coords[0][0], lon: route.coords[0][1] };
+  // About 150 m to the rim on foot, closer in as the goal nears; a ride's
+  // stops are further apart.
+  const left = straightMetres(here, target);
+  const reach = bus !== null || route.coords.length > 2 && !route.turns.length
+    ? Math.max(250, Math.min(1500, route.metres * 0.5))
+    : Math.max(60, Math.min(150, left * 1.25));
+  const k = R / reach;
+  const px = (p) => [(p.lon - start.lon) * 111_320 * Math.cos(rad(start.lat)) * k, -(p.lat - start.lat) * 111_320 * k];
+  const pts = (list) => list.map((p) => px(p).map((v) => v.toFixed(1)).join(',')).join(' ');
+  const points = route.coords.map(([lat, lon]) => ({ lat, lon }));
+  const cut = route.along.findIndex((x) => x > done);
+  const split = cut < 0 ? points.length : cut;
+  const behind = [...points.slice(0, split), here], ahead = [here, ...points.slice(split)];
+  const [hx, hy] = px(here);
+  let [tx, ty] = px(target);
+  const far = Math.hypot(tx - hx, ty - hy), rim = R - 7;
+  if (far > rim) { tx = hx + ((tx - hx) * rim) / far; ty = hy + ((ty - hy) * rim) / far; }
+  const busDot = bus && bus.lat != null ? (() => { const [bx, by] = px(bus); return `<circle class="mm-bus" cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="4" style="fill:#${esc(color || 'fff')}"/>`; })() : '';
+  const turned = needleAngle(`${where}-map`, heading);
+  return `<span class="minimap" aria-hidden="true"><span class="mm-turn" style="transform:rotate(${(-turned).toFixed(1)}deg)">
+      <svg viewBox="-40 -40 80 80"><g transform="translate(${(-hx).toFixed(1)} ${(-hy).toFixed(1)})">
+        <polyline class="mm-done" points="${pts(behind)}"/><polyline class="mm-path" points="${pts(ahead)}"/>
+        <circle class="mm-target" cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}" r="4.5"${color ? ` style="stroke:#${esc(color)}"` : ''}/>${busDot}
+      </g></svg></span>
+      <svg class="mm-me" viewBox="-40 -40 80 80"><path d="M0 -7 5 5.5 0 2.8 -5 5.5Z"/></svg>
+    </span>`;
+}
 
 /* The prototype has no GPS during a trip, so the rider is placed where the
    timetable says they should be: along the walk by elapsed time, between two
@@ -1623,16 +1722,25 @@ function guidance(trip, phase, at) {
   const legs = trip.option.legs;
   const leg = phase.kind === 'before' ? legs[0] : phase.leg;
   const lastLeg = legs.indexOf(leg) === legs.length - 1;
+  // Where the phone points, on the desk: the way the path runs, turned by
+  // the panel's "Kur atsisukęs" slider (a real phone has a compass).
+  const facing = (deg) => (deg + (state.headingOffset || 0) + 360) % 360;
   if (leg.kind === 'walk') {
     const span = Math.max(1, t(leg.arrival) - t(leg.departure));
     const done = phase.kind === 'before' ? 0 : clamp01((at - t(leg.departure)) / span);
-    const here = lerp(leg.from, leg.to, done);
+    const route = walkRoute(leg);
+    const d = done * route.metres;
+    const here = pointAlong(route, d);
+    const next = route.turns.find((turn) => turn.at > d + 2 && Math.abs(turn.angle) >= 20) || null;
+    const left = Math.max(0, route.metres - d);
     return {
-      mode: 'walk',
+      mode: 'walk', route, here, done: d,
+      heading: facing(route.straight ? bearing(here, leg.to) : here.heading),
       deg: bearing(here, leg.to),
-      metres: Math.round(leg.metres * (1 - done)),
+      metres: Math.round(left),
       straight: straightMetres(here, leg.to),
-      target: leg.to.name,
+      next: next && next.at - d < left - 10 ? { angle: next.angle, in: Math.round(next.at - d), name: next.name } : null,
+      target: leg.to.name, targetPoint: leg.to,
       toStop: !lastLeg && leg.to.stop != null,
     };
   }
@@ -1641,11 +1749,18 @@ function guidance(trip, phase, at) {
   while (k < stops.length - 2 && t(stops[k + 1].time) <= at) k++;
   const a = stops[k], b = stops[k + 1] || stops[k];
   const same = a.lat === b.lat && a.lon === b.lon;
+  const f = clamp01((at - t(a.time)) / Math.max(1, t(b.time) - t(a.time)));
+  const route = rideRoute(leg);
   return {
-    mode: 'ride',
+    mode: 'ride', route,
+    here: lerp(a, b, f),
+    done: route.along[k] + (route.along[Math.min(k + 1, route.along.length - 1)] - route.along[k]) * f,
     deg: bearing(same ? leg.from : a, same ? leg.to : b),
+    heading: facing(bearing(same ? leg.from : a, same ? leg.to : b)),
     next: b.name,
+    left: Math.max(1, stops.filter((stop) => t(stop.time) > at).length),
     minutes: Math.max(1, minutesUntil(t(b.time), at)),
+    targetPoint: leg.to,
   };
 }
 
@@ -1718,7 +1833,7 @@ const PAGES = ['Laikas', 'Kryptis', 'Maršrutas'];
 
 /* The page the banner shows. A new stage is a new instruction, so it opens
    on the first page again: the rider never misses "Ruoškis išlipti" because
-   the compass was left up. */
+   the map was left up. */
 const stageOf = (phase) => `${phase.kind}:${phase.i ?? ''}`;
 function pageOf(trip, phase) {
   if (trip.pageStage !== stageOf(phase)) {
@@ -1796,7 +1911,7 @@ const countdown = (ms, at) => {
 /* The number block: how long until the next thing happens, what that thing
    is, and its clock time — "išvyksta po / 10 min / 08:10". It says what the
    number means right beside it, and it sits in the same place on every page,
-   so flipping to the compass never hides "when". */
+   so flipping to the map never hides "when". */
 function heroOf(trip, phase, at) {
   const o = trip.option;
   const legs = o.legs;
@@ -1890,7 +2005,9 @@ function nowPage(trip, phase, at) {
   // Live, where the bus is replaces the walk's minutes: the number block
   // already counts down to it, and the line has room for one of the two.
   const live = ride && phase.i + 1 === legs.indexOf(ride) ? liveHtml(ride, { short: true }) : '';
-  const foot = clip(`${pointer(g.deg)}${distanceHtml(g.metres)} · ${live || `${walkLeft} min`}`);
+  const way = g.next ? `${turnArrow(g.next.angle, 'small')}po ${distanceHtml(g.next.in)} ${turnWords(g.next.angle)}`
+    : `${turnArrow(0, 'small')}${distanceHtml(g.metres)}`;
+  const foot = clip(`${way} · ${live || `${walkLeft} min`}`);
   if (!ride) {
     return stageHtml({ title: 'Eik pėsčiomis', meta: clip(esc(trip.place.name)), hero, foot });
   }
@@ -1904,25 +2021,38 @@ function nowPage(trip, phase, at) {
   return stageHtml({ title, meta: `${badge(ride.route, true)}${clip(esc(ride.from.name))}`, hero, foot });
 }
 
-// Page 2: which way. Walking, towards the next stop or the destination;
-// riding, the direction of travel and the next stop. The number block stays.
+// Page 2: which way, as the street says it: the next bend's arrow at its
+// real angle, and a map that turns with the rider. On the bus, the next
+// stop; waiting, where the bus is. The number block stays.
 function directionPage(trip, phase, at, where) {
   const g = guidance(trip, phase, at);
   const hero = heroHtml(heroOf(trip, phase, at));
-  const view = (inner, title, meta) => `<div class="dir">
-      <div class="compass"><span class="north">Š</span>${inner}</div>
+  const legs = trip.option.legs;
+  const view = (map, title, meta) => `<div class="dir">
+      ${map}
       <div class="stage-text"><div class="stage-title">${title}</div><div class="stage-meta">${meta}</div></div>
       ${hero}
     </div><div class="stage-foot"></div>`;
-  if (phase.kind === 'wait') {
-    const leg = phase.leg;
-    return view(needle(where, g.deg), capital(towards(g.deg)), `${badge(leg.route, true)}${clip(`→ ${esc(leg.headsign || leg.to.name)}`)}`);
-  }
   if (g.mode === 'ride') {
-    return view(needle(where, g.deg), capital(towards(g.deg)), clip(`Kita: ${esc(g.next)}`));
+    const leg = phase.leg;
+    const waiting = phase.kind === 'wait';
+    const live = waiting ? liveOf(leg) : null;
+    const map = minimapHtml(where, { route: g.route, here: g.here, heading: g.heading, target: g.targetPoint, color: leg.route.color, done: g.done, bus: live });
+    if (waiting) {
+      const words = live ? liveWords(live, { short: true })[0] : null;
+      return view(map, words ? `<span class="${words.problem ? 'problem-text' : ''}">${esc(capital(words.text))}</span>` : 'Lauk stotelėje',
+        `${badge(leg.route, true)}${clip(`→ ${esc(leg.headsign || leg.to.name)}`)}`);
+    }
+    return view(map, clip(`Kita: ${esc(g.next)}`), clip(`Išlipk: ${esc(leg.to.name)}`));
   }
-  if (g.straight < 15 || g.metres < 15) return view('<i class="here"></i>', 'Tu jau čia', clip(esc(g.target)));
-  return view(needle(where, g.deg), capital(towards(g.deg)), clip(`${distanceHtml(g.metres)} · ${esc(g.target)}`));
+  const ride = nextRide(legs, (phase.i ?? -1) + 1);
+  const map = minimapHtml(where, { route: g.route, here: g.here, heading: g.heading, target: g.targetPoint, color: g.toStop && ride ? ride.route.color : null, done: g.done });
+  if (g.metres < 15 || g.straight < 12) return view(map, 'Tu jau čia', clip(esc(g.target)));
+  if (g.next) {
+    return view(map, `${turnArrow(g.next.angle)}<span>${esc(capital(turnWords(g.next.angle)))}</span>`,
+      clip(`po ${distanceHtml(g.next.in)}${g.next.name ? ` · ${esc(g.next.name)}` : ''}`));
+  }
+  return view(map, `${turnArrow(0)}<span>Tiesiai</span>`, clip(`${distanceHtml(g.metres)} · ${esc(g.target)}`));
 }
 
 // Page 3: the next three steps, then the arrival on the bottom line. The
@@ -2497,7 +2627,12 @@ const actions = {
     if (state.originChoice === el.dataset.id) state.originChoice = 'gps';
     save(); renderApp(); fillOrigins();
   },
-  'open-option': (el) => { state.selected = state.plan.options[Number(el.dataset.index)]; state.openStops = {}; push({ name: 'detail' }); },
+  'open-option': (el) => {
+    const option = state.plan.options[Number(el.dataset.index)];
+    state.selected = option; state.openStops = {};
+    push({ name: 'detail' });
+    fetchWalks(option).then(() => { if (state.selected === option && currentScreen().name === 'detail') { mapFor = null; drawMap(); } });
+  },
   'toggle-stops': (el) => { const i = el.dataset.index; state.openStops[i] = !state.openStops[i]; renderApp(); },
   'go-option': (el) => {
     const option = state.plan && state.plan.options[Number(el.dataset.index)];
@@ -2766,6 +2901,11 @@ $('#speed-buttons').addEventListener('click', (event) => {
   }
 });
 $('#jump-5').addEventListener('click', () => { jumpTo(now().getTime() + 5 * 60_000); renderAll(); });
+$('#heading-offset').addEventListener('input', (event) => {
+  state.headingOffset = Number(event.target.value);
+  $('#heading-value').textContent = state.headingOffset === 0 ? 'žiūri, kur eini' : `pasisukęs ${Math.abs(state.headingOffset)}° ${state.headingOffset < 0 ? 'kairėn' : 'dešinėn'}`;
+  renderLock(); renderIsland();
+});
 $('#reset-clock').addEventListener('click', () => {
   jumpTo(Date.now()); setSpeed(1);
   document.querySelectorAll('[data-speed]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.speed === '1')));
@@ -2852,6 +2992,7 @@ function fillOrigins() {
   if (trip && new Date(trip.option.arrive.iso).getTime() > Date.now() - 2 * 3600_000) {
     const planned = wholeMinutes(mergeWalks(trip.planned || trip.option));
     state.trip = { ...trip, planned, option: planned };
+    fetchWalks(planned);
     state.banner = { stage: 'trip' };
   }
   // Once set up, the phone starts locked: the banner is the product, and the

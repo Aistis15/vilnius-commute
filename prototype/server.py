@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vc import data, departures, live, planner, search, speech_lt  # noqa: E402
+from vc import data, departures, live, planner, search, speech_lt, walking  # noqa: E402
 
 PORT = 8765
 WEB = Path(__file__).resolve().parent / "web"
@@ -126,6 +126,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(speech_lt.parse(query.get("text", ""), minutes_of(query.get("now"))).as_json())
             if url.path == "/api/cities":
                 return self.send_json({"cities": State.cities})
+            if url.path == "/api/walk":
+                # The street path of one walk and every turn on it, for the
+                # banner's arrow and minimap. Needs the internet.
+                a, b = point(query["from"], ""), point(query["to"], "")
+                found = walking.route(a.lat, a.lon, b.lat, b.lon)
+                if found is None:
+                    return self.send_json({"error": "Pėsčiųjų maršruto gauti nepavyko."}, 503)
+                return self.send_json(found)
             if url.path.startswith("/api/") and State.timetable is None:
                 return self.send_json({"error": State.error or "Tvarkaraščiai dar kraunami…"}, 503)
             if url.path == "/api/search":
