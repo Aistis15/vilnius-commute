@@ -5,8 +5,9 @@ Runs in CI, never on the phone: the Vilnius feed alone is a 3.6 MB zip that
 expands to ~34 MB of CSV, and parsing it on an iPhone every launch would be
 wasteful and slow.
 
-Five cities publish the same GTFS shape on stops.lt: Vilnius, Kaunas, Klaipėda,
-Šiauliai and Panevėžys. They are merged into one set of tables with dense
+Five cities publish the same GTFS shape on stops.lt; the product uses three,
+Vilnius, Kaunas and Klaipėda, the ones with live vehicle data (the workflow's
+CITIES decides which feeds come in). They are merged into one set of tables with dense
 integer ids across all of them, so the router sees a single network. The
 product plans trips inside each city, so the coaches between cities that the
 Šiauliai feed also carries are left out (EXCLUDED_KINDS). The file

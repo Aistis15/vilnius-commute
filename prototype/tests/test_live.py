@@ -65,11 +65,6 @@ class Parsing(unittest.TestCase):
         rows = live.parse_full(vilnius_feed(measured=8 * 3600), 8 * 3600 + 10 * MIN)
         self.assertEqual(rows, [])
 
-    def test_positions_only_feed(self):
-        rows = live.parse_positions("2,8,24346966,55750786,0,342,,2187,\n2,,24377134,55715252,0,66,,2212,\n")
-        self.assertEqual([r["route"] for r in rows], ["8"])     # no route: going to the depot
-        self.assertIsNone(rows[0]["delay"])
-
 
 class Matching(unittest.TestCase):
 

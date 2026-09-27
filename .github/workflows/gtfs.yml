@@ -34,7 +34,9 @@ permissions:
 env:
   # stops.lt serves every city's feed at /<city>/<city>/gtfs.zip. The order
   # here is the order of the merged ids, and of the combined digest below.
-  CITIES: vilnius kaunas klaipeda siauliai panevezys
+  # The product covers the three cities with live vehicle data (see
+  # prototype/vc/live.py); Šiauliai and Panevėžys were dropped 2026-09-27.
+  CITIES: vilnius kaunas klaipeda
   FEED_BASE: https://www.stops.lt
   RELEASE_TAG: data-latest
 

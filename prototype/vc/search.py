@@ -443,6 +443,14 @@ class StopIndex:
                 for label in {_plain(name), _plain(t.stop_names[stop])}:
                     self.by_name.setdefault(label, []).append((t.stop_lat[stop], t.stop_lon[stop]))
 
+    def covers(self, lat: float, lon: float, km: float = 3.0) -> bool:
+        """Whether a place is within the networks the app plans in: some stop
+        no more than `km` away. Photon searches all of Lithuania; a place in
+        Šiauliai is a result the app could only fail on."""
+        return any(abs(slat - lat) < 0.03 and abs(slon - lon) < 0.05
+                   and distance_km(lat, lon, (slat, slon)) <= km
+                   for _, _, _, slat, slon, _ in self.entries)
+
     def has_stop_near(self, name: str, lat: float, lon: float, km: float = 0.3) -> bool:
         return any(distance_km(lat, lon, where) <= km for where in self.by_name.get(_plain(name), []))
 
@@ -552,7 +560,8 @@ def search(index: StopIndex, query: str, lat: float | None = None, lon: float | 
 
     def found(text: str) -> list[dict]:
         return [p for p in places(text, origin)
-                if not (p["category"] in TRANSIT_STOPS and index.has_stop_near(p["name"], p["lat"], p["lon"]))]
+                if index.covers(p["lat"], p["lon"])
+                and not (p["category"] in TRANSIT_STOPS and index.has_stop_near(p["name"], p["lat"], p["lon"]))]
 
     candidates = index.search(query, origin=origin) + found(query)
     out = _best(rank(query, candidates, origin))

@@ -39,7 +39,9 @@ class Endpoints(unittest.TestCase):
             original = getattr(target, value)
             self.addCleanup(setattr, target, value, original)
         server.State.timetable = object()
-        server.State.index = vilnius_index()
+        # Vilnius's sampled stops and one in Kaunas: places are offered only
+        # where some stop is within reach.
+        server.State.index = vilnius_index([("Karaliaus Mindaugo pr.", "Kaunas", *KAUNAS)])
         patcher = mock.patch.object(search, "_fetch_photon", fake_photon)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -54,6 +56,14 @@ class Endpoints(unittest.TestCase):
         self.assertEqual(fake_photon.origins, [KAUNAS])
         self.assertEqual(body["results"][0]["city"], "Kaunas")
         self.assertIs(body["ambiguous"], False)
+
+    def test_places_outside_the_cities_are_not_offered(self):
+        # Photon finds an Akropolis in Šiauliai too; the app plans in
+        # Vilnius, Kaunas and Klaipėda only, so it is not a result.
+        body = self.get("/api/search", q="Akropolis")
+        cities = {r.get("city") for r in body["results"]}
+        self.assertIn("Vilnius", cities)
+        self.assertNotIn("Šiauliai", cities)
 
     def test_search_defaults_to_vilnius(self):
         body = self.get("/api/search", q="ISM universitetas")

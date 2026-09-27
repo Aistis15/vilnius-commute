@@ -7,8 +7,8 @@ it is the feed behind stops.lt's own map. What each city publishes (checked
   Vilnius    gps_full.txt  position, delay and the GTFS trip id
   Kaunas     gps_full.txt  position, delay, route and the trip's start minute
   Klaipėda   gps_full.txt  as Kaunas
-  Panevėžys  gps.txt       position and route only: no delay, no trip
-  Šiauliai   nothing (404)
+  (Panevėžys publishes positions only and Šiauliai nothing; neither is in
+  the product.)
 
 NuokrypisSekundemis is actual minus scheduled, in seconds: positive is late.
 Checked against the timetable the same day: for 122 Vilnius buses standing
@@ -38,11 +38,9 @@ FEEDS = {
     "Vilnius": "https://www.stops.lt/vilnius/gps_full.txt",
     "Kaunas": "https://www.stops.lt/kaunas/gps_full.txt",
     "Klaipėda": "https://www.stops.lt/klaipeda/gps_full.txt",
-    "Panevėžys": "https://www.stops.lt/panevezys/gps.txt",
 }
 # Trip ids in the database are namespaced by feed ('vilnius:A1-01-...').
-SLUGS = {"Vilnius": "vilnius", "Kaunas": "kaunas", "Klaipėda": "klaipeda",
-         "Šiauliai": "siauliai", "Panevėžys": "panevezys"}
+SLUGS = {"Vilnius": "vilnius", "Kaunas": "kaunas", "Klaipėda": "klaipeda"}
 
 REFRESH_S = 15      # a city is fetched at most this often, and only on demand
 STALE_S = 120       # older than this, a snapshot is not "live" any more
@@ -98,24 +96,6 @@ def parse_full(text: str, clock_s: int) -> list[dict]:
             "headsign": (row.get("KryptiesPavadinimas") or "").strip(),
             "number": (row.get("MasinosNumeris") or "").strip(),
         })
-    return out
-
-
-def parse_positions(text: str) -> list[dict]:
-    """Panevėžys's gps.txt, no header: type, route, lon, lat, speed, bearing,
-    (empty), vehicle. Vehicles without a route are going to the depot."""
-    out = []
-    for line in text.splitlines():
-        cells = line.split(",")
-        if len(cells) < 6 or not cells[1].strip():
-            continue
-        lon, lat = _int(cells[2]), _int(cells[3])
-        if not lat or not lon:
-            continue
-        out.append({"route": cells[1].strip(), "trolleybus": False,
-                    "lat": lat / 1e6, "lon": lon / 1e6, "bearing": _int(cells[5]),
-                    "delay": None, "start": None, "gtfs_trip": "", "headsign": "",
-                    "number": cells[7].strip() if len(cells) > 7 else ""})
     return out
 
 
@@ -236,7 +216,7 @@ class Live:
             text = self.fetch(FEEDS[city])
             now = self.clock()
             clock_s = clock_seconds(now)
-            rows = parse_positions(text) if FEEDS[city].endswith("/gps.txt") else parse_full(text, clock_s)
+            rows = parse_full(text, clock_s)
             if self.matcher is None:
                 self.matcher = Matcher(self.t)
             today = (now.year * 10_000 + now.month * 100 + now.day, now.weekday())

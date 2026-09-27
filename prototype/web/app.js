@@ -323,11 +323,10 @@ function origin() {
 
 /* The five cities, each with a place to start from (its bus station), from
    /api/cities. On a phone the city is simply where you are; on a computer in
-   Vilnius the switcher is how Kaunas, Klaipėda, Šiauliai and Panevėžys get
-   tried at all. */
+   Vilnius the switcher is how Kaunas and Klaipėda get tried at all. */
 const cityNamed = (name) => (state.cities || []).find((c) => c.name === name) || null;
 // "in Kaunas", "from Kaunas": Lithuanian names change with the case.
-const CITY_IN = { Vilnius: 'Vilniuje', Kaunas: 'Kaune', 'Klaipėda': 'Klaipėdoje', 'Šiauliai': 'Šiauliuose', 'Panevėžys': 'Panevėžyje' };
+const CITY_IN = { Vilnius: 'Vilniuje', Kaunas: 'Kaune', 'Klaipėda': 'Klaipėdoje' };
 const cityIn = (name) => CITY_IN[name] || name;
 
 function chooseCity(name) {
@@ -1052,6 +1051,7 @@ function resultsView() {
   if (state.planning) body = `<p class="footnote loading">Ieškau maršrutų${dotsHtml}</p>`;
   else if (state.planError) body = `<p class="footnote error-text">${esc(state.planError)}</p>`;
   else if (state.plan && state.plan.cross_city && !state.plan.options.some((o) => !o.walk_only)) body = crossCityNotice(state.plan);
+  else if (state.plan && (!state.plan.from_city || !state.plan.to_city) && !state.plan.options.some((o) => !o.walk_only)) body = outOfAreaNotice(state.plan);
   else if (state.plan && !state.plan.options.length) body = '<p class="footnote">Maršruto šiuo laiku nerasta. Pabandyk kitą laiką.</p>';
   else if (state.plan) {
     const shown = state.plan.options.map((o, index) => ({ ...withLive(o), index }))
@@ -1079,6 +1079,21 @@ function crossCityNotice(plan) {
       ${cityNamed(to) ? `<div class="notice-actions">
         <button class="secondary" data-action="origin-city" data-city="${esc(to)}">Pradėti ${esc(cityIn(to))}</button>
       </div>` : ''}
+    </div>`;
+}
+
+/* One end is outside the three cities: say where the app works instead of
+   a bare "no route", and offer a city to start in when it is the rider who
+   is outside. */
+const AREA = 'Vilniuje, Kaune ir Klaipėdoje';
+function outOfAreaNotice(plan) {
+  const place = state.destination ? state.destination.name : '';
+  const away = !plan.from_city;
+  return `<div class="notice reveal" data-key="out-of-area" role="status">
+      <div class="notice-title"><span class="problem">${icon('pin')}</span>${away ? 'Tu esi už miesto ribų' : `${esc(place)}: už miesto ribų`}</div>
+      <p>Programėlė planuoja keliones miesto autobusais ${AREA}.</p>
+      ${away && (state.cities || []).length ? `<div class="notice-actions">${state.cities.map((c) =>
+        `<button class="secondary" data-action="origin-city" data-city="${esc(c.name)}">Pradėti ${esc(cityIn(c.name))}</button>`).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -2195,6 +2210,12 @@ async function planAndGo(place, mode, time, surface) {
         state.banner = { stage: 'error', code: 'cross-city', city: plan.to_city, place,
           message: `${place.name} yra ${cityIn(plan.to_city)}`,
           detail: `Planuoju keliones mieste, o tu esi ${cityIn(plan.from_city)}.`, retry: 'ask' };
+        renderAll();
+        return;
+      }
+      if ((!plan.from_city || !plan.to_city) && !plan.options.some((o) => !o.walk_only)) {
+        state.banner = { stage: 'error', message: plan.from_city ? `${place.name}: už miesto ribų` : 'Tu esi už miesto ribų',
+          detail: `Planuoju keliones ${AREA}.`, retry: 'ask' };
         renderAll();
         return;
       }

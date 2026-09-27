@@ -42,13 +42,12 @@ MINIMUMS = {
 # route_id / gtfs_id prefix -> (stop.city, min stops, min routes, min trips).
 # Same ~60% rule per city, so one feed collapsing cannot hide behind the others.
 # Measured 2026-09-26: Vilnius 1 548/115/20 846, Kaunas 966/69/7 191,
-# Klaipėda 928/69/7 049, Šiauliai 471/44/2 871, Panevėžys 252/21/1 757.
+# Klaipėda 928/69/7 049. (Šiauliai and Panevėžys left the product on
+# 2026-09-27: the three cities with live vehicle data remain.)
 CITIES = {
     "vilnius": ("Vilnius", 1_000, 80, 15_000),
     "kaunas": ("Kaunas", 600, 40, 4_300),
     "klaipeda": ("Klaipėda", 550, 40, 4_200),
-    "siauliai": ("Šiauliai", 280, 25, 1_700),
-    "panevezys": ("Panevėžys", 150, 12, 1_000),
 }
 
 # The city a route belongs to, from its id: `kaunas_bus_3` -> `kaunas`.
