@@ -1,0 +1,54 @@
+name: OSM crossings
+
+# Pedestrian crossings of Vilnius, Kaunas and Klaipėda, for walking directions
+# that say "Pereik gatvę per perėją". Built from Geofabrik's Lithuania extract
+# (OpenStreetMap, ODbL) and published next to the timetables on the
+# data-latest release. Crossings change slowly: weekly is plenty.
+
+on:
+  schedule:
+    - cron: "40 4 * * 1"
+  workflow_dispatch:
+  push:
+    paths:
+      - "Tools/osm/**"
+      - ".github/workflows/osm.yml"
+
+concurrency:
+  group: osm-crossings
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  EXTRACT: https://download.geofabrik.de/europe/lithuania-latest.osm.pbf
+  RELEASE_TAG: data-latest
+
+jobs:
+  crossings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pyosmium
+        run: pip install osmium
+
+      - name: Download the Lithuania extract
+        run: curl -fsSL --retry 3 -o lithuania.osm.pbf "${EXTRACT}" && ls -l lithuania.osm.pbf
+
+      - name: Extract the crossings
+        run: |
+          python Tools/osm/crossings.py lithuania.osm.pbf crossings.json
+          gzip -9 -k crossings.json
+          ls -l crossings.json crossings.json.gz
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${RELEASE_TAG}" crossings.json.gz --clobber
