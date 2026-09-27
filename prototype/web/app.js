@@ -63,6 +63,8 @@ const ICONS = {
   stop: '<rect x="6" y="3" width="12" height="9" rx="2"/><path d="M12 12v9"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  // The "this time is live" mark transit apps share: a source and two waves.
+  live: '<circle cx="6.5" cy="17.5" r="2" class="fill"/><path d="M5 11.5a7.5 7.5 0 0 1 7.5 7.5M5 5a14 14 0 0 1 14 14"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 // Filled, so it reads as a direction rather than a line drawing. Points north.
@@ -293,6 +295,10 @@ const state = {
   sheet: null,
   toast: null,
   serverReady: false,
+  // Live state of rides, by their "trip" reference; null = no vehicle known.
+  live: {},
+  // What leaves the stops around the origin (see refreshNearby).
+  nearby: null,
 };
 
 const save = () => {
@@ -397,8 +403,8 @@ function atFor(mode, time) {
   return at;
 }
 
-async function planTrip(place, mode, time) {
-  const from = origin();
+async function planTrip(place, mode, time, start = null) {
+  const from = start || origin();
   if (!from) {
     const error = new Error('Nežinau, iš kur keliauji. Leisk naršyklei nustatyti vietą arba pasirink ją.');
     error.code = 'no-origin';
@@ -455,6 +461,138 @@ function wholeMinutes(option) {
   const leave = floor(option.leave), arrive = ceil(option.arrive);
   return { ...option, legs, leave, arrive, duration_min: Math.round((new Date(arrive.iso) - new Date(leave.iso)) / MINUTE) };
 }
+
+// ------------------------------------------------------------------- live
+//
+// Where the buses are now: stops.lt's positions, matched to timetable trips
+// by the server. They describe the real now, so they are used only while the
+// prototype's clock is at it (not at "+5 min" or 10x).
+
+const liveClock = () => Math.abs(now().getTime() - Date.now()) < 90_000;
+const refOf = (leg) => (leg && leg.kind === 'ride' && leg.trip ? leg.trip.join('.') : null);
+function liveOf(leg) {
+  const ref = refOf(leg);
+  if (!ref || !liveClock()) return null;
+  return ref in state.live ? state.live[ref] : (leg.live || null);
+}
+const localIsoSec = (d) => `${localIso(d).slice(0, 16)}:${pad(d.getSeconds())}`;
+const atMs = (ms) => { const d = new Date(ms); return { iso: localIsoSec(d), hm: hm(d) }; };
+
+/* The trip as the buses are really running. A ride whose vehicle is on the
+   road moves by its delay, and everything after it moves with it. The walk
+   to the first bus follows that bus, but never by all of a delay: a late bus
+   can make up time, so a minute stays as margin, and under two minutes late
+   is not worth moving for. An early bus moves it earlier by all of it.
+   `firstShift` pins that walk once the rider has set off. A connection the
+   new times break is marked `missed`. */
+function withLive(option, firstShift = null) {
+  if (!option || option.walk_only || !option.legs.some(liveOf)) return option;
+  const move = (x, ms) => (ms ? atMs(t(x) + ms) : x);
+  const legs = option.legs.map((leg) => {
+    const live = liveOf(leg);
+    if (!live || live.delay_s == null) return { ...leg };
+    const d = live.delay_s * 1000;
+    return { ...leg, delay: d, departure: move(leg.departure, d), arrival: move(leg.arrival, d),
+      stops: leg.stops.map((stop) => ({ ...stop, time: move(stop.time, d) })) };
+  });
+  const firstRide = legs.find((l) => l.kind === 'ride');
+  const lead = (firstRide && firstRide.delay) || 0;
+  const shift = firstShift != null ? firstShift : lead >= 120_000 ? lead - 60_000 : lead <= -30_000 ? lead : 0;
+  // Any other walk starts when the leg before it ends. Before another ride
+  // it only ever starts later: arriving early does not bring the next bus
+  // sooner. (A replanned rest of a trip already starts after the late bus,
+  // so it does not move twice.)
+  legs.forEach((leg, i) => {
+    if (leg.kind !== 'walk') return;
+    const gap = i === 0 ? shift : t(legs[i - 1].arrival) - t(leg.departure);
+    const d = i === 0 || i === legs.length - 1 ? gap : Math.max(0, gap);
+    if (d) legs[i] = { ...leg, departure: move(leg.departure, d), arrival: move(leg.arrival, d) };
+  });
+  let missed = false;
+  for (let i = 1; i < legs.length; i++) {
+    if (legs[i].kind === 'ride' && t(legs[i - 1].arrival) > t(legs[i].departure) + 30_000) {
+      legs[i].missed = true; missed = true;
+    }
+  }
+  return wholeMinutes({ ...option, legs, leave: legs[0].departure, arrive: legs[legs.length - 1].arrival, missed, firstShift: shift });
+}
+
+/* What a vehicle on the road means for someone waiting for it, in a few
+   words: late or early first (that is the news), then how far away it is.
+   `short` keeps only the most useful one. */
+function liveWords(live, { short = false } = {}) {
+  if (!live) return null;
+  if (live.departed) return [{ text: 'jau nuvažiavo', problem: true }];
+  const words = [];
+  const late = Math.round((live.delay_s || 0) / 60);
+  if (late >= 2) words.push({ text: `vėluoja ${late} min`, problem: true });
+  else if (late <= -1) words.push({ text: `${-late} min anksčiau`, problem: true });
+  const away = live.stops_away;
+  if (away === 0) words.push({ text: 'jau stotelėje' });
+  else if (away === 1) words.push({ text: 'atvažiuoja' });
+  else if (away > 1 && away <= 20) words.push({ text: `už ${away} ${plural(away, 'stotelės', 'stotelių', 'stotelių')}` });
+  if (!words.some((w) => w.problem)) words.unshift({ text: 'laiku' });
+  if (short) return [words.find((w) => w.problem) || words[words.length - 1]];
+  return words;
+}
+function liveHtml(leg, options) {
+  const words = liveWords(liveOf(leg), options);
+  if (!words) return '';
+  return `<span class="live">${icon('live')}<span>${words.map((w) => (w.problem ? `<span class="problem-text">${esc(w.text)}</span>` : esc(w.text))).join(' · ')}</span></span>`;
+}
+
+/* Keeps a running trip in step with its buses. The first walk is pinned
+   once its (moved) start has passed: telling someone already on their way
+   to leave two minutes later helps nobody. */
+function refreshTripOption() {
+  const trip = state.trip;
+  if (!trip) return;
+  const planned = trip.planned || trip.option;
+  const setOff = now().getTime() >= t(trip.option.legs[0].departure);
+  trip.option = withLive(planned, setOff ? (trip.option.firstShift || 0) : null);
+}
+
+/* The stops a short walk from the origin and what leaves them in the next
+   hour: the first thing Trafi users open the app for, here without a tap. */
+let nearbyAt = 0;
+async function refreshNearby(force = false) {
+  const from = origin();
+  if (!from || !state.serverReady) return;
+  const key = `${from.lat.toFixed(4)},${from.lon.toFixed(4)}`;
+  if (!force && state.nearby && state.nearby.key === key && Date.now() - nearbyAt < 25_000) return;
+  nearbyAt = Date.now();
+  try {
+    const data = await api('/api/nearby', { lat: from.lat.toFixed(5), lon: from.lon.toFixed(5), now: localIso(now()) });
+    state.nearby = { key, at: now().getTime(), ...data };
+    refreshHome();
+  } catch { /* the board is a help, not a requirement */ }
+}
+function refreshHome() {
+  if (currentScreen().name !== 'home' || state.searchActive || state.query.trim().length >= 2) return;
+  const box = inPage('#home-content');
+  if (box) staggerIn(morph(box, homeContent(saveSuggestions())));
+}
+
+async function pollLive() {
+  if (!state.serverReady) return;
+  const screen = currentScreen().name;
+  if (screen === 'home' && !state.locked) refreshNearby();
+  if (!liveClock()) return;
+  const refs = new Set();
+  const add = (o) => o && !o.walk_only && o.legs.forEach((l) => { const r = refOf(l); if (r) refs.add(r); });
+  if (state.trip) add(state.trip.planned || state.trip.option);
+  if (!state.locked && screen === 'results' && state.plan) state.plan.options.slice(0, 5).forEach(add);
+  if (!state.locked && screen === 'detail') add(state.selected);
+  if (!refs.size) return;
+  try {
+    const data = await api('/api/live', { legs: [...refs].join(','), now: localIso(now()) });
+    Object.assign(state.live, data.legs || {});
+  } catch { return; }
+  refreshTripOption();
+  if (!state.locked && ['results', 'detail'].includes(currentScreen().name)) renderApp();
+  drawVehicles();
+}
+setInterval(pollLive, 15_000);
 
 /* Earliest arrival first: what "you will not make it" should offer. */
 const earliest = (options) => options.slice().sort((a, b) => new Date(a.arrive.iso) - new Date(b.arrive.iso))[0] || null;
@@ -766,7 +904,41 @@ function homeContent(suggestions) {
       <button class="tile add" data-action="add-place" data-key="add"><span class="glyph">${icon('plus')}</span>
         <span><span class="title">Pridėti vietą</span><span class="sub">Kiek tik nori</span></span></button>
     </div>
-    ${state.places.length ? '' : '<p class="footnote">Namai, mokykla, darbas, močiutė: paliesk vietą, ir maršrutas jau skaičiuojamas.</p>'}`;
+    ${state.places.length ? '' : '<p class="footnote">Namai, mokykla, darbas, močiutė: paliesk vietą, ir maršrutas jau skaičiuojamas.</p>'}
+    ${nearbyHtml()}`;
+}
+
+/* The board at the stop, for the stops around the origin: line, direction,
+   and minutes until the next ones leave. A live time carries the mark; the
+   first time of each line is the one that matters, so it is the bold one. */
+function nearbyHtml() {
+  const n = state.nearby;
+  if (!n || !n.stops || !n.stops.some((s) => s.lines.length)) return '';
+  const at = now().getTime();
+  const minutes = (d) => Math.round((new Date(d.iso).getTime() - at) / 60_000);
+  const time = (d, i) => {
+    const m = minutes(d);
+    const text = m <= 0 ? 'dabar' : String(m);
+    return `<span class="${i === 0 ? 'first' : ''}">${d.live && i === 0 ? icon('live') : ''}${text}</span>`;
+  };
+  const line = (l) => {
+    const shown = l.departures.filter((d) => minutes(d) >= 0).slice(0, 3);
+    if (!shown.length) return '';
+    const unit = shown.some((d) => minutes(d) > 0) ? '<small>min</small>' : '';
+    return `<div class="dep" data-key="${esc(`${l.route.name}>${l.headsign}`)}">
+        ${badge(l.route)}<span class="dep-dir">${esc(l.headsign)}</span>
+        <span class="dep-times">${shown.map(time).join('<i>·</i>')}${unit}</span>
+      </div>`;
+  };
+  const cards = n.stops.filter((s) => s.lines.length).slice(0, 3).map((s) => `
+      <div class="stop-card" data-key="stop-${esc(s.name)}">
+        <div class="stop-head"><span class="stop-name">${esc(s.name)}</span><span class="stop-dist">${metresText(s.metres)}</span></div>
+        ${s.lines.slice(0, 4).map(line).join('')}
+      </div>`).join('');
+  return `<div class="heading"><h2>Šalia tavęs</h2>${n.live_available
+      ? `<span class="heading-note">${icon('live')}realiu laiku</span>`
+      : '<span class="heading-note">pagal tvarkaraštį</span>'}</div>
+    <div class="board stagger">${cards}</div>`;
 }
 
 function searchResultsHtml(action) {
@@ -858,14 +1030,18 @@ function distinctTags(o, all) {
 function optionCard(o, i, all) {
   const when = isLate(o) ? '<span class="late">Reikėjo išeiti</span>' : `Išeik ${esc(inText(new Date(o.leave.iso).getTime()))}`;
   const meta = [when, `${metresText(o.walk_m)} pėsčiomis`, o.walk_only ? '' : transfersText(o.transfers)].filter(Boolean).join(' · ');
-  const tags = i === 0 ? distinctTags(o, all) : [];
-  return `<button class="option${isLate(o) ? ' late' : ''}" data-action="open-option" data-index="${i}" data-key="${esc(o.id)}">
+  const tags = i === 0 && !o.missed ? distinctTags(o, all) : [];
+  const ride = o.walk_only ? null : o.legs.find((l) => l.kind === 'ride');
+  const live = ride ? liveHtml(ride) : '';
+  return `<button class="option${isLate(o) ? ' late' : ''}" data-action="open-option" data-index="${o.index ?? i}" data-key="${esc(o.id)}">
       <div class="top">
         <div class="span">${esc(o.leave.hm)}–<span class="${o.late ? 'late' : ''}">${esc(o.arrive.hm)}</span></div>
         <div class="dur">${o.duration_min} min</div>
       </div>
       <div class="route-line">${routeLine(o)}</div>
       <div class="meta">${meta}</div>
+      ${live ? `<div class="live-row">${badge(ride.route, true)}${live}</div>` : ''}
+      ${o.missed ? '<div class="live-row problem-text">Persėdimas gali nepavykti: autobusas vėluoja</div>' : ''}
       ${tags.length ? `<div class="tags">${tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
     </button>`;
 }
@@ -878,7 +1054,9 @@ function resultsView() {
   else if (state.plan && state.plan.cross_city && !state.plan.options.some((o) => !o.walk_only)) body = crossCityNotice(state.plan);
   else if (state.plan && !state.plan.options.length) body = '<p class="footnote">Maršruto šiuo laiku nerasta. Pabandyk kitą laiką.</p>';
   else if (state.plan) {
-    body = `${lateNotice(state.plan)}<div class="options stagger">${state.plan.options.map(optionCard).join('')}</div>`;
+    const shown = state.plan.options.map((o, index) => ({ ...withLive(o), index }))
+      .sort((a, b) => Number(!!a.missed) - Number(!!b.missed));
+    body = `${lateNotice(state.plan)}<div class="options stagger">${shown.map(optionCard).join('')}</div>`;
   } else body = '';
   const from = origin();
   return `<div class="nav">${navBar({ back: true, title: place ? place.name : '' })}</div>
@@ -932,6 +1110,7 @@ async function runPlan() {
   renderApp();
   try {
     state.plan = await planTrip(state.destination, state.timeMode, state.timeValue);
+    for (const o of state.plan.options) for (const l of o.legs) { const r = refOf(l); if (r) state.live[r] = l.live || null; }
   } catch (e) {
     state.planError = e.message;
   }
@@ -950,8 +1129,8 @@ function openDestination(place) {
 // ---- detail
 
 function detailView() {
-  const o = state.selected;
-  if (!o) return homeView();
+  if (!state.selected) return homeView();
+  const o = withLive(state.selected);
   const steps = o.legs.map((leg, i) => {
     let what, seg;
     if (leg.kind === 'ride') {
@@ -960,6 +1139,8 @@ function detailView() {
       // Names stay in the nominative after a colon; "išlipk „X“" would not.
       what = `<div class="route-line">${badge(leg.route)} <span class="headsign">${esc(leg.headsign || '')}</span></div>
         <div class="sub">Įlipk: ${esc(leg.from.name)}</div>
+        ${liveOf(leg) && i === o.legs.findIndex((l) => l.kind === 'ride') ? `<div class="sub">${liveHtml(leg)}</div>` : ''}
+        ${leg.missed ? '<div class="sub problem-text">Gali nespėti: ankstesnis autobusas vėluoja</div>' : ''}
         <div class="sub">Išlipk: ${esc(leg.to.name)} · ${esc(leg.arrival.hm)}</div>
         ${between ? `<button class="stops-toggle" data-action="toggle-stops" data-index="${i}" aria-expanded="${open}">${stopsText(leg.stop_count)}${icon('chevron')}</button>
           ${open ? `<div class="stops reveal">${between}</div>` : ''}` : `<div class="sub">${stopsText(leg.stop_count)}</div>`}`;
@@ -977,7 +1158,8 @@ function detailView() {
   }).join('') + `<div class="step"><div class="t">${esc(o.arrive.hm)}</div><div class="rail"><i class="node end"></i></div>
       <div class="what"><b class="arrive-name">${esc(state.destination ? state.destination.name : '')}</b></div></div>`;
 
-  const running = state.trip && state.trip.option.id === o.id && state.trip.option.leave.iso === o.leave.iso;
+  const planned = state.trip && (state.trip.planned || state.trip.option);
+  const running = planned && planned.id === state.selected.id && planned.leave.iso === state.selected.leave.iso;
   return `<div class="nav">${navBar({ back: true, title: 'Maršrutas', always: true })}</div>
     <div class="content">
       <div id="map" class="map" data-morph="keep"></div>
@@ -1000,6 +1182,7 @@ function drawMap() {
   if (!o || !el || !window.L) return;
   if (map && map.getContainer() === el && mapFor === o) return;
   if (map) { map.remove(); map = null; }
+  vehicleLayer = null;
   map = L.map(el, { zoomControl: false, attributionControl: true });
   // Plain text: the only colour on the map is the route's own.
   map.attributionControl.setPrefix('Leaflet');
@@ -1019,6 +1202,40 @@ function drawMap() {
   L.circleMarker([first.lat, first.lon], { radius: 7, color: '#000', weight: 3, fillColor: '#fff', fillOpacity: 1 }).addTo(map);
   L.circleMarker([last.lat, last.lon], { radius: 7, color: '#fff', weight: 3, fillColor: '#000', fillOpacity: 1 }).addTo(map);
   map.fitBounds(bounds, { padding: [24, 24] });
+  drawVehicles();
+}
+
+/* The trip's buses where they are now, as their own badge. Moved, not
+   redrawn, when a new position comes in, so they glide along the street. */
+let vehicleLayer = null;
+const vehicleMarkers = {};
+function drawVehicles() {
+  if (!map || !window.L || currentScreen().name !== 'detail' || !state.selected) return;
+  if (!vehicleLayer) {
+    vehicleLayer = L.layerGroup().addTo(map);
+    Object.keys(vehicleMarkers).forEach((k) => delete vehicleMarkers[k]);
+  }
+  const seen = new Set();
+  state.selected.legs.forEach((leg) => {
+    const live = liveOf(leg), ref = refOf(leg);
+    if (!live || live.lat == null || live.departed === undefined) return;
+    seen.add(ref);
+    const known = vehicleMarkers[ref];
+    if (known) {
+      // Glide only for a new fix; a zoom must not drag the badge behind it.
+      const el = known.getElement();
+      if (el) { el.classList.add('gliding'); clearTimeout(el.glide); el.glide = setTimeout(() => el.classList.remove('gliding'), 1300); }
+      known.setLatLng([live.lat, live.lon]);
+      return;
+    }
+    const html = `<span class="bus-marker" style="background:#${esc(leg.route.color)};color:#${esc(leg.route.text_color)}">${esc(leg.route.name)}</span>`;
+    vehicleMarkers[ref] = L.marker([live.lat, live.lon], {
+      icon: L.divIcon({ className: 'bus-icon', html, iconSize: null }), keyboard: false, interactive: false,
+    }).addTo(vehicleLayer);
+  });
+  Object.keys(vehicleMarkers).forEach((ref) => {
+    if (!seen.has(ref)) { vehicleLayer.removeLayer(vehicleMarkers[ref]); delete vehicleMarkers[ref]; }
+  });
 }
 
 // ---- settings, places, pick
@@ -1119,11 +1336,46 @@ function recordVisit(place) {
 // ================================================================ the trip
 
 function startTrip(option, place) {
-  state.trip = { option, place, startedAt: now().getTime(), snoozeUntil: 0, page: 0 };
+  state.trip = { option: withLive(option), planned: option, place, startedAt: now().getTime(), snoozeUntil: 0, page: 0 };
   state.banner = { stage: 'trip' };
   store.set('trip', state.trip);
   recordVisit(place);
   state.islandExpanded = false;
+  renderAll();
+}
+
+async function replanTrip() {
+  const trip = state.trip;
+  if (!trip || state.replanning) return;
+  const legs = trip.option.legs;
+  const first = legs.findIndex((l) => l.kind === 'ride');
+  const k = legs.findIndex((l, i) => l.missed && i !== first);
+  if (k < 1) return;
+  const before = legs[k - 1];
+  const start = { name: before.to.name, lat: before.to.lat, lon: before.to.lon };
+  state.replanning = true;
+  renderAll();
+  try {
+    const plan = await planTrip(trip.place, 'depart', hm(new Date(t(before.arrival))), start);
+    const next = plan.options.find((o) => !o.walk_only) || plan.options[0];
+    if (!next) throw new Error('Kito kelio nerasta.');
+    const planned = trip.planned || trip.option;
+    const kept = planned.legs.slice(0, k);
+    const joined = [...kept, ...next.legs];
+    const rides = joined.filter((l) => l.kind === 'ride');
+    trip.planned = wholeMinutes({
+      ...planned, id: `${planned.id}~${next.id}`, legs: joined, arrive: next.arrive,
+      transfers: Math.max(0, rides.length - 1), routes: rides.map((l) => l.route),
+      walk_m: joined.filter((l) => l.kind === 'walk').reduce((sum, l) => sum + l.metres, 0),
+    });
+    for (const l of next.legs) { const r = refOf(l); if (r) state.live[r] = l.live || null; }
+    refreshTripOption();
+    store.set('trip', state.trip);
+    toast(`Naujas kelias: atvyksi ${state.trip.option.arrive.hm}`);
+  } catch (e) {
+    toast(e.message);
+  }
+  state.replanning = false;
   renderAll();
 }
 
@@ -1416,26 +1668,44 @@ function nowPage(trip, phase, at) {
   const legs = o.legs;
   const hero = heroOf(trip, phase, at);
 
+  // A late bus has broken a connection ahead: say which, and offer the way on.
+  // (An early first bus is not a connection: "Paskubėk" covers it below.)
+  const firstRide = legs.find((l) => l.kind === 'ride');
+  const broken = legs.slice((phase.i ?? -1) + 1).find((l) => l.missed && l !== firstRide);
+  if (broken) {
+    return stageHtml({
+      title: '<span class="problem-text">Nespėsi persėsti</span>',
+      meta: `${badge(broken.route, true)}${clip(`išvyks ${esc(broken.departure.hm)} · ${esc(broken.from.name)}`)}`,
+      hero,
+      foot: `<button class="foot-action" data-action="trip-replan">${state.replanning ? `Ieškau${dotsHtml}` : 'Rasti kitą kelią'}</button>`,
+    });
+  }
+
   if (phase.kind === 'before') {
     const leave = t(legs[0].departure);
     const ride = nextRide(legs, 0);
     const walk = legs[0].kind === 'walk' ? legs[0] : null;
+    // Live, the bus is the news ("vėluoja 3 min" is why "Išeik" moved);
+    // otherwise the walk ahead.
+    const live = ride ? liveHtml(ride, { short: true }) : '';
     return stageHtml({
       title: `Išeik${esc(dayWord(leave))} ${esc(o.leave.hm)}`,
       meta: ride ? `${badge(ride.route, true)}${clip(esc(ride.from.name))}` : clip(esc(trip.place.name)),
       hero,
-      foot: walk ? clip(`${metresText(walk.metres)} · ${walk.minutes} min pėsčiomis`) : '',
+      foot: live ? clip(live) : walk ? clip(`${metresText(walk.metres)} · ${walk.minutes} min pėsčiomis`) : '',
     });
   }
 
   const leg = phase.leg;
   if (phase.kind === 'wait') {
     const transfer = phase.i > 0 && legs[phase.i - 1].kind === 'ride';
+    // Waiting, where the bus is matters more than the stop you stand at.
+    const live = liveHtml(leg, { short: true });
     return stageHtml({
       title: transfer ? 'Persėsk' : 'Lauk stotelėje',
-      meta: `${badge(leg.route, true)}${clip(esc(leg.from.name))}`,
+      meta: `${badge(leg.route, true)}${clip(live && leg.headsign ? `→ ${esc(leg.headsign)}` : esc(leg.from.name))}`,
       hero,
-      foot: leg.headsign ? clip(`→ ${esc(leg.headsign)}`) : '',
+      foot: live ? clip(live) : leg.headsign ? clip(`→ ${esc(leg.headsign)}`) : '',
     });
   }
 
@@ -1455,14 +1725,19 @@ function nowPage(trip, phase, at) {
   // minutes beside it say whether it fits before the bus.
   const g = guidance(trip, phase, at);
   const walkLeft = Math.max(1, minutesUntil(t(leg.arrival), at));
-  const foot = clip(`${pointer(g.deg)}${distanceHtml(g.metres)} · ${walkLeft} min`);
   const ride = nextRide(legs, phase.i + 1);
+  // Live, where the bus is replaces the walk's minutes: the number block
+  // already counts down to it, and the line has room for one of the two.
+  const live = ride && phase.i + 1 === legs.indexOf(ride) ? liveHtml(ride, { short: true }) : '';
+  const foot = clip(`${pointer(g.deg)}${distanceHtml(g.metres)} · ${live || `${walkLeft} min`}`);
   if (!ride) {
     return stageHtml({ title: 'Eik pėsčiomis', meta: clip(esc(trip.place.name)), hero, foot });
   }
   let title = 'Eik į stotelę';
   if (phase.i > 0) title = 'Persėsk';
   else if (leavingNow(trip, phase, at)) title = 'Išeik dabar';
+  // The bus will be there before you at this pace.
+  if (ride.missed) title = 'Paskubėk';
   return stageHtml({ title, meta: `${badge(ride.route, true)}${clip(esc(ride.from.name))}`, hero, foot });
 }
 
@@ -1759,6 +2034,7 @@ setInterval(() => {
     lastMinute = minute;
     // "Išeik po 5 min" on the results and the route must not go stale.
     if (state.prefs && ['results', 'detail'].includes(currentScreen().name)) renderApp();
+    else if (state.prefs && currentScreen().name === 'home') refreshHome();
   }
 }, 250);
 
@@ -2085,7 +2361,7 @@ const actions = {
     stopListening();
     state.locked = false;
     if (b && b.stage === 'trip' && state.trip) {
-      state.selected = state.trip.option; state.destination = state.trip.place; state.openStops = {};
+      state.selected = state.trip.planned || state.trip.option; state.destination = state.trip.place; state.openStops = {};
       state.stack = [HOME(), { name: 'detail', id: uid() }];
     } else if (b && b.stage === 'choosePlace') {
       // The full list, with what was heard, is one tap away.
@@ -2141,6 +2417,7 @@ const actions = {
     store.set('trip', state.trip);
     renderLock(); renderIsland();
   },
+  'trip-replan': () => replanTrip(),
   'trip-done': () => {
     const place = state.trip.place;
     const key = placeKey(place);
@@ -2352,6 +2629,7 @@ $('#origin-select').addEventListener('change', (event) => {
 $('#locate').addEventListener('click', () => locate(true));
 
 function fillOrigins() {
+  if (state.serverReady) setTimeout(() => refreshNearby(), 0);
   const select = $('#origin-select');
   const options = [['gps', 'Tavo vieta (naršyklė)'],
     ...(state.cities || []).map((c) => [`city:${c.name}`, `${c.name} · ${c.stop}`]),
@@ -2377,7 +2655,8 @@ function fillOrigins() {
   // A trip survives a reload, like a Live Activity survives the app quitting.
   const trip = store.get('trip', null);
   if (trip && new Date(trip.option.arrive.iso).getTime() > Date.now() - 2 * 3600_000) {
-    state.trip = { ...trip, option: wholeMinutes(mergeWalks(trip.option)) };
+    const planned = wholeMinutes(mergeWalks(trip.planned || trip.option));
+    state.trip = { ...trip, planned, option: planned };
     state.banner = { stage: 'trip' };
   }
   // Once set up, the phone starts locked: the banner is the product, and the
@@ -2396,7 +2675,7 @@ function fillOrigins() {
         state.dataInfo = `${stopsText(s.stops)} · atnaujinta ${built ? built.toLocaleDateString('lt-LT') : '—'}`;
         status.textContent = `Tvarkaraščiai: ${state.dataInfo}`;
         state.serverReady = true;
-        api('/api/cities').then((data) => { state.cities = data.cities || []; fillOrigins(); renderAll(); }).catch(() => {});
+        api('/api/cities').then((data) => { state.cities = data.cities || []; fillOrigins(); renderAll(); refreshNearby(true); }).catch(() => {});
         return;
       }
       status.textContent = s.error ? `Klaida: ${s.error}` : 'Kraunami tvarkaraščiai…';

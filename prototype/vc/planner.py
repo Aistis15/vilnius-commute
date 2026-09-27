@@ -458,6 +458,9 @@ def option_json(t: Timetable, journey: Journey, midnight: datetime, origin: Poin
             trip = t.pattern_trips[leg.pattern][leg.trip]
             item["route"] = route_json(t, leg.pattern)
             item["headsign"] = t.pattern_headsign[leg.pattern]
+            # Which vehicle run this is, so live data can find it again.
+            item["trip"] = [leg.pattern, leg.trip, leg.shift, leg.board_index, leg.alight_index,
+                            midnight.strftime("%Y-%m-%d")]
             item["stop_count"] = leg.alight_index - leg.board_index
             item["stops"] = [
                 {

@@ -563,3 +563,43 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
   .island.expanded { width: calc(100% - 22px); }
   .island .expanded-body { width: 100%; left: 0; margin-left: 0; }
 }
+
+/* ---- live: the time is real, not the timetable's ------------------------ */
+.icon .fill { fill: currentColor; stroke: none; }
+.problem-text { color: var(--red); }
+.live { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-variant-numeric: tabular-nums; }
+.live > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live .icon { flex: none; font-size: .9em; opacity: .8; }
+.option .live-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; color: var(--label2); }
+.heading-note { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--label2); }
+.heading-note .icon { font-size: 13px; }
+
+/* The board at the stop. */
+.board { display: grid; gap: 10px; }
+.stop-card { background: var(--card); border-radius: 16px; padding: 12px 16px 6px; }
+.stop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.stop-name { font: 600 16px/1.25 var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stop-dist { font-size: 13px; color: var(--label2); flex: none; font-variant-numeric: tabular-nums; }
+.dep { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; min-height: 40px; }
+.dep + .dep { border-top: 0.5px solid var(--separator); }
+.dep-dir { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dep-times { display: inline-flex; align-items: baseline; gap: 5px; font-size: 15px; color: var(--label2); font-variant-numeric: tabular-nums; }
+.dep-times .first { color: var(--label); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+.dep-times .first .icon { font-size: 12px; opacity: .75; }
+.dep-times i { font-style: normal; color: var(--label3); }
+.dep-times small { font-size: 13px; }
+
+/* The trip's bus on the map, in its own colour, gliding between fixes. */
+.bus-icon { background: none; border: 0; }
+.bus-marker { display: inline-grid; place-items: center; min-width: 30px; height: 22px; padding: 0 6px; border-radius: 6px;
+  font: 700 13px/1 var(--font); box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,.25); transform: translate(-50%, -50%); }
+.leaflet-marker-icon.bus-icon.gliding { transition: transform 1.2s var(--ease-move); }
+
+/* Red wherever it sits: a problem is a problem in a card, a timeline, a row. */
+:is(.option, .timeline, .live, .stage) .problem-text { color: var(--red); }
+:is(.activity, .island) .problem-text { color: #FF453A; }
+.option .live-row.problem-text { color: var(--red); }
+/* The one action a broken connection needs, where the walk or the progress
+   would be: white, like the banner's primary buttons. */
+.foot-action { height: 30px; padding: 0 14px; border-radius: 15px; background: #fff; color: #000; font: 600 15px var(--font); }
+.foot-action:active { transform: scale(.96); opacity: .8; }

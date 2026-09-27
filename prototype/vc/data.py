@@ -100,6 +100,9 @@ class Timetable:
     pattern_stops: list[list[int]] = field(default_factory=list)
     # Per pattern: trips sorted by departure; each trip is (service_id, [arrivals], [departures]).
     pattern_trips: list[list[tuple[int, list[int], list[int]]]] = field(default_factory=list)
+    # Per pattern, the GTFS id of each trip in pattern_trips ('<city>:<trip_id>'),
+    # so a live vehicle that names its trip can be found.
+    pattern_trip_ids: list[list[str]] = field(default_factory=list)
     patterns_at_stop: list[list[tuple[int, int]]] = field(default_factory=list)
     transfers: list[list[tuple[int, int]]] = field(default_factory=list)
     services: list[tuple[int, int, int]] = field(default_factory=list)  # weekdays, start, end
@@ -164,12 +167,14 @@ def load_timetable(path: Path = DB_PATH) -> Timetable:
             departures.append(departure)
 
         t.pattern_trips = [[] for _ in range(pattern_count)]
-        for trip_id, pid, service_id in db.execute(
-            "SELECT id, pattern_id, service_id FROM trip ORDER BY pattern_id, departure"
+        t.pattern_trip_ids = [[] for _ in range(pattern_count)]
+        for trip_id, pid, service_id, gtfs_id in db.execute(
+            "SELECT id, pattern_id, service_id, gtfs_id FROM trip ORDER BY pattern_id, departure"
         ):
             arrivals, departures = times.get(trip_id, ([], []))
             if len(arrivals) == len(t.pattern_stops[pid]):
                 t.pattern_trips[pid].append((service_id, arrivals, departures))
+                t.pattern_trip_ids[pid].append(gtfs_id)
 
         t.patterns_at_stop = [[] for _ in range(stop_count)]
         for pid, stops in enumerate(t.pattern_stops):

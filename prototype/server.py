@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vc import data, planner, search, speech_lt  # noqa: E402
+from vc import data, departures, live, planner, search, speech_lt  # noqa: E402
 
 PORT = 8765
 WEB = Path(__file__).resolve().parent / "web"
@@ -31,6 +31,7 @@ WEB = Path(__file__).resolve().parent / "web"
 class State:
     cities: list = []
     timetable = None
+    live = None
     index = None
     manifest: dict = {}
     error: str | None = None
@@ -42,6 +43,7 @@ def load_in_background() -> None:
         State.timetable = data.load_timetable()
         State.index = search.StopIndex(State.timetable)
         State.cities = planner.city_summaries(State.timetable)
+        State.live = live.Live(State.timetable)
         print(f"Ready: {len(State.timetable.stop_names)} stops. Open http://localhost:{PORT}")
     except Exception as error:  # noqa: BLE001
         State.error = str(error)
@@ -68,6 +70,23 @@ def local_time(value: str) -> datetime:
     if moment.tzinfo is not None:
         moment = moment.astimezone().replace(tzinfo=None)
     return moment
+
+
+# The prototype's clock can run ahead of the real one ("+5 min", 10x). Live
+# positions describe the real now, so they are used only when the two agree.
+LIVE_TOLERANCE_S = 120
+
+
+def live_now(query: dict) -> datetime | None:
+    """The real now, when the app's clock is at it; else None (no live data)."""
+    if State.live is None:
+        return None
+    real = datetime.now()
+    if query.get("now"):
+        claimed = local_time(query["now"])
+        if abs((claimed - real).total_seconds()) > LIVE_TOLERANCE_S:
+            return None
+    return real
 
 
 def minutes_of(now: str | None) -> int | None:
@@ -135,7 +154,32 @@ class Handler(BaseHTTPRequestHandler):
                     query.get("walk", "normal"),
                     now=local_time(query["now"]) if query.get("now") else None,
                 )
+                real = live_now(query) if query.get("now") else None
+                if real is not None:
+                    State.live.annotate(result["options"], real)
+                result["live_available"] = real is not None
                 return self.send_json(result)
+            if url.path == "/api/nearby":
+                # The stops a short walk away and what leaves them in the next
+                # hour, live where the vehicle is on the road.
+                when = local_time(query["now"]) if query.get("now") else datetime.now()
+                real = live_now(query)
+                return self.send_json(departures.nearby(
+                    State.timetable, float(query["lat"]), float(query["lon"]), when,
+                    State.live if real is not None else None))
+            if url.path == "/api/live":
+                # The rides of a trip under way, by the "trip" reference the
+                # plan gave each: "pattern.trip.shift.board.alight.YYYY-MM-DD",
+                # comma-separated. Answers {reference: state or null}.
+                real = live_now(query)
+                states = {}
+                for ref in filter(None, query.get("legs", "").split(",")):
+                    parts = ref.split(".")
+                    if real is None or len(parts) != 6:
+                        states[ref] = None
+                        continue
+                    states[ref] = State.live.ride_state([*map(int, parts[:5]), parts[5]], real)
+                return self.send_json({"legs": states, "live_available": real is not None})
             if url.path.startswith("/api/"):
                 return self.send_json({"error": "unknown endpoint"}, 404)
             return self.serve_static(url.path)

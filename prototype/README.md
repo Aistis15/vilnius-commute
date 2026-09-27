@@ -33,6 +33,7 @@ Place search and speech need the internet.
 | Routing: RAPTOR from any point to any point, arrive-by, night service, the intercity coaches in the feeds | The clock can be sped up (panel on the right) to watch a trip unfold |
 | Address and place search: Photon (OpenStreetMap), Lithuania-wide | "Balsas be mikrofono" stands in for a microphone when there is none |
 | Lithuanian speech: the browser's recogniser + `vc/speech_lt.py` | Your location comes from the browser, or a place you pick |
+| Live buses: stops.lt's positions and delays for Vilnius, Kaunas, Klaipėda (Panevėžys: positions only; Šiauliai publishes none), matched to timetable trips (`vc/live.py`) | Live data is used only while the clock panel is at the real time |
 
 Saved places and preferences live in the browser's `localStorage`, never in
 this repository.
@@ -51,6 +52,15 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
 ```
 
 ## Decisions worth knowing
+
+- **Live delays move the plan, carefully.** A late bus moves its ride and
+  everything after it; the walk to it starts later by the delay less a minute
+  (buses make up time), and under two minutes late moves nothing. An early
+  bus moves the walk earlier by all of it. A connection the new times break
+  is marked, sorted last in the results, and the banner says "Nespėsi
+  persėsti" with one button that plans the rest from that stop.
+- **The board at the stop is on the home screen** (`/api/nearby`): the three
+  nearest stops, their lines and the next times, live where known.
 
 - **An extra vehicle must save at least 3 minutes**, and options that are no
   better in any way are dropped. Without this RAPTOR offers "10, then 10 the

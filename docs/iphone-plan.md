@@ -51,6 +51,7 @@ the prototype's tests, ported.
 | Speech | browser recogniser + `vc/speech_lt.py` | whisper.cpp builds; model accuracy unknown | Port the parser with all its tests ("pusę trijų", "be penkiolikos trys", spelled letters "i s m"); measure whisper small/base on real phrases |
 | Banner | `web/app.js` stages and pages | One countdown state | `TripContentState` gains the stage and the page; one template for every stage with the number block ("išvyksta po / 10 min / 08:10"); pages flipped by a `LiveActivityIntent` button (buttons are what Live Activities allow); ≤ 160 pt tall; "Ar baigėte kelionę?" with Taip / Dar ne |
 | Lock screen | lock-screen button → question → voice | `StartBannerControl`, `AudioRecordingIntent` (built, never ran: unsigned extension) | Wire the control to "Kur keliausime šiandien?" + listening; `AudioRecordingIntent` must start the Live Activity first (Apple's rule) |
+| Live buses | `vc/live.py` (stops.lt `gps_full.txt`, matched by GTFS trip id or route + start minute), `vc/departures.py`, `withLive` in `web/app.js` | — | Fetch the city's feed every 15 s while a trip runs or the board is on screen; same matching and "delay moves the plan" rules; push Live Activity updates on a change of delay or a broken connection |
 | Arrival | simulated clock | — | Real GPS: stage changes on position, arrival detection for the question |
 | Design | tokens, motion roles, dark grey | Design system in Core | Port the motion roles (short, varied, reduced-motion aware) to SwiftUI animations |
 
