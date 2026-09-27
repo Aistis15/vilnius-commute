@@ -292,3 +292,37 @@ class Intercity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(TIMETABLE is None, "timetable not downloaded yet")
+class Cities(unittest.TestCase):
+    """Trips are planned inside a city; the app says so when they are not."""
+
+    KAUNAS = Point(54.8966, 23.8905, "Kauno pilis")
+
+    def test_another_city_is_flagged_not_just_empty(self):
+        from vc.planner import city_at
+        if city_at(TIMETABLE, self.KAUNAS.lat, self.KAUNAS.lon) != "Kaunas":
+            self.skipTest("this timetable has no Kaunas")
+        result = plan(TIMETABLE, ISM, self.KAUNAS, busy_weekday(), arrive_by=False)
+        self.assertIs(result["cross_city"], True)
+        self.assertEqual((result["from_city"], result["to_city"]), ("Vilnius", "Kaunas"))
+
+    def test_same_city_is_not_flagged(self):
+        result = plan(TIMETABLE, ISM, AKROPOLIS, busy_weekday(), arrive_by=False)
+        self.assertIs(result["cross_city"], False)
+        self.assertEqual(result["from_city"], "Vilnius")
+
+    def test_every_city_has_a_place_to_start(self):
+        from vc.planner import city_summaries
+        cities = city_summaries(TIMETABLE)
+        self.assertEqual(len({c["name"] for c in cities}), len(cities))
+        for city in cities:
+            self.assertTrue(city["stop"])
+            # The starting stop belongs to the city it is offered for.
+            self.assertEqual(city_at_stop(city), city["name"])
+
+
+def city_at_stop(city: dict) -> str:
+    from vc.planner import city_at
+    return city_at(TIMETABLE, city["lat"], city["lon"], within_m=5)

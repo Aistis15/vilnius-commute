@@ -162,12 +162,72 @@ def plan(
 
     rank(options, priority, arrive_by)
     tag(options, arrive_by)
+    # Trips are planned inside one city. When the two ends are in different
+    # cities the answer is empty for a reason the rider should be told, not
+    # a bare "no route".
+    from_city = city_at(t, origin.lat, origin.lon)
+    to_city = city_at(t, destination.lat, destination.lon)
     return {
         "options": options,
         "late": late_by_min is not None,
         "late_by_min": late_by_min,
+        "from_city": from_city,
+        "to_city": to_city,
+        "cross_city": bool(from_city and to_city and from_city != to_city),
         **counts,
     }
+
+
+def city_at(t: Timetable, lat: float, lon: float, within_m: float = 3000) -> str | None:
+    """The city of the nearest stop within `within_m`, or None out of town."""
+    cities = getattr(t, "stop_city", None)
+    if not cities:
+        return None
+    best, best_m = None, within_m
+    for stop, (slat, slon) in enumerate(zip(t.stop_lat, t.stop_lon)):
+        if abs(slat - lat) > 0.03 or abs(slon - lon) > 0.05:
+            continue
+        metres = distance_m(lat, lon, slat, slon)
+        if metres < best_m:
+            best, best_m = cities[stop], metres
+    return best
+
+
+# The bus station, where a city's lines meet and where a visitor starts. Found
+# by name in each city's own feed; Panevėžys's city feed has none, so there
+# the busiest stop near the middle of the network stands in.
+STATION_NAMES = {"stotis", "autobusų stotis", "autobusų stoties st."}
+
+
+def _base_name(name: str) -> str:
+    # Kaunas names carry a platform letter ("Autobusų stotis A").
+    return name[:-2] if len(name) > 2 and name[-2] == " " and name[-1] in "ABCDEF" else name
+
+
+def city_summaries(t: Timetable) -> list[dict]:
+    """Each city with a point to start from, derived from the data."""
+    groups: dict[str, list[int]] = {}
+    for stop, city in enumerate(getattr(t, "stop_city", None) or ["Vilnius"] * len(t.stop_names)):
+        groups.setdefault(city, []).append(stop)
+
+    def weight(i: int) -> tuple[int, int]:
+        patterns = t.patterns_at_stop[i]
+        return len({t.pattern_route[p] for p, _ in patterns}), len(patterns)
+
+    out = []
+    for city, stops in groups.items():
+        stations = [i for i in stops if _base_name(t.stop_names[i]).casefold() in STATION_NAMES]
+        if stations:
+            hub = max(stations, key=weight)
+        else:
+            lat = sum(t.stop_lat[i] for i in stops) / len(stops)
+            lon = sum(t.stop_lon[i] for i in stops) / len(stops)
+            central = [i for i in stops if distance_m(lat, lon, t.stop_lat[i], t.stop_lon[i]) <= 1500] or stops
+            hub = max(central, key=weight)
+        out.append({"name": city, "stops": len(stops), "stop": _base_name(t.stop_names[hub]),
+                    "lat": t.stop_lat[hub], "lon": t.stop_lon[hub]})
+    out.sort(key=lambda c: -c["stops"])
+    return out
 
 
 def _options(

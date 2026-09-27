@@ -294,3 +294,14 @@ rows, stop and service ids are dense, and no transfer is longer than
 
 `https://www.stops.lt/vilnius/gps_full.txt` — **not yet inspected.** No parser
 until it has been.
+
+## Left out: coaches between cities (2026-09-27)
+
+The Šiauliai feed also carries coaches to Vilnius and Kaunas (route ids
+`siauliai_intercitybus_*`). The product plans trips inside each of the five
+cities, and with those coaches the router offered a seven-hour Kaunas →
+Šiauliai → Vilnius trip as a way between cities, so `build_db.py` leaves them
+out (`EXCLUDED_KINDS`), together with the 44 stops served only by them. The
+merged database then has 4,121 stops, 313 routes, 39,704 trips and no
+transfer between cities. A trip whose ends are in different cities is answered
+with `cross_city: true` and both city names, so the app can say why.

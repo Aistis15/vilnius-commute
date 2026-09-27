@@ -307,8 +307,32 @@ function origin() {
   if (state.originChoice === 'gps') {
     return state.gps ? { name: 'Tavo vieta', lat: state.gps.lat, lon: state.gps.lon } : null;
   }
+  if (String(state.originChoice).startsWith('city:')) {
+    const city = cityNamed(state.originChoice.slice(5));
+    return city ? { name: `${city.name} · ${city.stop}`, lat: city.lat, lon: city.lon } : null;
+  }
   const place = state.places.find((p) => p.id === state.originChoice);
   return place ? { name: place.name, lat: place.lat, lon: place.lon } : null;
+}
+
+/* The five cities, each with a place to start from (its bus station), from
+   /api/cities. On a phone the city is simply where you are; on a computer in
+   Vilnius the switcher is how Kaunas, Klaipėda, Šiauliai and Panevėžys get
+   tried at all. */
+const cityNamed = (name) => (state.cities || []).find((c) => c.name === name) || null;
+// "in Kaunas", "from Kaunas": Lithuanian names change with the case.
+const CITY_IN = { Vilnius: 'Vilniuje', Kaunas: 'Kaune', 'Klaipėda': 'Klaipėdoje', 'Šiauliai': 'Šiauliuose', 'Panevėžys': 'Panevėžyje' };
+const cityIn = (name) => CITY_IN[name] || name;
+
+function chooseCity(name) {
+  if (!cityNamed(name)) return;
+  state.originChoice = `city:${name}`;
+  save();
+  fillOrigins();
+  if (currentScreen().name === 'pick') pop();
+  if (currentScreen().name === 'results' && state.destination) runPlan();
+  renderAll();
+  toast(`Pradžia: ${cityNamed(name).name} · ${cityNamed(name).stop}`);
 }
 
 /* Where search should look first: the rider's own city, not always Vilnius. */
@@ -851,6 +875,7 @@ function resultsView() {
   let body;
   if (state.planning) body = `<p class="footnote loading">Ieškau maršrutų${dotsHtml}</p>`;
   else if (state.planError) body = `<p class="footnote error-text">${esc(state.planError)}</p>`;
+  else if (state.plan && state.plan.cross_city && !state.plan.options.some((o) => !o.walk_only)) body = crossCityNotice(state.plan);
   else if (state.plan && !state.plan.options.length) body = '<p class="footnote">Maršruto šiuo laiku nerasta. Pabandyk kitą laiką.</p>';
   else if (state.plan) {
     body = `${lateNotice(state.plan)}<div class="options stagger">${state.plan.options.map(optionCard).join('')}</div>`;
@@ -862,6 +887,20 @@ function resultsView() {
       <div class="from-line">Iš: ${esc(from ? from.name : '—')}</div>
       ${timeControls()}
       ${body}
+    </div>`;
+}
+
+/* The destination is in another city. Trips are planned inside a city, by
+   its buses, so say that plainly and offer to start there instead. */
+function crossCityNotice(plan) {
+  const to = plan.to_city, from = plan.from_city;
+  const place = state.destination ? state.destination.name : '';
+  return `<div class="notice reveal" data-key="cross-city" role="status">
+      <div class="notice-title"><span class="problem">${icon('pin')}</span>${esc(place)} yra ${esc(cityIn(to))}</div>
+      <p>Programėlė planuoja keliones miesto autobusais, o tu esi ${esc(cityIn(from))}. Kelionių tarp miestų ji neieško.</p>
+      ${cityNamed(to) ? `<div class="notice-actions">
+        <button class="secondary" data-action="origin-city" data-city="${esc(to)}">Pradėti ${esc(cityIn(to))}</button>
+      </div>` : ''}
     </div>`;
 }
 
@@ -1050,6 +1089,12 @@ function pickContent() {
         <span class="main"><div class="title">${esc(p.name)}</div><div class="sub">${esc(p.subtitle || '')}</div></span>
         <span class="trail check">${state.originChoice === p.id ? icon('check') : ''}</span></button>`).join('')}
     </div>
+    ${(state.cities || []).length ? `<div class="heading"><h2>Kitas miestas</h2></div>
+    <div class="group stagger">
+      ${state.cities.map((c) => `<button class="row" data-action="origin-city" data-city="${esc(c.name)}" data-key="city-${esc(c.name)}"><span class="lead">${icon('bus')}</span>
+        <span class="main"><div class="title">${esc(c.name)}</div><div class="sub">${esc(c.stop)} · ${c.stops} stotelės</div></span>
+        <span class="trail check">${state.originChoice === `city:${c.name}` ? icon('check') : ''}</span></button>`).join('')}
+    </div>` : ''}
     <p class="footnote">Kompiuteryje naršyklės vieta gali būti netiksli. Tada geriau pasirinkti vietą iš sąrašo arba surasti ją paieškoje.</p>`;
 }
 
@@ -1242,6 +1287,7 @@ function activityContent(where) {
       return `<div class="question small">${esc(b.message)}</div>
         ${b.detail ? `<div class="heard wrap">${esc(b.detail)}</div>` : ''}
         ${b.code === 'no-origin' ? actions([['Pasirinkti vietą', 'banner-pick-origin', true], ['Atšaukti', 'banner-cancel']])
+          : b.code === 'cross-city' && cityNamed(b.city) ? actions([[`Pradėti ${cityIn(b.city)}`, 'banner-city', true], ['Atšaukti', 'banner-cancel']])
           : actions([['Bandyti dar kartą', 'banner-retry', true], ['Rašyti', 'banner-open-search']])}`;
     case 'saved':
       return `<div class="question small">Išsaugota: ${esc(b.name)}</div>`;
@@ -1869,6 +1915,13 @@ async function planAndGo(place, mode, time, surface) {
     renderAll();
     try {
       const plan = await planTrip(place, mode, time);
+      if (plan.cross_city && !plan.options.some((o) => !o.walk_only)) {
+        state.banner = { stage: 'error', code: 'cross-city', city: plan.to_city, place,
+          message: `${place.name} yra ${cityIn(plan.to_city)}`,
+          detail: `Planuoju keliones mieste, o tu esi ${cityIn(plan.from_city)}.`, retry: 'ask' };
+        renderAll();
+        return;
+      }
       if (!plan.options.length) throw new Error('Maršruto šiuo laiku nerasta.');
       if (plan.late) {
         // Nothing gets there in time: the plan is already the fastest way
@@ -1970,6 +2023,12 @@ const actions = {
       return;
     }
     askName(item);
+  },
+  'origin-city': (el) => chooseCity(el.dataset.city),
+  'banner-city': () => {
+    const b = state.banner;
+    chooseCity(b.city);
+    if (b.place) planAndGo(b.place, 'now', null, 'lock');
   },
   'origin-gps': () => { state.originChoice = 'gps'; save(); pop(); fillOrigins(); },
   'origin-place': (el) => { state.originChoice = el.dataset.id; save(); pop(); fillOrigins(); },
@@ -2273,6 +2332,10 @@ $('#typed-voice').addEventListener('keydown', (event) => {
     handleUtterance(text, 'app');
   }
 });
+$('#city-buttons').addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-city]');
+  if (button) chooseCity(button.dataset.city);
+});
 $('#origin-select').addEventListener('change', (event) => {
   if (event.target.value === '__pick') {
     state.locked = false;
@@ -2290,7 +2353,14 @@ $('#locate').addEventListener('click', () => locate(true));
 
 function fillOrigins() {
   const select = $('#origin-select');
-  const options = [['gps', 'Tavo vieta (naršyklė)'], ...state.places.map((p) => [p.id, p.name]), ['__pick', 'Kita vieta…']];
+  const options = [['gps', 'Tavo vieta (naršyklė)'],
+    ...(state.cities || []).map((c) => [`city:${c.name}`, `${c.name} · ${c.stop}`]),
+    ...state.places.map((p) => [p.id, p.name]), ['__pick', 'Kita vieta…']];
+  const cityButtons = $('#city-buttons');
+  if (cityButtons) {
+    cityButtons.innerHTML = (state.cities || []).map((c) =>
+      `<button data-city="${esc(c.name)}" aria-pressed="${state.originChoice === `city:${c.name}`}">${esc(c.name)}</button>`).join('');
+  }
   select.innerHTML = options.map(([value, label]) => `<option value="${esc(value)}"${value === state.originChoice ? ' selected' : ''}>${esc(label)}</option>`).join('');
   const from = origin();
   $('#origin-status').textContent = state.originChoice === 'gps'
@@ -2326,6 +2396,7 @@ function fillOrigins() {
         state.dataInfo = `${stopsText(s.stops)} · atnaujinta ${built ? built.toLocaleDateString('lt-LT') : '—'}`;
         status.textContent = `Tvarkaraščiai: ${state.dataInfo}`;
         state.serverReady = true;
+        api('/api/cities').then((data) => { state.cities = data.cities || []; fillOrigins(); renderAll(); }).catch(() => {});
         return;
       }
       status.textContent = s.error ? `Klaida: ${s.error}` : 'Kraunami tvarkaraščiai…';

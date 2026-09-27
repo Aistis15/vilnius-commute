@@ -7,7 +7,9 @@ wasteful and slow.
 
 Five cities publish the same GTFS shape on stops.lt: Vilnius, Kaunas, Klaipėda,
 Šiauliai and Panevėžys. They are merged into one set of tables with dense
-integer ids across all of them, so the router sees a single network. The file
+integer ids across all of them, so the router sees a single network. The
+product plans trips inside each city, so the coaches between cities that the
+Šiauliai feed also carries are left out (EXCLUDED_KINDS). The file
 keeps its historical name, vilnius.sqlite, because the app and the release
 asset already use it.
 
@@ -72,12 +74,18 @@ CATEGORY_BY_KIND = {
     "nightbus": "nightBus",
     "trol": "trolleybus",
     "ferry": "ferry",
-    # Šiauliai's minibus, regional and intercity lines are all route_type 3
-    # buses with their own colours in the feed, so "bus" loses nothing.
+    # Šiauliai's minibus and regional lines are route_type 3 buses with their
+    # own colours in the feed, so "bus" loses nothing.
     "minibus": "bus",
     "regionalbus": "bus",
-    "intercitybus": "bus",
 }
+
+# Kinds left out of the database. The product plans trips inside the five
+# cities; Šiauliai's feed also carries coaches to Vilnius and Kaunas, and with
+# them the router offered a seven-hour Kaunas -> Šiauliai -> Vilnius trip as
+# if it were a way between cities. Dropping them keeps every answer a city
+# answer.
+EXCLUDED_KINDS = {"intercitybus"}
 
 SCHEMA = """
 PRAGMA journal_mode = OFF;
@@ -186,6 +194,12 @@ def parse_time(value: str) -> int:
     return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
 
 
+def kind_of(route_id: str) -> str | None:
+    """The kind token of `<city>_<kind>_<name>`, or None."""
+    parts = route_id.split("_", 2)
+    return parts[1] if len(parts) == 3 else None
+
+
 def category_for(route_id: str) -> str:
     """`<city>_<kind>_<name>` -> category, for any city.
 
@@ -275,11 +289,37 @@ class Builder:
         before = (len(self.stop_rows), len(self.route_rows),
                   len(self.pattern_rows), len(self.trip_rows))
 
+        # --- which lines stay ----------------------------------------------
+        excluded_routes = {row["route_id"] for row in feed.rows("routes.txt")
+                           if kind_of(row["route_id"]) in EXCLUDED_KINDS}
+        trip_meta = {row["trip_id"]: row for row in feed.rows("trips.txt")
+                     if row["route_id"] not in excluded_routes}
+
+        sequences: dict[str, list[tuple[int, str, int, int]]] = defaultdict(list)
+        served: set[str] = set()
+        excluded_only: set[str] = set()
+        for row in feed.rows("stop_times.txt"):
+            if row["trip_id"] in trip_meta:
+                served.add(row["stop_id"])
+                sequences[row["trip_id"]].append((
+                    int(row["stop_sequence"]),
+                    row["stop_id"],
+                    parse_time(row["arrival_time"]),
+                    parse_time(row["departure_time"]),
+                ))
+            else:
+                excluded_only.add(row["stop_id"])
+        excluded_only -= served
+
         # --- stops ---------------------------------------------------------
         # Local GTFS ids -> global dense ids, scoped to this feed: stop 5118
-        # in Kaunas is not stop 5118 in Vilnius.
+        # in Kaunas is not stop 5118 in Vilnius. A stop served only by an
+        # excluded line is left out; one served by nothing at all stays, as
+        # before, since the feed lists it.
         stop_index: dict[str, int] = {}
         for row in feed.rows("stops.txt"):
+            if row["stop_id"] in excluded_only:
+                continue
             index = len(self.stop_rows)
             stop_index[row["stop_id"]] = index
             lat, lon = float(row["stop_lat"]), float(row["stop_lon"])
@@ -290,6 +330,8 @@ class Builder:
         # --- routes --------------------------------------------------------
         route_index: dict[str, int] = {}
         for row in feed.rows("routes.txt"):
+            if row["route_id"] in excluded_routes:
+                continue
             index = len(self.route_rows)
             route_index[row["route_id"]] = index
             self.route_rows.append((
@@ -330,17 +372,7 @@ class Builder:
                     1 if row["exception_type"] == "1" else 0)
 
         # --- trips and their stop sequences --------------------------------
-        trip_meta = {row["trip_id"]: row for row in feed.rows("trips.txt")}
-
-        sequences: dict[str, list[tuple[int, str, int, int]]] = defaultdict(list)
-        for row in feed.rows("stop_times.txt"):
-            sequences[row["trip_id"]].append((
-                int(row["stop_sequence"]),
-                row["stop_id"],
-                parse_time(row["arrival_time"]),
-                parse_time(row["departure_time"]),
-            ))
-
+        # (read above, excluded lines already filtered out)
         # Group trips into patterns by their ordered stop list.
         for trip_id in sorted(sequences):            # sorted for reproducible ids
             stops = sorted(sequences[trip_id])

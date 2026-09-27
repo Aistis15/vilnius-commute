@@ -29,6 +29,7 @@ WEB = Path(__file__).resolve().parent / "web"
 
 
 class State:
+    cities: list = []
     timetable = None
     index = None
     manifest: dict = {}
@@ -40,6 +41,7 @@ def load_in_background() -> None:
         State.manifest = data.ensure_database()
         State.timetable = data.load_timetable()
         State.index = search.StopIndex(State.timetable)
+        State.cities = planner.city_summaries(State.timetable)
         print(f"Ready: {len(State.timetable.stop_names)} stops. Open http://localhost:{PORT}")
     except Exception as error:  # noqa: BLE001
         State.error = str(error)
@@ -103,6 +105,8 @@ class Handler(BaseHTTPRequestHandler):
                 })
             if url.path == "/api/parse":
                 return self.send_json(speech_lt.parse(query.get("text", ""), minutes_of(query.get("now"))).as_json())
+            if url.path == "/api/cities":
+                return self.send_json({"cities": State.cities})
             if url.path.startswith("/api/") and State.timetable is None:
                 return self.send_json({"error": State.error or "Tvarkaraščiai dar kraunami…"}, 503)
             if url.path == "/api/search":
