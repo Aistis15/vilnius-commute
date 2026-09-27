@@ -299,6 +299,8 @@ const state = {
   live: {},
   // What leaves the stops around the origin (see refreshNearby).
   nearby: null,
+  // Per saved place, when to leave for it now (see refreshPlaceTimes).
+  placeTimes: {},
 };
 
 const save = () => {
@@ -477,6 +479,25 @@ function liveOf(leg) {
 const localIsoSec = (d) => `${localIso(d).slice(0, 16)}:${pad(d.getSeconds())}`;
 const atMs = (ms) => { const d = new Date(ms); return { iso: localIsoSec(d), hm: hm(d) }; };
 
+/* Where the bus is, drawn: the stops still before yours on a line, the bus
+   on it in its own colour, your stop at the end. It moves along as the bus
+   does (goal-gradient: the closer, the more it matters) and the words say
+   the same, so the picture is never the only way to know. */
+const APPROACH_SLOTS = 6;
+function approachHtml(leg) {
+  const live = liveOf(leg);
+  if (!live || live.departed || live.stops_away == null || live.stops_away >= APPROACH_SLOTS) return '';
+  const away = live.stops_away;
+  const at = ((APPROACH_SLOTS - away) / APPROACH_SLOTS) * 100;
+  const ticks = Array.from({ length: APPROACH_SLOTS - 1 }, (_, i) => `<i style="left:${(((i + 1) / APPROACH_SLOTS) * 100).toFixed(1)}%"></i>`).join('');
+  const words = liveWords(live, { short: true });
+  const text = words.map((w) => (w.problem ? `<span class="problem-text">${esc(w.text)}</span>` : esc(w.text))).join('');
+  return `<span class="approach" role="img" aria-label="${esc(`${leg.route.name}: ${words.map((w) => w.text).join(', ')}`)}">
+      <span class="approach-track" aria-hidden="true">${ticks}<i class="approach-you"></i><b class="approach-bus" style="left:${at.toFixed(1)}%;background:#${esc(leg.route.color)}"></b></span>
+      <span class="approach-text">${text}</span>
+    </span>`;
+}
+
 /* The trip as the buses are really running. A ride whose vehicle is on the
    road moves by its delay, and everything after it moves with it. The walk
    to the first bus follows that bus, but never by all of a delay: a late bus
@@ -567,15 +588,18 @@ async function refreshNearby(force = false) {
   } catch { /* the board is a help, not a requirement */ }
 }
 function refreshHome() {
-  if (currentScreen().name !== 'home' || state.searchActive || state.query.trim().length >= 2) return;
+  if (currentScreen().name !== 'home') return;
   const box = inPage('#home-content');
   if (box) staggerIn(morph(box, homeContent(saveSuggestions())));
+  const sub = inPage('.home-sub');
+  if (sub) morph(sub, `${originChip()}${state.nearby && state.nearby.live_available ? `<span class="heading-note">${icon('live')}realiu laiku</span>` : ''}`);
+  refreshDock();
 }
 
 async function pollLive() {
   if (!state.serverReady) return;
   const screen = currentScreen().name;
-  if (screen === 'home' && !state.locked) refreshNearby();
+  if (screen === 'home' && !state.locked) { refreshNearby(); refreshPlaceTimes(); }
   if (!liveClock()) return;
   const refs = new Set();
   const add = (o) => o && !o.walk_only && o.legs.forEach((l) => { const r = refOf(l); if (r) refs.add(r); });
@@ -827,33 +851,101 @@ function onboardingView() {
 // ---- home: say it, or type it, or tap a place
 
 function homeView() {
-  const listening = state.listening === 'app';
   return `<div class="nav">
-      ${navBar({ title: 'Kur keliausime?', right: `<button class="icon-button" data-action="settings" aria-label="Nustatymai">${icon('gear')}</button>` })}
+      ${navBar({ title: 'Šalia tavęs', right: `<button class="icon-button" data-action="settings" aria-label="Nustatymai">${icon('gear')}</button>` })}
     </div>
-    <div class="content${state.searchActive ? ' searching' : ''}">
-      <div class="collapsible"><div>
-        <h1 class="large one-line">Kur keliausime šiandien?</h1>
-        <button class="voice${listening ? ' listening' : ''}" data-action="app-mic" aria-pressed="${listening}">
-          <span class="voice-disc">${icon('mic')}</span>
-          <span class="voice-text">
-            <span class="voice-title">${listening ? `Klausau${dotsHtml}` : 'Pasakyk, kur keliauji'}</span>
-            <span class="voice-sub">${listening
-              ? (state.interim ? `„${esc(state.interim)}“` : 'Paliesk dar kartą, kad sustabdytum')
-              : 'Pvz.: „Į Akropolį keturiolika dvidešimt“'}</span>
-          </span>
-        </button>
-      </div></div>
-      <div class="search-row">
-        <label class="search">
-          ${icon('search')}
-          <input id="search" type="search" placeholder="${state.searchActive ? 'Adresas, vieta ar stotelė' : 'Arba įvesk adresą ar stotelę'}" value="${esc(state.query)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Kur keliausi">
-        </label>
-        <button class="search-cancel" data-action="search-cancel" tabindex="${state.searchActive ? 0 : -1}" aria-hidden="${!state.searchActive}">Atšaukti</button>
-      </div>
-      ${originChip()}
+    <div class="content home-scroll">
+      <h1 class="large">Šalia tavęs</h1>
+      <div class="home-sub">${originChip()}${state.nearby && state.nearby.live_available ? `<span class="heading-note">${icon('live')}realiu laiku</span>` : ''}</div>
       <div id="home-content">${homeContent(saveSuggestions())}</div>
+    </div>
+    ${dockHtml()}`;
+}
+
+/* The dock: the one question, under the thumb. A search field that says
+   "Kur keliausime?", the microphone beside it at the bottom right (where a
+   right thumb rests; two thirds of one-handed use is right-handed), and the
+   saved places as tiles that already know when to leave. Focusing the field
+   slides the dock up into a full search sheet; "Atšaukti" slides it back. */
+function dockHtml() {
+  const open = !!state.searchActive;
+  const listening = state.listening === 'app';
+  const typing = state.query.trim().length >= 2;
+  return `<div class="dock${open ? ' open' : ''}${typing ? ' typing' : ''}" id="dock">
+      <div class="dock-peek">
+        <i class="grabber" aria-hidden="true"></i>
+        <div class="dock-bar">
+          <label class="search${listening ? ' listening' : ''}">
+            ${icon('search')}
+            <input id="search" type="search" placeholder="${listening ? 'Klausau…' : 'Kur keliausime?'}" value="${esc(listening ? state.interim : state.query)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Kur keliausi">
+          </label>
+          ${open
+            ? '<button class="dock-cancel" data-action="search-cancel">Atšaukti</button>'
+            : `<button class="dock-mic${listening ? ' on' : ''}" data-action="app-mic" aria-pressed="${listening}" aria-label="${listening ? 'Sustabdyti klausymą' : 'Pasakyti, kur keliauji'}">${icon('mic')}</button>`}
+        </div>
+        <div class="dock-places" role="list" aria-label="Tavo vietos">${placeTiles()}</div>
+      </div>
+      <div class="dock-results" id="dock-results">${open ? dockResults() : ''}</div>
     </div>`;
+}
+
+function dockResults() {
+  if (state.query.trim().length >= 2) return searchResultsHtml('go');
+  return '<p class="footnote dock-hint">Įvesk adresą, vietą ar stotelę. Arba paliesk mikrofoną ir pasakyk, pvz., „Į Akropolį keturiolika dvidešimt“.</p>';
+}
+
+/* A saved place is a tile with its answer on it: which bus and when to
+   leave, worked out before anyone asks. One tap starts from there. */
+function placeTiles() {
+  const tiles = state.places.map((p) => `
+      <button class="ptile" role="listitem" data-action="go-place" data-id="${p.id}" data-key="${p.id}">
+        <span class="ptile-glyph">${placeIcon({ ...p, saved: true })}</span>
+        <span class="ptile-text"><span class="ptile-name">${esc(p.name)}</span><span class="ptile-sub">${placeWhen(p)}</span></span>
+      </button>`).join('');
+  return `${tiles}<button class="ptile add" role="listitem" data-action="add-place" data-key="add">
+      <span class="ptile-glyph">${icon('plus')}</span>
+      <span class="ptile-text"><span class="ptile-name">Pridėti</span><span class="ptile-sub">namai, darbas…</span></span>
+    </button>`;
+}
+
+function placeWhen(p) {
+  const info = state.placeTimes[p.id];
+  const address = esc(shortAddress(p.subtitle) || ' ');
+  const from = origin();
+  if (from && straightMetres(from, p) < 250) return 'čia esi';
+  if (!info) return address;
+  if (info.walk) return `pėsčiomis ${info.minutes} min`;
+  const m = Math.ceil((info.leave - now().getTime()) / 60_000);
+  if (m < 0) return address;          // gone; the next refresh has the next one
+  return `${info.route ? badge(info.route, true) : ''}${m === 0 ? 'išeik dabar' : `išeik po ${m} min`}`;
+}
+
+/* When to leave for each saved place, from wherever the rider is. Planned
+   once a minute at most, and only while home is on screen. */
+let placeTimesAt = 0;
+async function refreshPlaceTimes(force = false) {
+  const from = origin();
+  if (!from || !state.serverReady || !state.places.length || state.locked) return;
+  const key = `${from.lat.toFixed(3)},${from.lon.toFixed(3)}`;
+  if (!force && state.placeTimesKey === key && Date.now() - placeTimesAt < 60_000) return;
+  placeTimesAt = Date.now();
+  state.placeTimesKey = key;
+  for (const p of state.places.slice(0, 5)) {
+    try {
+      const plan = await planTrip(p, 'now', null);
+      const o = plan.options.map((x) => withLive(x)).find((x) => !x.walk_only && !x.missed) || plan.options[0];
+      state.placeTimes[p.id] = !o ? null : o.walk_only
+        ? { walk: true, minutes: o.duration_min }
+        : { leave: t(o.leave), route: (o.legs.find((l) => l.kind === 'ride') || {}).route || null };
+    } catch { state.placeTimes[p.id] = null; }
+  }
+  refreshDock();
+}
+
+function refreshDock() {
+  if (currentScreen().name !== 'home') return;
+  const row = inPage('.dock-places');
+  if (row) morph(row, placeTiles());
 }
 
 function originChip() {
@@ -882,12 +974,6 @@ function locationNotice() {
 }
 
 function homeContent(suggestions) {
-  if (state.query.trim().length >= 2) return searchResultsHtml('go');
-  const tiles = state.places.map((p) => `
-      <button class="tile" data-action="go-place" data-id="${p.id}" data-key="${p.id}">
-        <span class="glyph">${placeIcon({ ...p, saved: true })}</span>
-        <span><span class="title">${esc(p.name)}</span><span class="sub">${esc(shortAddress(p.subtitle) || ' ')}</span></span>
-      </button>`).join('');
   return `
     ${locationNotice()}
     ${suggestions.map((s) => `<div class="notice reveal" data-key="suggest-${esc(s.key)}">
@@ -897,28 +983,33 @@ function homeContent(suggestions) {
           <button class="secondary" data-action="save-suggestion" data-key-ref="${esc(s.key)}">Išsaugoti</button>
           <button class="secondary" data-action="dismiss-suggestion" data-key-ref="${esc(s.key)}">Ne</button>
         </div></div>`).join('')}
-    <div class="heading"><h2>Tavo vietos</h2>${state.places.length ? '<button data-action="places">Keisti</button>' : ''}</div>
-    <div class="places stagger">
-      ${tiles}
-      <button class="tile add" data-action="add-place" data-key="add"><span class="glyph">${icon('plus')}</span>
-        <span><span class="title">Pridėti vietą</span><span class="sub">Kiek tik nori</span></span></button>
-    </div>
-    ${state.places.length ? '' : '<p class="footnote">Namai, mokykla, darbas, močiutė: paliesk vietą, ir maršrutas jau skaičiuojamas.</p>'}
-    ${nearbyHtml()}`;
+    ${boardHtml()}`;
 }
 
 /* The board at the stop, for the stops around the origin: line, direction,
    and minutes until the next ones leave. A live time carries the mark; the
-   first time of each line is the one that matters, so it is the bold one. */
-function nearbyHtml() {
+   first time of each line is the one that matters, so it is the bold one.
+   Stops are cards (one boundary, one group) of at most four lines: enough to
+   hold in mind at a glance. */
+function boardHtml() {
+  const from = origin();
+  if (!from) return state.gpsError ? '' : skeletonCards(2);
   const n = state.nearby;
-  if (!n || !n.stops || !n.stops.some((s) => s.lines.length)) return '';
+  if (!n || n.key !== `${from.lat.toFixed(4)},${from.lon.toFixed(4)}`) return skeletonCards(2);
+  const stops = (n.stops || []).filter((stop) => stop.lines.length);
+  if (!stops.length) {
+    return `<div class="notice reveal" data-key="no-stops">
+        <div class="notice-title">Šalia nėra stotelių</div>
+        <p>Programėlė planuoja keliones ${AREA}.</p>
+        ${(state.cities || []).length ? `<div class="notice-actions">${state.cities.map((c) =>
+          `<button class="secondary" data-action="origin-city" data-city="${esc(c.name)}">Pradėti ${esc(cityIn(c.name))}</button>`).join('')}</div>` : ''}
+      </div>`;
+  }
   const at = now().getTime();
   const minutes = (d) => Math.round((new Date(d.iso).getTime() - at) / 60_000);
   const time = (d, i) => {
     const m = minutes(d);
-    const text = m <= 0 ? 'dabar' : String(m);
-    return `<span class="${i === 0 ? 'first' : ''}">${d.live && i === 0 ? icon('live') : ''}${text}</span>`;
+    return `<span class="${i === 0 ? 'first' : ''}">${d.live && i === 0 ? icon('live') : ''}${m <= 0 ? 'dabar' : m}</span>`;
   };
   const line = (l) => {
     const shown = l.departures.filter((d) => minutes(d) >= 0).slice(0, 3);
@@ -929,16 +1020,17 @@ function nearbyHtml() {
         <span class="dep-times">${shown.map(time).join('<i>·</i>')}${unit}</span>
       </div>`;
   };
-  const cards = n.stops.filter((s) => s.lines.length).slice(0, 3).map((s) => `
-      <div class="stop-card" data-key="stop-${esc(s.name)}">
-        <div class="stop-head"><span class="stop-name">${esc(s.name)}</span><span class="stop-dist">${metresText(s.metres)}</span></div>
-        ${s.lines.slice(0, 4).map(line).join('')}
-      </div>`).join('');
-  return `<div class="heading"><h2>Šalia tavęs</h2>${n.live_available
-      ? `<span class="heading-note">${icon('live')}realiu laiku</span>`
-      : '<span class="heading-note">pagal tvarkaraštį</span>'}</div>
-    <div class="board stagger">${cards}</div>`;
+  return `<div class="board stagger">${stops.slice(0, 3).map((stop) => `
+      <div class="stop-card" data-key="stop-${esc(stop.name)}">
+        <div class="stop-head"><span class="stop-name">${esc(stop.name)}</span><span class="stop-dist">${metresText(stop.metres)}</span></div>
+        ${stop.lines.slice(0, 4).map(line).join('')}
+      </div>`).join('')}</div>`;
 }
+
+/* Placeholders the shape of what is coming: the screen answers at once
+   (well inside 400 ms), and nothing jumps when the content lands. */
+const skeletonCards = (n) => `<div class="board" role="status" aria-label="Kraunama">${
+  Array.from({ length: n }, (_, i) => `<div class="skel skel-card" data-key="skel-${i}"></div>`).join('')}</div>`;
 
 function searchResultsHtml(action) {
   const items = currentItems();
@@ -959,11 +1051,13 @@ function onSearchInput(value) {
   state.query = value;
   state.heard = '';
   clearTimeout(searchTimer);
-  const container = inPage('#home-content') || inPage('#pick-content');
+  const container = inPage('#dock-results') || inPage('#pick-content');
   const isPick = currentScreen().name === 'pick';
+  const dock = inPage('#dock');
+  if (dock) dock.classList.toggle('typing', value.trim().length >= 2);
   if (value.trim().length < 2) {
     state.results = [];
-    if (container) staggerIn(morph(container, isPick ? pickContent() : homeContent(saveSuggestions())));
+    if (container) staggerIn(morph(container, isPick ? pickContent() : dockResults()));
     return;
   }
   state.searching = true;
@@ -978,7 +1072,7 @@ function onSearchInput(value) {
       toast(e.message);
     }
     state.searching = false;
-    const box = inPage('#home-content') || inPage('#pick-content');
+    const box = inPage('#dock-results') || inPage('#pick-content');
     if (box) staggerIn(morph(box, searchResultsHtml(currentScreen().name === 'pick' ? 'picked' : 'go')));
   }, 250);
 }
@@ -1026,16 +1120,69 @@ function distinctTags(o, all) {
   return (o.tags || []).filter((tag) => fold(tag) !== fold(transfersText(0)) && !others.some((x) => (x.tags || []).includes(tag)));
 }
 
-function optionCard(o, i, all) {
-  const when = isLate(o) ? '<span class="late">Reikėjo išeiti</span>' : `Išeik ${esc(inText(new Date(o.leave.iso).getTime()))}`;
-  const meta = [when, `${metresText(o.walk_m)} pėsčiomis`, o.walk_only ? '' : transfersText(o.transfers)].filter(Boolean).join(' · ');
-  const tags = i === 0 && !o.missed ? distinctTags(o, all) : [];
+
+function resultsView() {
+  const place = state.destination;
+  const plan = state.plan;
+  const transit = plan && plan.options.some((o) => !o.walk_only);
+  let body = '', cta = '';
+  if (state.planning) body = resultsSkeleton();
+  else if (state.planError) body = `<p class="footnote error-text">${esc(state.planError)}</p>`;
+  else if (plan && plan.cross_city && !transit) body = crossCityNotice(plan);
+  else if (plan && (!plan.from_city || !plan.to_city) && !transit) body = outOfAreaNotice(plan);
+  else if (plan && !plan.options.length) body = '<p class="footnote">Maršruto šiuo laiku nerasta. Pabandyk kitą laiką.</p>';
+  else if (plan) {
+    // One recommendation, clearly, and the rest one line each: comparing
+    // six equal cards is work (Hick's law); choosing to look further is not.
+    let shown = plan.options.map((o, index) => ({ ...withLive(o), index }));
+    // Asked for "now", a way whose (live) start has passed is not a way:
+    // an early bus has made it one you cannot catch.
+    if (state.timeMode === 'now' && shown.some((o) => !isLate(o))) shown = shown.filter((o) => !isLate(o));
+    const best = shown.find((o) => !isLate(o) && !o.missed) || shown[0];
+    const rest = shown.filter((o) => o !== best).sort((a, b) => Number(!!a.missed) - Number(!!b.missed));
+    body = `${lateNotice(plan)}${heroCard(best, shown)}
+      ${rest.length ? `<h2 class="section-head">Kiti variantai</h2><div class="group alts stagger">${rest.map(altRow).join('')}</div>` : ''}`;
+    // Going is one tap, at the bottom where the thumb is, and the button
+    // names what it starts.
+    if (!isLate(best) && !best.missed) {
+      cta = `<div class="sticky-bottom"><button class="prominent cta" data-action="go-option" data-index="${best.index}">
+          <span>Pradėti kelionę</span>${best.walk_only ? '' : `<span class="cta-route">${best.routes.map((r) => badge(r, true)).join('')}</span>`}
+        </button></div>`;
+    }
+  }
+  const from = origin();
+  return `<div class="nav">${navBar({ back: true, title: place ? place.name : '' })}</div>
+    <div class="content${cta ? ' has-cta' : ''}">
+      <h1 class="large title2">${esc(place ? place.name : '')}</h1>
+      <div class="from-line">Iš: ${esc(from ? from.name : '—')}</div>
+      ${timeControls()}
+      ${body}
+      ${cta}
+    </div>`;
+}
+
+/* When to leave, the way it is said: "po 5 min", "dabar", "18:22". */
+function leaveOf(o) {
+  if (isLate(o)) return { cap: 'Reikėjo išeiti', big: esc(o.leave.hm), words: 'Reikėjo išeiti', late: true };
+  const m = Math.ceil((t(o.leave) - now().getTime()) / 60_000);
+  if (m <= 0) return { cap: 'Išeik', big: 'dabar', words: 'dabar' };
+  if (m < 60) return { cap: 'Išeik po', big: `${roll(m)}<small>min</small>`, words: `po ${m} min` };
+  const day = dayWord(t(o.leave));
+  return { cap: `Išeik${esc(day)}`, big: esc(o.leave.hm), words: `${day.trim() ? `${day.trim()} ` : ''}${o.leave.hm}` };
+}
+
+/* The recommended way: when to leave is the biggest thing on the screen,
+   because it is the one thing to act on. When you arrive is the other end. */
+function heroCard(o, all) {
+  const leave = leaveOf(o);
   const ride = o.walk_only ? null : o.legs.find((l) => l.kind === 'ride');
   const live = ride ? liveHtml(ride) : '';
-  return `<button class="option${isLate(o) ? ' late' : ''}" data-action="open-option" data-index="${o.index ?? i}" data-key="${esc(o.id)}">
-      <div class="top">
-        <div class="span">${esc(o.leave.hm)}–<span class="${o.late ? 'late' : ''}">${esc(o.arrive.hm)}</span></div>
-        <div class="dur">${o.duration_min} min</div>
+  const tags = o.missed ? [] : distinctTags(o, all);
+  const meta = [`${o.leave.hm}–${o.arrive.hm}`, `${metresText(o.walk_m)} pėsčiomis`, o.walk_only ? '' : transfersText(o.transfers)].filter(Boolean).join(' · ');
+  return `<button class="option hero${isLate(o) ? ' late' : ''}" data-action="open-option" data-index="${o.index}" data-key="${esc(o.id)}">
+      <div class="hero-row">
+        <div><div class="cap">${leave.cap}</div><div class="hero-big${leave.late ? ' late' : ''}">${leave.big}</div></div>
+        <div class="hero-right"><div class="cap">atvyksi</div><div class="hero-time${o.late ? ' late' : ''}">${esc(o.arrive.hm)}</div><div class="cap">${o.duration_min} min kelionė</div></div>
       </div>
       <div class="route-line">${routeLine(o)}</div>
       <div class="meta">${meta}</div>
@@ -1045,28 +1192,23 @@ function optionCard(o, i, all) {
     </button>`;
 }
 
-function resultsView() {
-  const place = state.destination;
-  let body;
-  if (state.planning) body = `<p class="footnote loading">Ieškau maršrutų${dotsHtml}</p>`;
-  else if (state.planError) body = `<p class="footnote error-text">${esc(state.planError)}</p>`;
-  else if (state.plan && state.plan.cross_city && !state.plan.options.some((o) => !o.walk_only)) body = crossCityNotice(state.plan);
-  else if (state.plan && (!state.plan.from_city || !state.plan.to_city) && !state.plan.options.some((o) => !o.walk_only)) body = outOfAreaNotice(state.plan);
-  else if (state.plan && !state.plan.options.length) body = '<p class="footnote">Maršruto šiuo laiku nerasta. Pabandyk kitą laiką.</p>';
-  else if (state.plan) {
-    const shown = state.plan.options.map((o, index) => ({ ...withLive(o), index }))
-      .sort((a, b) => Number(!!a.missed) - Number(!!b.missed));
-    body = `${lateNotice(state.plan)}<div class="options stagger">${shown.map(optionCard).join('')}</div>`;
-  } else body = '';
-  const from = origin();
-  return `<div class="nav">${navBar({ back: true, title: place ? place.name : '' })}</div>
-    <div class="content">
-      <h1 class="large title2">${esc(place ? place.name : '')}</h1>
-      <div class="from-line">Iš: ${esc(from ? from.name : '—')}</div>
-      ${timeControls()}
-      ${body}
-    </div>`;
+function altRow(o) {
+  const leave = leaveOf(o);
+  const ride = o.walk_only ? null : o.legs.find((l) => l.kind === 'ride');
+  return `<button class="row alt" data-action="open-option" data-index="${o.index}" data-key="${esc(o.id)}">
+      <span class="main">
+        <div class="title"><span class="alt-when${leave.late ? ' late' : ''}">${ride && liveOf(ride) ? icon('live') : ''}${esc(leave.words)}</span><span class="alt-span">${esc(o.leave.hm)}–${esc(o.arrive.hm)}</span></div>
+        <div class="sub alt-route">${routeLine(o, true)}</div>
+        ${o.missed ? '<div class="sub problem-text">Persėdimas gali nepavykti</div>' : ''}
+      </span>
+      <span class="trail">${o.duration_min} min${icon('chevron')}</span>
+    </button>`;
 }
+
+const resultsSkeleton = () => `<div role="status" aria-label="Ieškau maršrutų">
+    <div class="skel skel-hero"></div><div class="skel skel-head"></div>
+    <div class="skel skel-row"></div><div class="skel skel-row"></div>
+  </div>`;
 
 /* The destination is in another city. Trips are planned inside a city, by
    its buses, so say that plainly and offer to start there instead. */
@@ -1176,7 +1318,7 @@ function detailView() {
   const planned = state.trip && (state.trip.planned || state.trip.option);
   const running = planned && planned.id === state.selected.id && planned.leave.iso === state.selected.leave.iso;
   return `<div class="nav">${navBar({ back: true, title: 'Maršrutas', always: true })}</div>
-    <div class="content">
+    <div class="content has-cta">
       <div id="map" class="map" data-morph="keep"></div>
       <div class="summary">
         <div>${leaveCaption(o)}<div class="leave${isLate(o) ? ' late' : ''}">${esc(o.leave.hm)}</div></div>
@@ -1558,6 +1700,9 @@ function activityContent(where) {
           : actions([['Bandyti dar kartą', 'banner-retry', true], ['Rašyti', 'banner-open-search']])}`;
     case 'saved':
       return `<div class="question small">Išsaugota: ${esc(b.name)}</div>`;
+    case 'done':
+      return `<div class="done"><svg class="done-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+        <div><div class="question small">Atvykai</div><div class="heard">${esc(b.name)} · ${b.minutes} min kelionė</div></div></div>`;
     case 'suggestSave':
       return `<div class="question small">Išsaugoti šią vietą?</div>
         <div class="heard">${esc(b.name)} · važiuoji čia dažnai</div>
@@ -1703,11 +1848,12 @@ function nowPage(trip, phase, at) {
     // Live, the bus is the news ("vėluoja 3 min" is why "Išeik" moved);
     // otherwise the walk ahead.
     const live = ride ? liveHtml(ride, { short: true }) : '';
+    const track = ride ? approachHtml(ride) : '';
     return stageHtml({
       title: `Išeik${esc(dayWord(leave))} ${esc(o.leave.hm)}`,
       meta: ride ? `${badge(ride.route, true)}${clip(esc(ride.from.name))}` : clip(esc(trip.place.name)),
       hero,
-      foot: live ? clip(live) : walk ? clip(`${metresText(walk.metres)} · ${walk.minutes} min pėsčiomis`) : '',
+      foot: track || (live ? clip(live) : walk ? clip(`${metresText(walk.metres)} · ${walk.minutes} min pėsčiomis`) : ''),
     });
   }
 
@@ -1720,7 +1866,7 @@ function nowPage(trip, phase, at) {
       title: transfer ? 'Persėsk' : 'Lauk stotelėje',
       meta: `${badge(leg.route, true)}${clip(live && leg.headsign ? `→ ${esc(leg.headsign)}` : esc(leg.from.name))}`,
       hero,
-      foot: live ? clip(live) : leg.headsign ? clip(`→ ${esc(leg.headsign)}`) : '',
+      foot: approachHtml(leg) || (live ? clip(live) : leg.headsign ? clip(`→ ${esc(leg.headsign)}`) : ''),
     });
   }
 
@@ -1751,8 +1897,10 @@ function nowPage(trip, phase, at) {
   let title = 'Eik į stotelę';
   if (phase.i > 0) title = 'Persėsk';
   else if (leavingNow(trip, phase, at)) title = 'Išeik dabar';
-  // The bus will be there before you at this pace.
+  // The bus will be there before you at this pace; or, late enough, it
+  // spares you the rush, and saying so is worth a line.
   if (ride.missed) title = 'Paskubėk';
+  else if (phase.i === legs.indexOf(ride) - 1 && liveOf(ride) && t(ride.departure) - t(leg.arrival) >= 150_000) title = 'Eik ramiai';
   return stageHtml({ title, meta: `${badge(ride.route, true)}${clip(esc(ride.from.name))}`, hero, foot });
 }
 
@@ -1962,7 +2110,22 @@ function animateLock(lock, show) {
 
 let islandWasExpanded = false;
 
+function autoExpandIsland() {
+  const trip = state.trip;
+  if (!trip || state.locked || !state.banner || state.banner.stage !== 'trip') return;
+  const at = now().getTime();
+  const phase = phaseOf(trip, at);
+  if (phase.kind !== 'ride') return;
+  const left = phase.leg.stops.filter((stop) => t(stop.time) > at).length;
+  trip.expandedFor = trip.expandedFor || {};
+  if (left > 2 || trip.expandedFor[phase.i]) return;
+  trip.expandedFor[phase.i] = true;
+  state.islandExpanded = true;
+  setTimeout(() => { state.islandExpanded = false; renderIsland(); }, 6000);
+}
+
 function renderIsland() {
+  autoExpandIsland();
   const island = $('#island');
   const compact = islandCompact();
   // The island only expands for a trip; a question or a confirmation belongs
@@ -2336,6 +2499,16 @@ const actions = {
   },
   'open-option': (el) => { state.selected = state.plan.options[Number(el.dataset.index)]; state.openStops = {}; push({ name: 'detail' }); },
   'toggle-stops': (el) => { const i = el.dataset.index; state.openStops[i] = !state.openStops[i]; renderApp(); },
+  'go-option': (el) => {
+    const option = state.plan && state.plan.options[Number(el.dataset.index)];
+    if (!option) return;
+    startTrip(option, state.destination);
+    // Unlocking later shows the trip under way, not the list it came from.
+    state.selected = option; state.openStops = {};
+    state.stack = [HOME(), { name: 'detail', id: uid() }];
+    toast('Kelionė pradėta');
+    setTimeout(() => { state.locked = true; renderAll(); }, 700);
+  },
   'start-trip': () => {
     startTrip(state.selected, state.destination);
     toast('Kelionė pradėta');
@@ -2440,18 +2613,19 @@ const actions = {
   },
   'trip-replan': () => replanTrip(),
   'trip-done': () => {
-    const place = state.trip.place;
+    const trip = state.trip;
+    const place = trip.place;
     const key = placeKey(place);
     const known = state.places.some((p) => Math.abs(p.lat - place.lat) < 0.0015 && Math.abs(p.lon - place.lon) < 0.0015);
     state.trip = null;
     store.set('trip', null);
     const visits = state.visits[key];
-    if (!known && visits && visits.count >= 2 && !state.dismissed.includes(key)) {
-      state.banner = { stage: 'suggestSave', name: place.name, key };
-    } else {
-      state.banner = null;
-    }
+    const next = !known && visits && visits.count >= 2 && !state.dismissed.includes(key)
+      ? { stage: 'suggestSave', name: place.name, key } : null;
+    // A moment to land (the peak-end rule: the end is what is remembered).
+    state.banner = { stage: 'done', name: place.name, minutes: trip.option.duration_min };
     renderAll();
+    setTimeout(() => { if (state.banner && state.banner.stage === 'done') { state.banner = next; renderAll(); } }, 2400);
   },
   'trip-snooze': () => { state.trip.snoozeUntil = now().getTime() + 5 * 60_000; renderAll(); },
   'banner-save': () => {
@@ -2650,7 +2824,7 @@ $('#origin-select').addEventListener('change', (event) => {
 $('#locate').addEventListener('click', () => locate(true));
 
 function fillOrigins() {
-  if (state.serverReady) setTimeout(() => refreshNearby(), 0);
+  if (state.serverReady) setTimeout(() => { refreshNearby(); refreshPlaceTimes(); }, 0);
   const select = $('#origin-select');
   const options = [['gps', 'Tavo vieta (naršyklė)'],
     ...(state.cities || []).map((c) => [`city:${c.name}`, `${c.name} · ${c.stop}`]),
@@ -2696,7 +2870,7 @@ function fillOrigins() {
         state.dataInfo = `${stopsText(s.stops)} · atnaujinta ${built ? built.toLocaleDateString('lt-LT') : '—'}`;
         status.textContent = `Tvarkaraščiai: ${state.dataInfo}`;
         state.serverReady = true;
-        api('/api/cities').then((data) => { state.cities = data.cities || []; fillOrigins(); renderAll(); refreshNearby(true); }).catch(() => {});
+        api('/api/cities').then((data) => { state.cities = data.cities || []; fillOrigins(); renderAll(); refreshNearby(true); refreshPlaceTimes(true); }).catch(() => {});
         return;
       }
       status.textContent = s.error ? `Klaida: ${s.error}` : 'Kraunami tvarkaraščiai…';
