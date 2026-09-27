@@ -68,3 +68,13 @@ Priority: composition → typography → spacing → colour → motion → micro
   (51 states, 0 console errors) → independent critic → frontend fixer on its
   top items; backend fixer in parallel: arrive-by never offers trips that
   already left ("late" response), aikštė↔a. variants, intercity routing.
+- Round 2 done (~03:45 after a usage-limit pause): critic ranked #1 a walk
+  distance that grew while walking (two walk legs back to back) and #2 the
+  banner scrolled off-screen at 390 px. All 17 critic items fixed or partly
+  fixed; late trips ("Nespėsi iki …"), intercity coaches, street-word
+  variants. Decisions: keep "Ar baigėte kelionę?" (user's words), keep
+  trolleybus red (real route colour). 75 tests. Commit 954d9d6.
+- Round 3 (started ~04:00): fresh critic on round-3 shots; backend merges
+  walk legs at the source, drops parcel lockers, groups Kaunas A/B
+  platforms, keeps unique-line platforms past the 12-stop limit; capture
+  script gains a listening state and 390 px in --quick.
