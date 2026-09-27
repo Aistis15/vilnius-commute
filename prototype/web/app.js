@@ -1301,8 +1301,13 @@ function detailView() {
           ${open ? `<div class="stops reveal">${between}</div>` : ''}` : `<div class="sub">${stopsText(leg.stop_count)}</div>`}`;
       seg = `<b class="seg" style="background:#${esc(leg.route.color)}"></b>`;
     } else {
-      const target = leg.to.stop == null ? 'iki tikslo' : (leg.from.name === leg.to.name ? 'į kitą tos pačios stotelės peroną' : `į stotelę „${esc(leg.to.name)}“`);
-      what = `<div>Eik ${target}</div><div class="sub">${metresText(leg.metres)} · ${leg.minutes} min</div>`;
+      const move = leg.from.name === leg.to.name && leg.to.stop != null ? sameStopMove(o.legs, i) : null;
+      if (move === 'across') {
+        what = `<div>Pereik gatvę</div><div class="sub">į stotelę „${esc(leg.to.name)}“ kitoje pusėje · ${metresText(leg.metres)} · ${leg.minutes} min</div>`;
+      } else {
+        const target = leg.to.stop == null ? 'iki tikslo' : move ? `į kitą stotelę „${esc(leg.to.name)}“` : `į stotelę „${esc(leg.to.name)}“`;
+        what = `<div>Eik ${target}</div><div class="sub">${metresText(leg.metres)} · ${leg.minutes} min</div>`;
+      }
       seg = '<b class="seg walk"></b>';
     }
     return `<div class="step">
@@ -1715,6 +1720,24 @@ function minimapHtml(where, { route, here, heading, target, color, done = 0, bus
     </span>`;
 }
 
+/* A change between two stops of one name ("Vinco Kudirkos aikštė" both
+   ways). Across the street is said only when it is plain: the bus you came
+   on and the next one run along the same street (their directions parallel
+   or opposite), and the second stop is off to the side of that street,
+   within a street's width. Anything else is "the other stop of that name",
+   which is true whatever the corner looks like. */
+function sameStopMove(legs, i) {
+  const walk = legs[i], before = legs[i - 1], after = legs[i + 1];
+  const direction = (ride, end) => (ride && ride.kind === 'ride' && ride.stops.length >= 2
+    ? (end ? bearing(ride.stops[ride.stops.length - 2], ride.stops[ride.stops.length - 1]) : bearing(ride.stops[0], ride.stops[1]))
+    : null);
+  const into = direction(before, true), out = direction(after, false);
+  if (into == null || out == null || walk.metres > 90) return 'other';
+  const sameStreet = Math.abs(Math.cos(rad(into - out))) > 0.7;
+  const aside = Math.abs(Math.sin(rad(bearing(walk.from, walk.to) - into))) > 0.7;
+  return sameStreet && aside ? 'across' : 'other';
+}
+
 /* The prototype has no GPS during a trip, so the rider is placed where the
    timetable says they should be: along the walk by elapsed time, between two
    stops by their times. What the real app will replace with a location fix. */
@@ -2012,7 +2035,7 @@ function nowPage(trip, phase, at) {
     return stageHtml({ title: 'Eik pėsčiomis', meta: clip(esc(trip.place.name)), hero, foot });
   }
   let title = 'Eik į stotelę';
-  if (phase.i > 0) title = 'Persėsk';
+  if (phase.i > 0) title = leg.from.name === leg.to.name && sameStopMove(legs, phase.i) === 'across' ? 'Pereik gatvę' : 'Persėsk';
   else if (leavingNow(trip, phase, at)) title = 'Išeik dabar';
   // The bus will be there before you at this pace; or, late enough, it
   // spares you the rush, and saying so is worth a line.
@@ -2070,7 +2093,7 @@ function routePage(trip, phase, at) {
     } else if (leg.to.stop == null) {
       text = `${metresText(leg.metres)} · iki tikslo`;
     } else if (leg.from.name === leg.to.name) {
-      text = 'kitas peronas';
+      text = sameStopMove(legs, legs.indexOf(leg)) === 'across' ? `per gatvę · ${esc(leg.to.name)}` : `${metresText(leg.metres)} · kita stotelė „${esc(leg.to.name)}“`;
     } else {
       text = `${metresText(leg.metres)} · ${esc(leg.to.name)}`;
     }
