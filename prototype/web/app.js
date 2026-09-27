@@ -788,10 +788,16 @@ function onSearchInput(value) {
   }, 250);
 }
 
+/* A saved place hides a search result only when it is the same place: same
+   name AND within a few hundred metres. A saved "Akropolis" in Vilnius must
+   not hide the Akropolis in Kaunas. */
+const samePlace = (a, b) => sameName(a.name, b.name)
+  && Math.abs(a.lat - b.lat) < 0.004 && Math.abs(a.lon - b.lon) < 0.006;
+
 function currentItems() {
   const q = state.query.trim();
   const saved = state.places.filter((p) => fold(p.name).includes(fold(q)) || sameName(p.name, q)).map((p) => ({ ...p, saved: true }));
-  return [...saved, ...cleanResults(state.results.filter((r) => !saved.some((s) => sameName(s.name, r.name))), q, saved)];
+  return [...saved, ...cleanResults(state.results.filter((r) => !saved.some((s) => samePlace(s, r))), q, saved)];
 }
 
 // ---- results
@@ -968,7 +974,7 @@ function drawMap() {
     bounds.push(...points);
     L.polyline(points, leg.kind === 'ride'
       ? { color: '#' + leg.route.color, weight: 6, opacity: 0.95 }
-      : { color: '#8E8E93', weight: 4, dashArray: '2 8', lineCap: 'round' }).addTo(map);
+      : { color: getComputedStyle(document.documentElement).getPropertyValue('--label').trim() || '#000', weight: 4, opacity: 0.75, dashArray: '1 8', lineCap: 'round' }).addTo(map);
   });
   const first = o.legs[0].from, last = o.legs[o.legs.length - 1].to;
   L.circleMarker([first.lat, first.lon], { radius: 7, color: '#000', weight: 3, fillColor: '#fff', fillOpacity: 1 }).addTo(map);
@@ -1250,11 +1256,11 @@ function activityContent(where) {
   }
 }
 
-const PAGES = ['Dabar', 'Kryptis', 'Maršrutas'];
+const PAGES = ['Laikas', 'Kryptis', 'Maršrutas'];
 
 /* The page the banner shows. A new stage is a new instruction, so it opens
-   on "Dabar" again: the rider never misses "Ruoškis išlipti" because the
-   compass was left up. */
+   on the first page again: the rider never misses "Ruoškis išlipti" because
+   the compass was left up. */
 const stageOf = (phase) => `${phase.kind}:${phase.i ?? ''}`;
 function pageOf(trip, phase) {
   if (trip.pageStage !== stageOf(phase)) {
@@ -1282,13 +1288,18 @@ function activityKey() {
   return `trip:${stageOf(phase)}${leavingNow(state.trip, phase, at) ? ':now' : ''}|${pageOf(state.trip, phase)}`;
 }
 
-/* One button that names the next page. No dots: a Live Activity cannot be
-   swiped, so nothing should look as if it could. */
+/* One button that names the next page, with the position in it. The dots
+   live inside the button on purpose: they say "page 2 of 3" without looking
+   like something to swipe, which a Live Activity cannot do. */
 function activityPager() {
   const b = state.banner, trip = state.trip;
-  if (!b || b.stage !== 'trip' || !trip || phaseOf(trip, now().getTime()).kind === 'arrived') return '';
-  const next = (pageOf(trip, phaseOf(trip, now().getTime())) + 1) % PAGES.length;
-  return `<button class="pager-next" data-action="banner-page" data-page="${next}" aria-label="Rodyti: ${esc(PAGES[next])}">${esc(PAGES[next])}${icon('chevron')}</button>`;
+  if (!b || b.stage !== 'trip' || !trip) return '';
+  const phase = phaseOf(trip, now().getTime());
+  if (phase.kind === 'arrived') return '';
+  const page = pageOf(trip, phase);
+  const next = (page + 1) % PAGES.length;
+  const dots = PAGES.map((_, i) => `<i${i === page ? ' class="on"' : ''}></i>`).join('');
+  return `<button class="pager-next" data-action="banner-page" data-page="${next}" aria-label="Rodyti: ${esc(PAGES[next])} (${page + 1} iš ${PAGES.length})"><span class="pdots" aria-hidden="true">${dots}</span>${esc(PAGES[next])}${icon('chevron')}</button>`;
 }
 
 function tripContent(at, actions, where) {
@@ -1307,25 +1318,16 @@ function tripContent(at, actions, where) {
   }
   const page = pageOf(trip, phase);
   if (page === 1) return directionPage(trip, phase, at, where);
-  if (page === 2) return routePage(trip, phase);
+  if (page === 2) return routePage(trip, phase, at);
   return nowPage(trip, phase, at);
 }
 
-/* One template for every stage, so nothing moves between them. Left: what to
-   do, then where. Right: how long until the next thing happens, and what and
-   when that is. The bottom line holds the distance or the ride's progress,
-   beside the page button. Three type sizes: the number, the instruction,
-   everything else. */
-function stageHtml({ title, meta = '', label = '', hero = '', long = false, foot = '' }) {
-  return `<div class="stage">
-      <div class="stage-text"><div class="stage-title">${title}</div><div class="stage-meta">${meta}</div></div>
-      <div class="stage-hero"><div class="stage-label">${label}</div><div class="big${long ? ' hours' : ''}">${hero}</div></div>
-    </div>
-    <div class="stage-foot">${foot}</div>`;
-}
 const clip = (html) => `<span class="clip">${html}</span>`;
 const distanceHtml = (m) => `${roll(roundMetres(m))} ${m >= 1000 ? 'km' : 'm'}`;
-const progressHtml = (f) => `<div class="progress"><i style="width:${(clamp01(f) * 100).toFixed(1)}%"></i></div>`;
+/* The ride's progress, notched at every stop in between: the fill visibly
+   moves stop by stop, and the notches count what "Važiuok 5 stoteles" says. */
+const progressHtml = (f, ticks = []) => `<div class="progress"><i style="width:${(clamp01(f) * 100).toFixed(1)}%"></i>${
+  ticks.map((x) => `<b class="tick" style="left:${(clamp01(x) * 100).toFixed(1)}%"></b>`).join('')}</div>`;
 // Counts to the minute that is shown beside it: "išeik 08:01" never sits
 // over "2 min" at 08:00 because the plan said 08:01:40.
 const countdown = (ms, at) => {
@@ -1333,10 +1335,40 @@ const countdown = (ms, at) => {
   return { hero: durationHtml(m), long: m >= 60 };
 };
 
+/* The number block: how long until the next thing happens, what that thing
+   is, and its clock time — "išvyksta po / 10 min / 08:10". It says what the
+   number means right beside it, and it sits in the same place on every page,
+   so flipping to the compass never hides "when". */
+function heroOf(trip, phase, at) {
+  const o = trip.option;
+  const legs = o.legs;
+  if (phase.kind === 'before') return { label: 'liko', ...countdown(t(legs[0].departure), at), sub: '' };
+  const leg = phase.leg;
+  if (phase.kind === 'wait') return { label: 'išvyksta po', ...countdown(t(leg.departure), at), sub: esc(leg.departure.hm) };
+  if (phase.kind === 'ride') return { label: 'išlipsi po', ...countdown(t(leg.arrival), at), sub: esc(leg.arrival.hm) };
+  const ride = nextRide(legs, phase.i + 1);
+  if (!ride) return { label: 'atvyksi po', ...countdown(t(o.arrive), at), sub: esc(o.arrive.hm) };
+  return { label: 'išvyksta po', ...countdown(t(ride.departure), at), sub: esc(ride.departure.hm) };
+}
+const heroHtml = (h) => `<div class="stage-hero"><div class="stage-label">${h.label}</div><div class="big${h.long ? ' hours' : ''}">${h.hero}</div><div class="stage-sub">${h.sub || '&nbsp;'}</div></div>`;
+
+/* One template for every stage, so nothing moves between them. Left: what to
+   do, then where. Right: the number block. The bottom line holds the walk or
+   the ride's progress, beside the page button. Three type sizes: the number,
+   the instruction, everything else. */
+function stageHtml({ title, meta = '', hero, foot = '' }) {
+  return `<div class="stage">
+      <div class="stage-text"><div class="stage-title">${title}</div><div class="stage-meta">${meta}</div></div>
+      ${heroHtml(hero)}
+    </div>
+    <div class="stage-foot">${foot}</div>`;
+}
+
 // Page 1: what to do now.
 function nowPage(trip, phase, at) {
   const o = trip.option;
   const legs = o.legs;
+  const hero = heroOf(trip, phase, at);
 
   if (phase.kind === 'before') {
     const leave = t(legs[0].departure);
@@ -1345,10 +1377,8 @@ function nowPage(trip, phase, at) {
     return stageHtml({
       title: `Išeik${esc(dayWord(leave))} ${esc(o.leave.hm)}`,
       meta: ride ? `${badge(ride.route, true)}${clip(esc(ride.from.name))}` : clip(esc(trip.place.name)),
-      label: 'liko',
-      ...countdown(leave, at),
-      foot: clip([walk ? `${metresText(walk.metres)} pėsčiomis` : '', ride ? `išvyksta ${esc(ride.departure.hm)}` : `atvyksi ${esc(o.arrive.hm)}`]
-        .filter(Boolean).join(' · ')),
+      hero,
+      foot: walk ? clip(`${metresText(walk.metres)} · ${walk.minutes} min pėsčiomis`) : '',
     });
   }
 
@@ -1358,71 +1388,63 @@ function nowPage(trip, phase, at) {
     return stageHtml({
       title: transfer ? 'Persėsk' : 'Lauk stotelėje',
       meta: `${badge(leg.route, true)}${clip(esc(leg.from.name))}`,
-      label: `išvyksta ${esc(leg.departure.hm)}`,
-      ...countdown(t(leg.departure), at),
+      hero,
       foot: leg.headsign ? clip(`→ ${esc(leg.headsign)}`) : '',
     });
   }
 
   if (phase.kind === 'ride') {
     const remaining = Math.max(1, leg.stops.filter((s) => t(s.time) > at).length);
+    const from = t(leg.departure), span = Math.max(1, t(leg.arrival) - from);
     return stageHtml({
       title: remaining === 1 ? 'Ruoškis išlipti' : `Važiuok ${stopsAccText(remaining)}`,
       meta: `${badge(leg.route, true)}${clip(`iki stotelės „${esc(leg.to.name)}“`)}`,
-      label: `išlipsi ${esc(leg.arrival.hm)}`,
-      ...countdown(t(leg.arrival), at),
-      foot: progressHtml((at - t(leg.departure)) / Math.max(1, t(leg.arrival) - t(leg.departure))),
+      hero,
+      foot: progressHtml((at - from) / span, leg.stops.slice(1, -1).map((s) => (t(s.time) - from) / span)),
     });
   }
 
   // Walking: to the first stop, between vehicles, or to the destination. The
-  // distance is what is left of this walk, so it only ever goes down.
+  // distance is what is left of this walk, so it only ever goes down, and the
+  // minutes beside it say whether it fits before the bus.
   const g = guidance(trip, phase, at);
-  const foot = clip(`${pointer(g.deg)}${distanceHtml(g.metres)}`);
+  const walkLeft = Math.max(1, minutesUntil(t(leg.arrival), at));
+  const foot = clip(`${pointer(g.deg)}${distanceHtml(g.metres)} · ${walkLeft} min`);
   const ride = nextRide(legs, phase.i + 1);
   if (!ride) {
-    return stageHtml({
-      title: 'Eik pėsčiomis',
-      meta: clip(esc(trip.place.name)),
-      label: `atvyksi ${esc(o.arrive.hm)}`,
-      ...countdown(t(o.arrive), at),
-      foot,
-    });
+    return stageHtml({ title: 'Eik pėsčiomis', meta: clip(esc(trip.place.name)), hero, foot });
   }
   let title = 'Eik į stotelę';
   if (phase.i > 0) title = 'Persėsk';
   else if (leavingNow(trip, phase, at)) title = 'Išeik dabar';
-  return stageHtml({
-    title,
-    meta: `${badge(ride.route, true)}${clip(esc(ride.from.name))}`,
-    label: `išvyksta ${esc(ride.departure.hm)}`,
-    ...countdown(t(ride.departure), at),
-    foot,
-  });
+  return stageHtml({ title, meta: `${badge(ride.route, true)}${clip(esc(ride.from.name))}`, hero, foot });
 }
 
 // Page 2: which way. Walking, towards the next stop or the destination;
-// riding, the direction of travel and the next stop.
+// riding, the direction of travel and the next stop. The number block stays.
 function directionPage(trip, phase, at, where) {
   const g = guidance(trip, phase, at);
+  const hero = heroHtml(heroOf(trip, phase, at));
   const view = (inner, title, meta) => `<div class="dir">
       <div class="compass"><span class="north">Š</span>${inner}</div>
       <div class="stage-text"><div class="stage-title">${title}</div><div class="stage-meta">${meta}</div></div>
+      ${hero}
     </div><div class="stage-foot"></div>`;
   if (phase.kind === 'wait') {
     const leg = phase.leg;
     return view(needle(where, g.deg), capital(towards(g.deg)), `${badge(leg.route, true)}${clip(`→ ${esc(leg.headsign || leg.to.name)}`)}`);
   }
   if (g.mode === 'ride') {
-    return view(needle(where, g.deg), capital(towards(g.deg)), clip(`Kita stotelė: ${esc(g.next)} · ${g.minutes} min`));
+    return view(needle(where, g.deg), capital(towards(g.deg)), clip(`Kita: ${esc(g.next)}`));
   }
   if (g.straight < 15 || g.metres < 15) return view('<i class="here"></i>', 'Tu jau čia', clip(esc(g.target)));
-  return view(needle(where, g.deg), capital(towards(g.deg)), clip(`${esc(g.target)} · ${distanceHtml(g.metres)}`));
+  return view(needle(where, g.deg), capital(towards(g.deg)), clip(`${distanceHtml(g.metres)} · ${esc(g.target)}`));
 }
 
-// Page 3: now, next, arrival. Three lines fit a Live Activity; the whole
-// list lives in the app, one tap away.
-function routePage(trip, phase) {
+// Page 3: the next three steps, then the arrival on the bottom line. The
+// place names get the room: the icons already say walk or ride, so the rows
+// drop "iki stotelės". The whole list lives in the app, one tap away.
+function routePage(trip, phase, at) {
   const o = trip.option;
   const legs = o.legs;
   const current = phase.kind === 'before' ? 0 : phase.i;
@@ -1430,20 +1452,26 @@ function routePage(trip, phase) {
     let glyph = icon('walk'), text;
     if (leg.kind === 'ride') {
       glyph = badge(leg.route, true);
-      text = `iki stotelės „${esc(leg.to.name)}“`;
+      text = esc(leg.to.name);
     } else if (leg.to.stop == null) {
-      text = `${metresText(leg.metres)} iki tikslo`;
+      text = `${metresText(leg.metres)} · iki tikslo`;
+    } else if (leg.from.name === leg.to.name) {
+      text = 'kitas peronas';
     } else {
-      text = leg.from.name === leg.to.name ? 'į kitą tos pačios stotelės peroną' : `${metresText(leg.metres)} iki stotelės „${esc(leg.to.name)}“`;
+      text = `${metresText(leg.metres)} · ${esc(leg.to.name)}`;
     }
     return `<div class="leg-row${cls}"><span class="t">${esc(leg.departure.hm)}</span><span class="glyph">${glyph}</span><span class="text">${text}</span></div>`;
   };
-  const rows = [row(legs[current], phase.kind === 'before' ? '' : ' now')];
-  // A few metres across the same stop is not a step worth a line.
-  const next = legs.slice(current + 1).find((l) => l.kind === 'ride' || l.metres >= 120);
-  if (next) rows.push(row(next, ''));
-  rows.push(`<div class="leg-row"><span class="t">${esc(o.arrive.hm)}</span><span class="glyph">${icon('pin')}</span><span class="text">${esc(trip.place.name)}</span></div>`);
-  return `<div class="legs">${rows.join('')}</div><div class="stage-foot"></div>`;
+  // A few metres across the same stop is not a step worth a line; the walk
+  // to the destination always is.
+  const shown = [legs[current]];
+  for (const leg of legs.slice(current + 1)) {
+    if (shown.length === 3) break;
+    if (leg.kind === 'ride' || leg.metres >= 120 || leg.to.stop == null) shown.push(leg);
+  }
+  const rows = shown.map((leg, i) => row(leg, i === 0 && phase.kind !== 'before' ? ' now' : '')).join('');
+  return `<div class="stage route"><div class="legs">${rows}</div>${heroHtml(heroOf(trip, phase, at))}</div>
+    <div class="stage-foot">${clip(`${icon('pin')} ${esc(o.arrive.hm)} · ${esc(trip.place.name)}`)}</div>`;
 }
 
 function islandCompact() {
@@ -1553,7 +1581,10 @@ function renderLock() {
   const d = now();
   // The locale's own order and its "d." ("rugsėjo 28 d., pirmadienis"),
   // capitalised at the start of the line, as iOS does.
-  const date = capital(new Intl.DateTimeFormat('lt-LT', { weekday: 'long', month: 'long', day: 'numeric' }).format(d));
+  // Lithuanian writes the day with "d.": "Rugsėjo 28 d., pirmadienis".
+  const part = Object.fromEntries(new Intl.DateTimeFormat('lt-LT', { weekday: 'long', month: 'long', day: 'numeric' })
+    .formatToParts(d).map((x) => [x.type, x.value]));
+  const date = `${capital(part.month)} ${part.day} d., ${part.weekday}`;
   const dateEl = $('.date', lock);
   if (dateEl.textContent !== date) dateEl.textContent = date;
   rollTo($('.clock .roll', lock), hm(d));
