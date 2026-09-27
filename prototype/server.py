@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vc import data, departures, live, planner, search, speech_lt, walking  # noqa: E402
+from vc import crossings, data, departures, live, planner, search, speech_lt, walking  # noqa: E402
 
 PORT = 8765
 WEB = Path(__file__).resolve().parent / "web"
@@ -32,6 +32,7 @@ class State:
     cities: list = []
     timetable = None
     live = None
+    crossings: dict = {}
     index = None
     manifest: dict = {}
     error: str | None = None
@@ -44,6 +45,7 @@ def load_in_background() -> None:
         State.index = search.StopIndex(State.timetable)
         State.cities = planner.city_summaries(State.timetable)
         State.live = live.Live(State.timetable)
+        State.crossings = crossings.load()
         print(f"Ready: {len(State.timetable.stop_names)} stops. Open http://localhost:{PORT}")
     except Exception as error:  # noqa: BLE001
         State.error = str(error)
@@ -135,7 +137,10 @@ class Handler(BaseHTTPRequestHandler):
                 found = walking.route(a.lat, a.lon, b.lat, b.lon)
                 if found is None:
                     return self.send_json({"error": "Pėsčiųjų maršruto gauti nepavyko."}, 503)
-                return self.send_json(found)
+                # Where the path crosses a street, from OpenStreetMap's crossings.
+                body = {k: v for k, v in found.items() if k != "nodes"}
+                body["crossings"] = crossings.on_route(found, found.get("nodes", []), State.crossings)
+                return self.send_json(body)
             if url.path.startswith("/api/") and State.timetable is None:
                 return self.send_json({"error": State.error or "Tvarkaraščiai dar kraunami…"}, 503)
             if url.path == "/api/search":

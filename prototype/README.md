@@ -65,6 +65,16 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
   a street that only changes its name is not a turn, and the round minimap
   turns with the phone so the path ahead always runs up. Offline, the walk
   is a straight line and the arrow says "Tiesiai".
+- **Crossings are said where they are.** Each walk's path carries the
+  OpenStreetMap node ids it passes (OSRM `annotations=nodes`); those tagged
+  highway=crossing (`vc/crossings.py`, built weekly by `osm.yml`) become
+  "Pereik gatvę per perėją · Šv. Jurgio g." at the right metre. Where two
+  stops of one name face each other, the instruction says to cross to the
+  other side; on one curb, "toje pačioje gatvės pusėje".
+- **The banner's map is a real map**, OpenStreetMap under the path, on
+  every page, turning with the phone; tapping it opens the big map with the
+  trip and its next waypoint. Buses glide between 5-second fixes.
+- **Time is picked on wheels**, like the alarm: nothing but places is typed.
 - **A map, one tap from home.** Stops show once zoomed in far enough to
   tell apart; the buses in service move on it in their route colours
   (`/api/vehicles`). Tap a stop for its board (`/api/stop`), or anywhere

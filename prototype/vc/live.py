@@ -42,7 +42,10 @@ FEEDS = {
 # Trip ids in the database are namespaced by feed ('vilnius:A1-01-...').
 SLUGS = {"Vilnius": "vilnius", "Kaunas": "kaunas", "Klaipėda": "klaipeda"}
 
-REFRESH_S = 15      # a city is fetched at most this often, and only on demand
+# stops.lt rewrites a city's file about every 6 s (measured 2026-09-27: the
+# positions changed on every other poll 3 s apart); each vehicle reports
+# every ~9 s (median age of a position). Asking every 5 s misses nothing.
+REFRESH_S = 5       # a city is fetched at most this often, and only on demand
 STALE_S = 120       # older than this, a snapshot is not "live" any more
 LOST_S = 300        # a vehicle silent for five minutes is not on the road
 TROLLEYBUS = "Troleibusai"

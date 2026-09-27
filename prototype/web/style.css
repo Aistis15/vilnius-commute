@@ -458,7 +458,7 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .stage-sub { font-size: 13px; line-height: 16px; color: rgba(235,235,245,0.62); font-variant-numeric: tabular-nums; }
 .clip { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The last line: distance, direction or progress, beside the page button. */
-.stage-foot { display: flex; align-items: center; height: 30px; margin-top: auto; padding-right: 148px; font-size: 15px; color: rgba(235,235,245,0.8); font-variant-numeric: tabular-nums; min-width: 0; }
+.stage-foot { display: flex; align-items: center; height: 30px; margin-top: auto; padding-right: 44px; font-size: 15px; color: rgba(235,235,245,0.8); font-variant-numeric: tabular-nums; min-width: 0; }
 .stage-foot .progress { flex: 1; margin: 0; }
 
 /* Pages of the trip banner, flipped by tapping one button: a real Live
@@ -587,7 +587,6 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .bus-icon { background: none; border: 0; }
 .bus-marker { display: inline-grid; place-items: center; min-width: 30px; height: 22px; padding: 0 6px; border-radius: 6px;
   font: 700 13px/1 var(--font); box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,.25); transform: translate(-50%, -50%); }
-.leaflet-marker-icon.bus-icon.gliding { transition: transform 1.2s var(--ease-move); }
 
 /* Red wherever it sits: a problem is a problem in a card, a timeline, a row. */
 :is(.option, .timeline, .live, .stage) .problem-text { color: var(--red); }
@@ -794,3 +793,52 @@ svg.turn.small { width: 1.05em; height: 1.05em; margin-right: 4px; stroke-width:
 .pin-icon { background: none; border: 0; }
 .map-pin { display: block; font-size: 34px; color: #1C1C1E; transform: translate(-50%, -92%); filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3)); }
 .map-pin svg.icon { fill: #fff; stroke-width: 2; }
+
+/* ---- the real minimap: OpenStreetMap under the path, turning with you ---- */
+.minimap { position: relative; flex: none; border-radius: 50%; overflow: hidden; cursor: pointer;
+  background: #E5E3DF; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 1.5px rgba(255, 255, 255, 0.5); }
+.minimap .mm-turn { position: absolute; inset: 0; transform-origin: 50% 50%; transition: transform var(--t-turn) var(--ease-move); }
+.minimap .mm-turn img { position: absolute; max-width: none; height: auto; user-select: none; pointer-events: none; }
+.minimap svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.minimap polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.minimap .mm-case { stroke: #fff; stroke-width: 6; }
+.minimap .mm-path { stroke: #1C1C1E; stroke-width: 3.2; }
+.minimap .mm-done { stroke: rgba(28, 28, 30, 0.35); stroke-width: 2.6; }
+.minimap .mm-target { fill: #fff; stroke: #1C1C1E; stroke-width: 3; }
+.minimap .mm-bus { stroke: #fff; stroke-width: 2; }
+.minimap .mm-me path { fill: #1C1C1E; stroke: #fff; stroke-width: 2; stroke-linejoin: round; }
+.minimap:active { transform: scale(.96); }
+.stage.with-map { align-items: center; }
+.stage.with-map .minimap { margin-right: -2px; }
+.stage.with-map .stage-text { align-self: center; }
+svg.icon.cross-ic { margin-right: 5px; font-size: 1em; }
+.cross-line { display: flex; align-items: center; gap: 6px; }
+.cross-line .icon { flex: none; }
+.waypoint-tip { font: 600 13px var(--font); background: #1C1C1E; color: #fff; border: 0; border-radius: 8px; padding: 4px 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+.waypoint-tip::before { border-top-color: #1C1C1E !important; }
+.trip-line { display: flex; align-items: center; gap: 5px; }
+
+/* ---- the pager is just its dots ---------------------------------------- */
+.pager-dots { position: relative; display: inline-flex; align-items: center; justify-content: flex-end; height: 30px; padding: 0 2px; }
+.pager-dots::after { content: ""; position: absolute; inset: -12px -14px -12px -18px; }
+.pager-dots .pdots { margin: 0; gap: 5px; }
+.pager-dots .pdots i { width: 6px; height: 6px; border-radius: 3px; transition: background-color var(--t-content) var(--ease-out), transform var(--t-release) var(--ease-spring); }
+.pager-dots .pdots i.on { transform: scale(1.15); }
+.pager-dots:active .pdots { opacity: .6; }
+.act-pager { bottom: 16px; }
+
+/* ---- time wheels, like the alarm's ------------------------------------- */
+.time-row { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.wheel { position: relative; display: flex; align-items: center; gap: 2px; height: calc(38px * 5); padding: 0 8px; border-radius: 16px; background: var(--card); }
+.wheel-band { position: absolute; left: 6px; right: 6px; top: 50%; height: 38px; margin-top: -19px; border-radius: 10px; background: var(--fill); pointer-events: none; }
+.wheel-col { position: relative; width: 58px; height: 100%; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none; perspective: 420px; outline: none; }
+.wheel-col::-webkit-scrollbar { display: none; }
+.wheel-col:focus-visible { box-shadow: inset 0 0 0 2px var(--label3); border-radius: 10px; }
+.wheel-pad { height: calc(38px * 2); }
+.wheel-item { height: 38px; line-height: 38px; text-align: center; scroll-snap-align: center; font: 500 23px var(--font-display); font-variant-numeric: tabular-nums;
+  color: var(--label); transform-origin: 50% 50%; will-change: transform, opacity; cursor: pointer; user-select: none; }
+.wheel-item[aria-selected="true"] { font-weight: 600; }
+.wheel-colon { font: 600 23px var(--font-display); color: var(--label); margin-top: -3px; }
+
+/* The crossing glyph: road edges and the stripes between them. */
+svg.turn path[stroke-width], svg.icon path[stroke-width] { stroke-linecap: butt; }

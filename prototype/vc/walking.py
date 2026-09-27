@@ -20,7 +20,7 @@ import urllib.request
 from .data import USER_AGENT
 
 URL = ("https://routing.openstreetmap.de/routed-foot/route/v1/driving/{a};{b}"
-       "?overview=full&geometries=geojson&steps=true")
+       "?overview=full&geometries=geojson&steps=true&annotations=nodes")
 
 # A "turn" onto a step shorter than this is the router tidying up the last
 # few metres, not something to tell a person.
@@ -70,7 +70,10 @@ def parse(data: dict) -> dict | None:
     scale = along[-1] / at if at else 1.0
     for turn in turns:
         turn["at"] = round(turn["at"] * scale, 1)
-    return {"metres": round(along[-1], 1), "coords": coords, "along": [round(x, 1) for x in along], "turns": turns}
+    # The OpenStreetMap node of every point of the path, for crossings.
+    nodes = [int(n) for leg in route.get("legs", []) for n in leg.get("annotation", {}).get("nodes", [])]
+    return {"metres": round(along[-1], 1), "coords": coords, "along": [round(x, 1) for x in along],
+            "turns": turns, "nodes": nodes}
 
 
 def _fetch(lat1: float, lon1: float, lat2: float, lon2: float) -> dict:

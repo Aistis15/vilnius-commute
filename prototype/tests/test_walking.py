@@ -34,6 +34,19 @@ class Turns(unittest.TestCase):
         self.assertEqual(ats, sorted(ats))
         self.assertLess(ats[-1], found["metres"])
 
+    def test_crossings_on_the_path_by_node(self):
+        from vc import crossings
+        found = walking.parse(RECORDED)
+        self.assertEqual(len(found["nodes"]), len(found["coords"]))
+        # Pretend the fifth node of the path is a zebra over Gedimino pr. and
+        # the sixth its other half across a traffic island: one crossing.
+        index = {found["nodes"][4]: (0, 0, "marked", "Gedimino pr."), found["nodes"][5]: (0, 0, "marked", "")}
+        on = crossings.on_route(found, found["nodes"], index)
+        self.assertEqual(len(on), 1 if found["along"][5] - found["along"][4] < crossings.SAME_CROSSING_M else 2)
+        self.assertEqual((on[0]["kind"], on[0]["road"]), ("marked", "Gedimino pr."))
+        self.assertAlmostEqual(on[0]["at"], found["along"][4], delta=0.2)
+        self.assertEqual(crossings.on_route(found, found["nodes"], {}), [])
+
     def test_no_route(self):
         self.assertIsNone(walking.parse({"code": "NoRoute", "routes": []}))
 

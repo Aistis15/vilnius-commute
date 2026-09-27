@@ -64,6 +64,8 @@ const ICONS = {
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   map: '<path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5L9 4z"/><path d="M9 4v13.5M15 6.5V20"/>',
+  // A zebra crossing seen as you walk up to it: stripes across your way.
+  crossing: '<path d="M3.5 3v18M20.5 3v18"/><path d="M8 6h8M8 10h8M8 14h8M8 18h8" stroke-width="2.6"/>',
   // The "this time is live" mark transit apps share: a source and two waves.
   live: '<circle cx="6.5" cy="17.5" r="2" class="fill"/><path d="M5 11.5a7.5 7.5 0 0 1 7.5 7.5M5 5a14 14 0 0 1 14 14"/>',
 };
@@ -687,7 +689,6 @@ async function pollLive() {
   const screen = currentScreen().name;
   if (screen === 'home' && !state.locked) { refreshNearby(); refreshPlaceTimes(); }
   if (screen === 'map' && !state.locked) {
-    loadMapData();
     const sel = state.mapSel;
     if (sel && sel.kind === 'stop') api('/api/stop', { id: sel.stop.id, now: localIso(now()) }).then((board) => { if (state.mapSel === sel) { sel.board = board; refreshMapCard(); } }).catch(() => {});
   }
@@ -706,7 +707,12 @@ async function pollLive() {
   if (!state.locked && ['results', 'detail'].includes(currentScreen().name)) renderApp();
   drawVehicles();
 }
-setInterval(pollLive, 15_000);
+setInterval(pollLive, 5_000);
+// The big map's buses, the rider and the trip, at the same rate.
+setInterval(() => {
+  if (currentScreen().name !== 'map' || state.locked) return;
+  loadMapData(); drawMe(); drawTripOnMap(); refreshMapCard();
+}, 5_000);
 
 /* Earliest arrival first: what "you will not make it" should offer. */
 const earliest = (options) => options.slice().sort((a, b) => new Date(a.arrive.iso) - new Date(b.arrive.iso))[0] || null;
@@ -847,6 +853,7 @@ function renderApp() {
   }
   if (screen.name === 'detail') drawMap();
   if (screen.name === 'map') drawBigMap();
+  if (screen.name === 'results') settleWheels();
   $('#statusbar').classList.toggle('on-lock', state.locked);
 }
 
@@ -898,12 +905,80 @@ function timeControls() {
       <span class="seg-pill" aria-hidden="true"></span>
       ${modes.map(([m, label]) => `<button data-action="time-mode" data-mode="${m}" aria-pressed="${state.timeMode === m}">${label}</button>`).join('')}
     </div>
-    ${state.timeMode !== 'now' ? `<div class="time-row reveal">
-      <input class="time-input" id="time-value" type="text" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="14:20"
-        value="${esc(state.timeValue || hm(new Date(now().getTime() + 30 * 60_000)))}" aria-label="Laikas, pvz., 14:20">
+    ${state.timeMode !== 'now' ? `<div class="time-row reveal" data-key="time-${state.timeMode}">
+      ${wheelsHtml(state.timeValue || hm(new Date(now().getTime() + 30 * 60_000)))}
       <span class="footnote">${state.timeMode === 'arrive' ? 'turi būti vietoje' : 'nori išeiti'}</span>
     </div>` : ''}`;
 }
+
+/* The time, picked like the iPhone's alarm: two wheels, hours and minutes,
+   turned with a finger (or the mouse wheel) and settling on the row in the
+   band. Nothing to type. The rows tilt away from the band as a drum's do. */
+const WHEEL_ROW = 38;
+function wheelsHtml(value) {
+  const [h, m] = value.split(':').map(Number);
+  const column = (kind, count, current, label) => `<div class="wheel-col" data-wheel="${kind}" data-value="${current}" tabindex="0" role="listbox" aria-label="${label}">
+      <div class="wheel-pad"></div>${Array.from({ length: count }, (_, i) => `<div class="wheel-item" role="option" data-v="${i}" aria-selected="${i === current}">${pad(i)}</div>`).join('')}<div class="wheel-pad"></div>
+    </div>`;
+  return `<div class="wheel" data-morph="keep" role="group" aria-label="Laikas">
+      <i class="wheel-band" aria-hidden="true"></i>
+      ${column('h', 24, h, 'Valandos')}<span class="wheel-colon" aria-hidden="true">:</span>${column('m', 60, m, 'Minutės')}
+    </div>`;
+}
+/* Put each wheel on its value (on first show), and tilt the rows. */
+function settleWheels(smooth = false) {
+  document.querySelectorAll('.wheel-col').forEach((col) => {
+    if (!col.dataset.placed) {
+      col.dataset.placed = '1';
+      col.scrollTo({ top: Number(col.dataset.value) * WHEEL_ROW, behavior: smooth ? 'smooth' : 'instant' });
+    }
+    tiltWheel(col);
+  });
+}
+function tiltWheel(col) {
+  const middle = col.scrollTop / WHEEL_ROW;
+  col.querySelectorAll('.wheel-item').forEach((item, i) => {
+    const off = i - middle;
+    if (Math.abs(off) > 3.5) { item.style.opacity = 0; return; }
+    item.style.transform = `rotateX(${(-off * 20).toFixed(1)}deg)`;
+    item.style.opacity = (1 - Math.min(1, Math.abs(off) * 0.28)).toFixed(2);
+  });
+}
+let wheelTimer = null, wheelPlanTimer = null;
+document.addEventListener('scroll', (event) => {
+  const col = event.target;
+  if (!(col instanceof Element) || !col.classList.contains('wheel-col')) return;
+  requestAnimationFrame(() => tiltWheel(col));
+  clearTimeout(wheelTimer);
+  // Once the wheel has come to rest: read both, and plan again.
+  wheelTimer = setTimeout(() => {
+    const wheel = col.closest('.wheel');
+    const read = (kind) => {
+      const c = wheel.querySelector(`[data-wheel="${kind}"]`);
+      const max = kind === 'h' ? 23 : 59;
+      const v = Math.max(0, Math.min(max, Math.round(c.scrollTop / WHEEL_ROW)));
+      c.querySelectorAll('.wheel-item').forEach((item, i) => item.setAttribute('aria-selected', String(i === v)));
+      return v;
+    };
+    const value = `${pad(read('h'))}:${pad(read('m'))}`;
+    if (value === state.timeValue) return;
+    state.timeValue = value;
+    clearTimeout(wheelPlanTimer);
+    wheelPlanTimer = setTimeout(() => { if (currentScreen().name === 'results') runPlan(); }, 250);
+  }, 140);
+}, true);
+// A tap on a row turns the wheel to it; arrows turn it one row.
+document.addEventListener('click', (event) => {
+  const item = event.target.closest && event.target.closest('.wheel-item');
+  if (!item) return;
+  item.parentElement.scrollTo({ top: Number(item.dataset.v) * WHEEL_ROW, behavior: 'smooth' });
+});
+document.addEventListener('keydown', (event) => {
+  const col = event.target.closest && event.target.closest('.wheel-col');
+  if (!col || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+  event.preventDefault();
+  col.scrollBy({ top: event.key === 'ArrowUp' ? -WHEEL_ROW : WHEEL_ROW, behavior: 'smooth' });
+});
 
 // ---- onboarding: the preferences from the vision, asked once
 
@@ -1043,6 +1118,7 @@ function refreshDock() {
 function originChip() {
   const from = origin();
   let label = from ? from.name : 'pasirink vietą';
+  if (from && state.originChoice === 'gps' && state.gps) label = `${from.name} · ±${Math.max(1, Math.round(state.gps.accuracy))} m`;
   if (!from && state.originChoice === 'gps' && !state.gpsError) label = 'ieškau vietos…';
   return `<div class="from-row"><button class="chip" data-action="pick-origin">${icon('location')}<span>Iš: ${esc(label)}</span>${icon('chevron')}</button></div>`;
 }
@@ -1399,11 +1475,19 @@ function detailView() {
       seg = `<b class="seg" style="background:#${esc(leg.route.color)}"></b>`;
     } else {
       const move = leg.from.name === leg.to.name && leg.to.stop != null ? sameStopMove(o.legs, i) : null;
-      if (move === 'across') {
-        what = `<div>Pereik gatvę</div><div class="sub">į stotelę „${esc(leg.to.name)}“ kitoje pusėje · ${metresText(leg.metres)} · ${leg.minutes} min</div>`;
+      const crosses = walkRoute(leg).crossings || [];
+      const line = crossingsLine(leg);
+      const size = `${metresText(leg.metres)} · ${leg.minutes} min`;
+      if (move === 'across' || (move && crosses.length && move !== 'same-side')) {
+        // The same stop's other side: say to cross, and how.
+        const how = crosses.length && crosses.every((c) => c.kind === 'marked') ? 'Pereik gatvę per perėją' : 'Pereik gatvę';
+        what = `<div>${how}</div><div class="sub">į stotelę „${esc(leg.to.name)}“ kitoje pusėje · ${size}</div>`;
+      } else if (move === 'same-side') {
+        what = `<div>Eik į stotelę „${esc(leg.to.name)}“ toje pačioje gatvės pusėje</div><div class="sub">${size}</div>`;
       } else {
-        const target = leg.to.stop == null ? 'iki tikslo' : move ? `į kitą stotelę „${esc(leg.to.name)}“` : `į stotelę „${esc(leg.to.name)}“`;
-        what = `<div>Eik ${target}</div><div class="sub">${metresText(leg.metres)} · ${leg.minutes} min</div>`;
+        const target = leg.to.stop == null ? 'iki tikslo' : move === 'corner' ? `už kampo į stotelę „${esc(leg.to.name)}“`
+          : move ? `į kitą stotelę „${esc(leg.to.name)}“` : `į stotelę „${esc(leg.to.name)}“`;
+        what = `<div>Eik ${target}</div><div class="sub">${size}</div>${line ? `<div class="sub cross-line"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS.crossing}</svg>${esc(line)}</div>` : ''}`;
       }
       seg = '<b class="seg walk"></b>';
     }
@@ -1478,13 +1562,7 @@ function drawVehicles() {
     if (!live || live.lat == null || live.departed === undefined) return;
     seen.add(ref);
     const known = vehicleMarkers[ref];
-    if (known) {
-      // Glide only for a new fix; a zoom must not drag the badge behind it.
-      const el = known.getElement();
-      if (el) { el.classList.add('gliding'); clearTimeout(el.glide); el.glide = setTimeout(() => el.classList.remove('gliding'), 1300); }
-      known.setLatLng([live.lat, live.lon]);
-      return;
-    }
+    if (known) { glideTo(known, live.lat, live.lon); return; }
     const html = `<span class="bus-marker" style="background:#${esc(leg.route.color)};color:#${esc(leg.route.text_color)}">${esc(leg.route.name)}</span>`;
     vehicleMarkers[ref] = L.marker([live.lat, live.lon], {
       icon: L.divIcon({ className: 'bus-icon', html, iconSize: null }), keyboard: false, interactive: false,
@@ -1515,6 +1593,24 @@ function mapCard() {
   const me = `<button class="map-me" data-action="map-me" aria-label="Rodyti mano vietą">${icon('location')}</button>`;
   const from = origin();
   const away = (p) => (from ? ` · ${metresText(Math.round(straightMetres(from, p) * 1.3))} pėsčiomis` : '');
+  if (!sel && state.trip) {
+    // A trip under way: where it goes next, and what to do there.
+    const at = now().getTime();
+    const phase = phaseOf(state.trip, at);
+    const w = waypointOf(state.trip, phase);
+    if (w) {
+      let line = '';
+      if (phase.kind === 'wait') line = `${badge(w.ride.route, true)} išvyksta ${esc(w.ride.departure.hm)}`;
+      else if (phase.kind === 'ride') line = `${badge(w.ride.route, true)} išlipsi ${esc(w.ride.arrival.hm)}`;
+      else {
+        const g = guidance(state.trip, phase, at);
+        line = `${metresText(g.metres)} pėsčiomis${w.ride ? ` · ${badge(w.ride.route, true)} išvyksta ${esc(w.ride.departure.hm)}` : ` · atvyksi ${esc(state.trip.option.arrive.hm)}`}`;
+      }
+      return `${me}<div class="map-card-head"><span class="glyph">${icon('pin')}</span>
+          <div class="main"><div class="title">${esc(w.label)}</div><div class="sub trip-line">${line}</div></div></div>
+        <button class="secondary map-go" data-action="lock">Rodyti banerį</button>`;
+    }
+  }
   if (!sel) {
     return `${me}<p class="map-hint">${state.mapTooWide ? 'Priartink, kad matytum stoteles.' : 'Paliesk stotelę arba bet kurią vietą.'}</p>`;
   }
@@ -1537,6 +1633,72 @@ function refreshMapCard() {
 }
 
 let bigmap = null, bigLayers = null, busMarkers = {}, mapLoadTimer = null, lastLayerClick = 0;
+let meMarker = null, meRing = null;
+
+/* Where the rider is on the big map: the phone's fix with its accuracy as a
+   faint circle; during a trip without one, where the timetable puts them. */
+function mePoint() {
+  const fix = gpsFix() || (state.originChoice === 'gps' ? state.gps : null);
+  if (fix) return { lat: fix.lat, lon: fix.lon, accuracy: fix.accuracy };
+  if (state.trip) {
+    const at = now().getTime();
+    const phase = phaseOf(state.trip, at);
+    if (phase.kind !== 'arrived') { const g = guidance(state.trip, phase, at); return { lat: g.here.lat, lon: g.here.lon, accuracy: 0 }; }
+  }
+  const from = origin();
+  return from ? { lat: from.lat, lon: from.lon, accuracy: 0 } : null;
+}
+function drawMe() {
+  if (!bigmap || !bigLayers) return;
+  const me = mePoint();
+  if (!me) return;
+  if (!meMarker) {
+    meRing = L.circle([me.lat, me.lon], { radius: me.accuracy || 1, stroke: false, fillColor: '#1C1C1E', fillOpacity: 0.12, interactive: false }).addTo(bigLayers.me);
+    meMarker = L.circleMarker([me.lat, me.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1C1C1E', fillOpacity: 1, interactive: false }).addTo(bigLayers.me);
+    return;
+  }
+  glideTo(meMarker, me.lat, me.lon, 900);
+  meRing.setLatLng([me.lat, me.lon]).setRadius(me.accuracy || 1);
+}
+
+/* The next place the trip goes: the stop to walk to, the stop to get off
+   at, or the destination. The big map marks it and says what it is. */
+function waypointOf(trip, phase) {
+  if (phase.kind === 'arrived') return null;
+  const legs = trip.option.legs;
+  const leg = phase.kind === 'before' ? legs[0] : phase.leg;
+  if (phase.kind === 'wait') return { lat: leg.from.lat, lon: leg.from.lon, label: leg.from.name, color: leg.route.color, ride: leg };
+  if (leg.kind === 'ride') return { lat: leg.to.lat, lon: leg.to.lon, label: `Išlipk: ${leg.to.name}`, color: leg.route.color, ride: leg };
+  const ride = leg.to.stop != null ? nextRide(legs, (phase.i ?? -1) + 1) : null;
+  return { lat: leg.to.lat, lon: leg.to.lon, label: leg.to.stop == null ? trip.place.name : leg.to.name, color: ride ? ride.route.color : null, ride };
+}
+let tripDrawn = '';
+function drawTripOnMap(fit = false) {
+  if (!bigmap || !bigLayers) return;
+  const trip = state.trip;
+  const at = now().getTime();
+  const phase = trip ? phaseOf(trip, at) : null;
+  const w = trip ? waypointOf(trip, phase) : null;
+  const key = trip ? `${trip.option.id}|${trip.option.leave.iso}|${w ? w.label : ''}|${Object.keys(walkRoutes).length}` : '';
+  if (key === tripDrawn && !fit) return;
+  tripDrawn = key;
+  bigLayers.trip.clearLayers();
+  if (!trip) return;
+  for (const leg of trip.option.legs) {
+    const points = leg.kind === 'ride' ? leg.stops.map((stop) => [stop.lat, stop.lon]) : walkRoute(leg).coords;
+    L.polyline(points, leg.kind === 'ride'
+      ? { color: `#${leg.route.color}`, weight: 6, opacity: 0.9, interactive: false }
+      : { color: '#1C1C1E', weight: 4, opacity: 0.75, dashArray: '1 8', lineCap: 'round', interactive: false }).addTo(bigLayers.trip);
+  }
+  if (!w) return;
+  L.circleMarker([w.lat, w.lon], { radius: 11, color: w.color ? `#${w.color}` : '#1C1C1E', weight: 4, fillColor: '#fff', fillOpacity: 1, interactive: false })
+    .bindTooltip(esc(w.label), { permanent: true, direction: 'top', offset: [0, -12], className: 'waypoint-tip' }).addTo(bigLayers.trip);
+  if (fit) {
+    const me = mePoint();
+    const box = L.latLngBounds([[w.lat, w.lon], ...(me ? [[me.lat, me.lon]] : [])]);
+    bigmap.fitBounds(box.pad(0.45), { maxZoom: 17, animate: false });
+  }
+}
 function drawBigMap() {
   const el = inPage('#bigmap');
   if (!el || !window.L) return;
@@ -1546,9 +1708,11 @@ function drawBigMap() {
   bigmap = L.map(el, { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([from.lat, from.lon], 16);
   bigmap.attributionControl.setPrefix('Leaflet');
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(bigmap);
-  bigLayers = { stops: L.layerGroup().addTo(bigmap), buses: L.layerGroup().addTo(bigmap), marks: L.layerGroup().addTo(bigmap) };
+  bigLayers = { trip: L.layerGroup().addTo(bigmap), stops: L.layerGroup().addTo(bigmap), buses: L.layerGroup().addTo(bigmap), marks: L.layerGroup().addTo(bigmap), me: L.layerGroup().addTo(bigmap) };
   busMarkers = {};
-  if (origin()) L.circleMarker([from.lat, from.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1C1C1E', fillOpacity: 1, interactive: false }).addTo(bigLayers.marks);
+  meMarker = null; meRing = null;
+  drawMe();
+  drawTripOnMap(true);
   bigmap.on('moveend', () => { clearTimeout(mapLoadTimer); mapLoadTimer = setTimeout(loadMapData, 250); });
   bigmap.on('click', (e) => { if (Date.now() - lastLayerClick > 350) dropPin(e.latlng.lat, e.latlng.lng); });
   // The page slides in; once it has, the map knows its real size and asks
@@ -1587,12 +1751,7 @@ function drawBuses(list) {
   for (const v of list) {
     seen.add(v.key);
     const known = busMarkers[v.key];
-    if (known) {
-      const el = known.getElement();
-      if (el) { el.classList.add('gliding'); clearTimeout(el.glide); el.glide = setTimeout(() => el.classList.remove('gliding'), 1300); }
-      known.setLatLng([v.lat, v.lon]);
-      continue;
-    }
+    if (known) { glideTo(known, v.lat, v.lon); continue; }
     const html = `<span class="bus-marker" style="background:#${esc(v.color)};color:#${esc(v.text_color)}">${esc(v.route)}</span>`;
     busMarkers[v.key] = L.marker([v.lat, v.lon], {
       icon: L.divIcon({ className: 'bus-icon', html, iconSize: null }), keyboard: false, interactive: false,
@@ -1915,6 +2074,18 @@ function pointAlong(route, d) {
   return { ...lerp(a, b, f), heading: bearing(a, b) };
 }
 
+/* The next thing to do on a walk: cross a street or turn, whichever comes
+   first, or keep going to the end. A crossing is said as it is: "per
+   perėją" where there is one, a plain "Pereik gatvę" where there is not. */
+function walkStep(g) {
+  const turn = g.next, cross = g.crossing;
+  if (cross && (!turn || cross.in <= turn.in + 5)) return { kind: 'cross', in: cross.in, road: cross.road, marked: cross.marked };
+  if (turn) return { kind: 'turn', in: turn.in, angle: turn.angle, name: turn.name };
+  return { kind: 'straight', in: g.metres };
+}
+const crossWords = () => 'Pereik gatvę';
+const crossHow = (step) => (step.marked ? 'per perėją' : 'kur nėra perėjos');
+
 /* A turn as it is said. The word comes from the angle; the arrow is drawn
    at the angle itself, bent as much as the street bends. */
 function turnWords(angle) {
@@ -1939,40 +2110,77 @@ function turnArrow(angle, cls = '') {
   return `<svg class="turn${cls ? ` ${cls}` : ''}" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 }
 
+// Web Mercator, as the map tiles are drawn.
+const TILE = 256;
+function worldPx(lat, lon, z) {
+  const n = TILE * 2 ** z, sin = Math.sin(rad(lat));
+  return [((lon + 180) / 360) * n, (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * n];
+}
+const metresPerPx = (lat, z) => (156543.03392 * Math.cos(rad(lat))) / 2 ** z;
+
 /* A small round map that turns with you, the way a game's minimap does: you
    in the middle pointing up, the path ahead as a line, where you are going
    as a ring. "Which way?" is answered by turning until the line runs up;
    no north, south or compass words to decode. Only lines and dots, so the
    real Live Activity can draw it natively. */
-function minimapHtml(where, { route, here, heading, target, color, done = 0, bus = null }) {
-  const R = 40;
-  const start = { lat: route.coords[0][0], lon: route.coords[0][1] };
-  // About 150 m to the rim on foot, closer in as the goal nears; a ride's
-  // stops are further apart.
-  const left = straightMetres(here, target);
-  const reach = bus !== null || route.coords.length > 2 && !route.turns.length
-    ? Math.max(250, Math.min(1500, route.metres * 0.5))
-    : Math.max(60, Math.min(150, left * 1.25));
-  const k = R / reach;
-  const px = (p) => [(p.lon - start.lon) * 111_320 * Math.cos(rad(start.lat)) * k, -(p.lat - start.lat) * 111_320 * k];
+function minimapHtml(where, { route, here, heading, target, color, done = 0, bus = null, busKey = '', size = 84, reach = 150 }) {
+  const R = size / 2;
+  const perMetre = R / reach;
+  // The tile zoom whose pixels come closest to the screen's without being
+  // stretched: sharp on a 2x screen, streets still readable at a glance.
+  let z = 17;
+  while (z > 13 && perMetre * metresPerPx(here.lat, z) < 0.55) z--;
+  while (z < 18 && perMetre * metresPerPx(here.lat, z) > 1.1) z++;
+  const scale = perMetre * metresPerPx(here.lat, z);
+  const [hx, hy] = worldPx(here.lat, here.lon, z);
+  const half = (R * 1.45) / scale;   // the rotated circle's corners are covered too
+  const tiles = [];
+  for (let x = Math.floor((hx - half) / TILE); x <= Math.floor((hx + half) / TILE); x++) {
+    for (let y = Math.floor((hy - half) / TILE); y <= Math.floor((hy + half) / TILE); y++) {
+      tiles.push(`<img alt="" data-key="t${z}-${x}-${y}" src="https://tile.openstreetmap.org/${z}/${x}/${y}.png" draggable="false"
+        style="left:${(R + (x * TILE - hx) * scale).toFixed(1)}px;top:${(R + (y * TILE - hy) * scale).toFixed(1)}px;width:${(TILE * scale + 0.5).toFixed(1)}px">`);
+    }
+  }
+  const px = (p) => { const [x, y] = worldPx(p.lat, p.lon, z); return [R + (x - hx) * scale, R + (y - hy) * scale]; };
   const pts = (list) => list.map((p) => px(p).map((v) => v.toFixed(1)).join(',')).join(' ');
   const points = route.coords.map(([lat, lon]) => ({ lat, lon }));
   const cut = route.along.findIndex((x) => x > done);
   const split = cut < 0 ? points.length : cut;
   const behind = [...points.slice(0, split), here], ahead = [here, ...points.slice(split)];
-  const [hx, hy] = px(here);
   let [tx, ty] = px(target);
-  const far = Math.hypot(tx - hx, ty - hy), rim = R - 7;
-  if (far > rim) { tx = hx + ((tx - hx) * rim) / far; ty = hy + ((ty - hy) * rim) / far; }
-  const busDot = bus && bus.lat != null ? (() => { const [bx, by] = px(bus); return `<circle class="mm-bus" cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="4" style="fill:#${esc(color || 'fff')}"/>`; })() : '';
-  const turned = needleAngle(`${where}-map`, heading);
-  return `<span class="minimap" aria-hidden="true"><span class="mm-turn" style="transform:rotate(${(-turned).toFixed(1)}deg)">
-      <svg viewBox="-40 -40 80 80"><g transform="translate(${(-hx).toFixed(1)} ${(-hy).toFixed(1)})">
-        <polyline class="mm-done" points="${pts(behind)}"/><polyline class="mm-path" points="${pts(ahead)}"/>
-        <circle class="mm-target" cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}" r="4.5"${color ? ` style="stroke:#${esc(color)}"` : ''}/>${busDot}
-      </g></svg></span>
-      <svg class="mm-me" viewBox="-40 -40 80 80"><path d="M0 -7 5 5.5 0 2.8 -5 5.5Z"/></svg>
+  const far = Math.hypot(tx - R, ty - R), rim = R - 7;
+  if (far > rim) { tx = R + ((tx - R) * rim) / far; ty = R + ((ty - R) * rim) / far; }
+  let busDot = '';
+  if (bus && bus.lat != null) {
+    const b = smoothPoint(busKey || `${where}-bus`, bus.lat, bus.lon);
+    const [bx, by] = px(b);
+    if (Math.hypot(bx - R, by - R) < R + 6) busDot = `<circle class="mm-bus" cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="5" style="fill:#${esc(color || '1C1C1E')}"/>`;
+  }
+  const turned = needleAngle(`${where}-map-${size}`, heading);
+  return `<span class="minimap" data-action="open-map" role="button" aria-label="Atidaryti žemėlapį" style="width:${size}px;height:${size}px">
+      <span class="mm-turn" style="transform:rotate(${(-turned).toFixed(1)}deg)">${tiles.join('')}
+        <svg viewBox="0 0 ${size} ${size}">
+          <polyline class="mm-case" points="${pts(ahead)}"/><polyline class="mm-done" points="${pts(behind)}"/><polyline class="mm-path" points="${pts(ahead)}"/>
+          <circle class="mm-target" cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}" r="5.5"${color ? ` style="stroke:#${esc(color)}"` : ''}/>${busDot}
+        </svg></span>
+      <svg class="mm-me" viewBox="-40 -40 80 80"><path d="M0 -8 6 6.5 0 3.2 -6 6.5Z"/></svg>
     </span>`;
+}
+
+/* The minimap for the banner's current moment: the walk's street path, the
+   ride's stops, and, while waiting, the bus on its way. */
+function phaseMap(trip, phase, at, where, size) {
+  const g = guidance(trip, phase, at);
+  const legs = trip.option.legs;
+  if (g.mode === 'ride') {
+    const leg = phase.kind === 'before' ? legs[0] : phase.leg;
+    const live = phase.kind === 'wait' ? liveOf(leg) : null;
+    return minimapHtml(where, { route: g.route, here: g.here, heading: g.heading, target: g.targetPoint, color: leg.route.color,
+      done: g.done, bus: live, busKey: refOf(leg), size, reach: phase.kind === 'wait' ? 450 : 600 });
+  }
+  const ride = nextRide(legs, (phase.i ?? -1) + 1);
+  return minimapHtml(where, { route: g.route, here: g.here, heading: g.gpsHeading ?? g.heading, target: g.targetPoint,
+    color: g.toStop && ride ? ride.route.color : null, done: g.done, size, reach: Math.max(70, Math.min(160, g.metres * 1.2)) });
 }
 
 /* A change between two stops of one name ("Vinco Kudirkos aikštė" both
@@ -1987,10 +2195,118 @@ function sameStopMove(legs, i) {
     ? (end ? bearing(ride.stops[ride.stops.length - 2], ride.stops[ride.stops.length - 1]) : bearing(ride.stops[0], ride.stops[1]))
     : null);
   const into = direction(before, true), out = direction(after, false);
-  if (into == null || out == null || walk.metres > 90) return 'other';
-  const sameStreet = Math.abs(Math.cos(rad(into - out))) > 0.7;
+  if (into == null || out == null || walk.metres > 120) return 'other';
+  const along = Math.cos(rad(into - out));                        // +1 same way, -1 opposite
   const aside = Math.abs(Math.sin(rad(bearing(walk.from, walk.to) - into))) > 0.7;
-  return sameStreet && aside ? 'across' : 'other';
+  if (along < -0.7 && aside) return 'across';                     // both ways of one street, facing
+  if (along > 0.7 && !aside) return 'same-side';                  // one way, further along the curb
+  if (Math.abs(along) < 0.7) return 'corner';                     // the street round the corner
+  return 'other';
+}
+
+/* What a walk crosses, from OpenStreetMap: "Pereisi gatvę per perėją:
+   Gedimino pr." Empty until the walk's path has arrived, or when it crosses
+   nothing. */
+function crossingsLine(leg) {
+  const list = walkRoute(leg).crossings || [];
+  if (!list.length) return '';
+  const n = list.length;
+  const roads = [...new Set(list.map((c) => c.road).filter(Boolean))];
+  const marked = list.every((c) => c.kind === 'marked');
+  return `Pereisi ${n === 1 ? 'gatvę' : `${n} ${plural(n, 'gatvę', 'gatves', 'gatvių')}`}${marked ? (n === 1 ? ' per perėją' : ' per perėjas') : ''}${roads.length ? `: ${roads.join(', ')}` : ''}`;
+}
+
+/* Moving things glide from one fix to the next instead of jumping: a bus's
+   new position arrives every ~5 s (stops.lt rewrites its file about every
+   6 s), and the marker travels there over the same time, so on screen it is
+   always moving, never teleporting. A jump of more than 600 m (a vehicle
+   back from nowhere) is taken at once. */
+const glides = new Map();
+let gliding = false;
+function glideTo(marker, lat, lon, ms = 5200) {
+  const from = marker.getLatLng();
+  if (straightMetres({ lat: from.lat, lon: from.lng }, { lat, lon }) > 600) { glides.delete(marker); marker.setLatLng([lat, lon]); return; }
+  glides.set(marker, { a: [from.lat, from.lng], b: [lat, lon], t0: performance.now(), ms });
+  if (!gliding) { gliding = true; requestAnimationFrame(glideFrame); }
+}
+function glideFrame(ts) {
+  for (const [marker, g] of glides) {
+    const f = Math.min(1, (ts - g.t0) / g.ms);
+    marker.setLatLng([g.a[0] + (g.b[0] - g.a[0]) * f, g.a[1] + (g.b[1] - g.a[1]) * f]);
+    if (f >= 1) glides.delete(marker);
+  }
+  if (glides.size) requestAnimationFrame(glideFrame); else gliding = false;
+}
+// The same for a dot drawn by hand (the banner's minimap redraws 4x a second).
+const tracks = {};
+function smoothPoint(key, lat, lon, ms = 5200) {
+  const at = performance.now();
+  const lerpTrack = (tr) => { const f = Math.min(1, (at - tr.t0) / ms); return { lat: tr.a[0] + (tr.b[0] - tr.a[0]) * f, lon: tr.a[1] + (tr.b[1] - tr.a[1]) * f }; };
+  const tr = tracks[key];
+  if (!tr) { tracks[key] = { a: [lat, lon], b: [lat, lon], t0: at }; return { lat, lon }; }
+  if (tr.b[0] !== lat || tr.b[1] !== lon) {
+    const cur = lerpTrack(tr);
+    tracks[key] = straightMetres(cur, { lat, lon }) > 600 ? { a: [lat, lon], b: [lat, lon], t0: at } : { a: [cur.lat, cur.lon], b: [lat, lon], t0: at };
+  }
+  return lerpTrack(tracks[key]);
+}
+
+// ---- where the rider really is
+
+/* The position the phone gives, kept sharp: every fix the browser reports
+   is watched, and a vaguer one replaces a sharper one only once the sharper
+   one is old or the person has clearly moved on. On a phone outdoors GPS
+   gives 5–15 m; a computer has no GPS and its Wi-Fi guess is coarser, so
+   the accuracy is always shown rather than assumed. */
+let watchId = null;
+function watchLocation() {
+  if (!navigator.geolocation || watchId != null) return;
+  watchId = navigator.geolocation.watchPosition(onFix, onFixError, { enableHighAccuracy: true, maximumAge: 0, timeout: 30_000 });
+}
+function onFix(pos) {
+  const c = pos.coords;
+  const fix = { lat: c.latitude, lon: c.longitude, accuracy: c.accuracy, heading: c.heading, speed: c.speed, at: Date.now() };
+  const cur = state.gps;
+  const keep = cur && fix.accuracy > cur.accuracy + 5 && Date.now() - cur.at < 15_000
+    && straightMetres(cur, fix) < cur.accuracy + fix.accuracy;
+  const hadNone = !cur;
+  if (!keep) state.gps = fix;
+  state.gpsError = null;
+  state.locating = false;
+  if (hadNone || !keep) {
+    fillOrigins();
+    if (['home', 'pick', 'settings'].includes(currentScreen().name) && !state.searchActive) {
+      if (currentScreen().name === 'home') refreshHome(); else renderApp();
+    }
+    drawMe();
+  }
+}
+function onFixError(err) {
+  if (state.gps) return;   // a fix in hand beats a timeout
+  state.gpsError = GPS_ERRORS[err.code] || 'Vietos nustatyti nepavyko.';
+  state.locating = false;
+  fillOrigins(); renderApp();
+}
+/* A fix recent and sharp enough to steer by, and only when the prototype's
+   clock is the real one (a GPS fix at "+5 min" describes another moment). */
+function gpsFix() {
+  const g = state.gps;
+  return g && liveClock() && Date.now() - g.at < 20_000 && g.accuracy <= 50 ? g : null;
+}
+/* The nearest point of a path to a position: how far along it, how far off. */
+function projectOnRoute(route, p) {
+  let best = { d: 0, off: Infinity };
+  const k = Math.cos(rad(p.lat)) * 111_320;
+  for (let i = 0; i < route.coords.length - 1; i++) {
+    const [alat, alon] = route.coords[i], [blat, blon] = route.coords[i + 1];
+    const ax = (alon - p.lon) * k, ay = (alat - p.lat) * 111_320;
+    const bx = (blon - p.lon) * k, by = (blat - p.lat) * 111_320;
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy || 1;
+    const f = clamp01(-(ax * dx + ay * dy) / len2);
+    const off = Math.hypot(ax + dx * f, ay + dy * f);
+    if (off < best.off) best = { d: route.along[i] + (route.along[i + 1] - route.along[i]) * f, off };
+  }
+  return best;
 }
 
 /* The prototype has no GPS during a trip, so the rider is placed where the
@@ -2007,9 +2323,17 @@ function guidance(trip, phase, at) {
     const span = Math.max(1, t(leg.arrival) - t(leg.departure));
     const done = phase.kind === 'before' ? 0 : clamp01((at - t(leg.departure)) / span);
     const route = walkRoute(leg);
-    const d = done * route.metres;
+    let d = done * route.metres;
+    // A real position near the path beats the timetable's guess of it.
+    const fix = gpsFix();
+    let snapped = false;
+    if (fix && phase.kind !== 'before') {
+      const p = projectOnRoute(route, fix);
+      if (p.off <= Math.max(25, fix.accuracy)) { d = p.d; snapped = true; }
+    }
     const here = pointAlong(route, d);
     const next = route.turns.find((turn) => turn.at > d + 2 && Math.abs(turn.angle) >= 20) || null;
+    const cross = (route.crossings || []).find((c) => c.at > d - 3) || null;
     const left = Math.max(0, route.metres - d);
     return {
       mode: 'walk', route, here, done: d,
@@ -2018,6 +2342,8 @@ function guidance(trip, phase, at) {
       metres: Math.round(left),
       straight: straightMetres(here, leg.to),
       next: next && next.at - d < left - 10 ? { angle: next.angle, in: Math.round(next.at - d), name: next.name } : null,
+      crossing: cross && cross.at - d < left - 3 ? { in: Math.max(0, Math.round(cross.at - d)), marked: cross.kind === 'marked', road: cross.road } : null,
+      snapped, gpsHeading: fix && fix.speed > 0.6 && fix.heading != null ? fix.heading : null,
       target: leg.to.name, targetPoint: leg.to,
       toStop: !lastLeg && leg.to.stop != null,
     };
@@ -2150,7 +2476,10 @@ function activityPager() {
   const page = pageOf(trip, phase);
   const next = (page + 1) % PAGES.length;
   const dots = PAGES.map((_, i) => `<i${i === page ? ' class="on"' : ''}></i>`).join('');
-  return `<button class="pager-next" data-action="banner-page" data-page="${next}" aria-label="Rodyti: ${esc(PAGES[next])} (${page + 1} iš ${PAGES.length})"><span class="pdots" aria-hidden="true">${dots}</span>${esc(PAGES[next])}${icon('chevron')}</button>`;
+  // Only the dots: they say which page this is, and a tap on them turns to
+  // the next one. A Live Activity takes taps on buttons, not swipes, so the
+  // dots are that button, with a finger-sized target around them.
+  return `<button class="pager-dots" data-action="banner-page" data-page="${next}" aria-label="${esc(PAGES[page])}, ${page + 1} iš ${PAGES.length}. Rodyti: ${esc(PAGES[next])}"><span class="pdots" aria-hidden="true">${dots}</span></button>`;
 }
 
 function tripContent(at, actions, where) {
@@ -2170,7 +2499,7 @@ function tripContent(at, actions, where) {
   const page = pageOf(trip, phase);
   if (page === 1) return directionPage(trip, phase, at, where);
   if (page === 2) return routePage(trip, phase, at);
-  return nowPage(trip, phase, at);
+  return nowPage(trip, phase, at, where);
 }
 
 const clip = (html) => `<span class="clip">${html}</span>`;
@@ -2207,16 +2536,16 @@ const heroHtml = (h) => `<div class="stage-hero"><div class="stage-label">${h.la
    do, then where. Right: the number block. The bottom line holds the walk or
    the ride's progress, beside the page button. Three type sizes: the number,
    the instruction, everything else. */
-function stageHtml({ title, meta = '', hero, foot = '' }) {
-  return `<div class="stage">
+function stageHtml({ title, meta = '', hero, foot = '', map = '' }) {
+  return `<div class="stage${map ? ' with-map' : ''}">${map}
       <div class="stage-text"><div class="stage-title">${title}</div><div class="stage-meta">${meta}</div></div>
       ${heroHtml(hero)}
     </div>
     <div class="stage-foot">${foot}</div>`;
 }
 
-// Page 1: what to do now.
-function nowPage(trip, phase, at) {
+// Page 1: what to do now, beside a glance of the map.
+function nowPage(trip, phase, at, where = 'lock') {
   const o = trip.option;
   const legs = o.legs;
   const hero = heroOf(trip, phase, at);
@@ -2225,8 +2554,9 @@ function nowPage(trip, phase, at) {
   // (An early first bus is not a connection: "Paskubėk" covers it below.)
   const firstRide = legs.find((l) => l.kind === 'ride');
   const broken = legs.slice((phase.i ?? -1) + 1).find((l) => l.missed && l !== firstRide);
+  const map = phaseMap(trip, phase, at, where, 64);
   if (broken) {
-    return stageHtml({
+    return stageHtml({ map,
       title: '<span class="problem-text">Nespėsi persėsti</span>',
       meta: `${badge(broken.route, true)}${clip(`išvyks ${esc(broken.departure.hm)} · ${esc(broken.from.name)}`)}`,
       hero,
@@ -2242,7 +2572,7 @@ function nowPage(trip, phase, at) {
     // otherwise the walk ahead.
     const live = ride ? liveHtml(ride, { short: true }) : '';
     const track = ride ? approachHtml(ride) : '';
-    return stageHtml({
+    return stageHtml({ map,
       title: `Išeik${esc(dayWord(leave))} ${esc(o.leave.hm)}`,
       meta: ride ? `${badge(ride.route, true)}${clip(esc(ride.from.name))}` : clip(esc(trip.place.name)),
       hero,
@@ -2255,7 +2585,7 @@ function nowPage(trip, phase, at) {
     const transfer = phase.i > 0 && legs[phase.i - 1].kind === 'ride';
     // Waiting, where the bus is matters more than the stop you stand at.
     const live = liveHtml(leg, { short: true });
-    return stageHtml({
+    return stageHtml({ map,
       title: transfer ? 'Persėsk' : 'Lauk stotelėje',
       meta: `${badge(leg.route, true)}${clip(live && leg.headsign ? `→ ${esc(leg.headsign)}` : esc(leg.from.name))}`,
       hero,
@@ -2266,7 +2596,7 @@ function nowPage(trip, phase, at) {
   if (phase.kind === 'ride') {
     const remaining = Math.max(1, leg.stops.filter((s) => t(s.time) > at).length);
     const from = t(leg.departure), span = Math.max(1, t(leg.arrival) - from);
-    return stageHtml({
+    return stageHtml({ map,
       title: remaining === 1 ? 'Ruoškis išlipti' : `Važiuok ${stopsAccText(remaining)}`,
       meta: `${badge(leg.route, true)}${clip(`iki stotelės „${esc(leg.to.name)}“`)}`,
       hero,
@@ -2283,20 +2613,27 @@ function nowPage(trip, phase, at) {
   // Live, where the bus is replaces the walk's minutes: the number block
   // already counts down to it, and the line has room for one of the two.
   const live = ride && phase.i + 1 === legs.indexOf(ride) ? liveHtml(ride, { short: true }) : '';
-  const way = g.next ? `${turnArrow(g.next.angle, 'small')}po ${distanceHtml(g.next.in)} ${turnWords(g.next.angle)}`
-    : `${turnArrow(0, 'small')}${distanceHtml(g.metres)}`;
-  const foot = clip(`${way} · ${live || `${walkLeft} min`}`);
+  const step = walkStep(g);
+  const way = step.kind === 'cross' ? `<svg class="icon cross-ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS.crossing}</svg>${step.in > 8 ? `po ${distanceHtml(step.in)} ` : ''}pereik gatvę${step.marked ? ' per perėją' : ''}`
+    : step.kind === 'turn' ? `${turnArrow(step.angle, 'small')}po ${distanceHtml(step.in)} ${turnWords(step.angle)}`
+      : `${turnArrow(0, 'small')}${distanceHtml(g.metres)}`;
+  // A crossing ahead fills the line on its own: the number block already
+  // counts the minutes.
+  const foot = clip(step.kind === 'cross' ? way : `${way} · ${live || `${walkLeft} min`}`);
+  // A street to cross close ahead is the instruction itself.
+  const crossingNow = step.kind === 'cross' && step.in <= 60;
   if (!ride) {
-    return stageHtml({ title: 'Eik pėsčiomis', meta: clip(esc(trip.place.name)), hero, foot });
+    return stageHtml({ map, title: crossingNow ? crossWords(step) : 'Eik pėsčiomis', meta: clip(esc(trip.place.name)), hero, foot });
   }
   let title = 'Eik į stotelę';
   if (phase.i > 0) title = leg.from.name === leg.to.name && sameStopMove(legs, phase.i) === 'across' ? 'Pereik gatvę' : 'Persėsk';
   else if (leavingNow(trip, phase, at)) title = 'Išeik dabar';
+  if (crossingNow && !(phase.i === 0 && leavingNow(trip, phase, at))) title = crossWords(step);
   // The bus will be there before you at this pace; or, late enough, it
   // spares you the rush, and saying so is worth a line.
   if (ride.missed) title = 'Paskubėk';
   else if (phase.i === legs.indexOf(ride) - 1 && liveOf(ride) && t(ride.departure) - t(leg.arrival) >= 150_000) title = 'Eik ramiai';
-  return stageHtml({ title, meta: `${badge(ride.route, true)}${clip(esc(ride.from.name))}`, hero, foot });
+  return stageHtml({ map, title, meta: `${badge(ride.route, true)}${clip(esc(ride.from.name))}`, hero, foot });
 }
 
 // Page 2: which way, as the street says it: the next bend's arrow at its
@@ -2315,7 +2652,7 @@ function directionPage(trip, phase, at, where) {
     const leg = phase.leg;
     const waiting = phase.kind === 'wait';
     const live = waiting ? liveOf(leg) : null;
-    const map = minimapHtml(where, { route: g.route, here: g.here, heading: g.heading, target: g.targetPoint, color: leg.route.color, done: g.done, bus: live });
+    const map = phaseMap(trip, phase, at, where, 84);
     if (waiting) {
       const words = live ? liveWords(live, { short: true })[0] : null;
       return view(map, words ? `<span class="${words.problem ? 'problem-text' : ''}">${esc(capital(words.text))}</span>` : 'Lauk stotelėje',
@@ -2323,12 +2660,16 @@ function directionPage(trip, phase, at, where) {
     }
     return view(map, clip(`Kita: ${esc(g.next)}`), clip(`Išlipk: ${esc(leg.to.name)}`));
   }
-  const ride = nextRide(legs, (phase.i ?? -1) + 1);
-  const map = minimapHtml(where, { route: g.route, here: g.here, heading: g.heading, target: g.targetPoint, color: g.toStop && ride ? ride.route.color : null, done: g.done });
+  const map = phaseMap(trip, phase, at, where, 84);
   if (g.metres < 15 || g.straight < 12) return view(map, 'Tu jau čia', clip(esc(g.target)));
-  if (g.next) {
-    return view(map, `${turnArrow(g.next.angle)}<span>${esc(capital(turnWords(g.next.angle)))}</span>`,
-      clip(`po ${distanceHtml(g.next.in)}${g.next.name ? ` · ${esc(g.next.name)}` : ''}`));
+  const step = walkStep(g);
+  if (step.kind === 'cross') {
+    return view(map, `<svg class="turn" viewBox="0 0 24 24" aria-hidden="true">${ICONS.crossing}</svg><span>${esc(crossWords(step))}</span>`,
+      clip(`${esc(crossHow(step))} · ${step.in > 8 ? `po ${distanceHtml(step.in)}` : 'dabar'}${step.road ? ` · ${esc(step.road)}` : ''}`));
+  }
+  if (step.kind === 'turn') {
+    return view(map, `${turnArrow(step.angle)}<span>${esc(capital(turnWords(step.angle)))}</span>`,
+      clip(`po ${distanceHtml(step.in)}${step.name ? ` · ${esc(step.name)}` : ''}`));
   }
   return view(map, `${turnArrow(0)}<span>Tiesiai</span>`, clip(`${distanceHtml(g.metres)} · ${esc(g.target)}`));
 }
@@ -2348,7 +2689,9 @@ function routePage(trip, phase, at) {
     } else if (leg.to.stop == null) {
       text = `${metresText(leg.metres)} · iki tikslo`;
     } else if (leg.from.name === leg.to.name) {
-      text = sameStopMove(legs, legs.indexOf(leg)) === 'across' ? `per gatvę · ${esc(leg.to.name)}` : `${metresText(leg.metres)} · kita stotelė „${esc(leg.to.name)}“`;
+      const move = sameStopMove(legs, legs.indexOf(leg));
+      text = move === 'across' ? `per gatvę · ${esc(leg.to.name)}`
+        : move === 'same-side' ? `${metresText(leg.metres)} · ta pati gatvės pusė` : `${metresText(leg.metres)} · kita stotelė „${esc(leg.to.name)}“`;
     } else {
       text = `${metresText(leg.metres)} · ${esc(leg.to.name)}`;
     }
@@ -2841,7 +3184,14 @@ const actions = {
   },
   settings: () => push({ name: 'settings' }),
   map: () => { state.mapSel = null; push({ name: 'map' }); },
-  'map-me': () => { const from = origin(); if (bigmap && from) bigmap.flyTo([from.lat, from.lon], 16, { duration: 0.6 }); },
+  'map-me': () => { const me = mePoint(); if (bigmap && me) bigmap.flyTo([me.lat, me.lon], 17, { duration: 0.6 }); },
+  // The banner's minimap opens the big one, with the trip on it.
+  'open-map': () => {
+    stopListening();
+    state.locked = false; state.islandExpanded = false; state.mapSel = null;
+    state.stack = [HOME(), { name: 'map', id: uid() }];
+    renderAll();
+  },
   'map-go': () => {
     const sel = state.mapSel;
     if (!sel) return;
@@ -2919,7 +3269,7 @@ const actions = {
     const option = state.plan.options[Number(el.dataset.index)];
     state.selected = option; state.openStops = {};
     push({ name: 'detail' });
-    fetchWalks(option).then(() => { if (state.selected === option && currentScreen().name === 'detail') { mapFor = null; drawMap(); } });
+    fetchWalks(option).then(() => { if (state.selected === option && currentScreen().name === 'detail') { mapFor = null; renderApp(); drawMap(); } });
   },
   'toggle-stops': (el) => { const i = el.dataset.index; state.openStops[i] = !state.openStops[i]; renderApp(); },
   'go-option': (el) => {
@@ -3298,6 +3648,7 @@ function fillOrigins() {
   fillOrigins();
   renderAll();
   locate(false);
+  watchLocation();
 
   const poll = async () => {
     try {
