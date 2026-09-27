@@ -148,7 +148,39 @@ class Matching(unittest.TestCase):
     def test_query_terms(self):
         self.assertEqual(search.query_terms("k t u"), (["ktu"], []))
         self.assertEqual(search.query_terms("į Akropolį"), (["akropoli"], []))
-        self.assertEqual(search.query_terms("Gedimino pr. 9"), (["gedimino", "9"], ["pr"]))
+        # "pr." is read as the word it stands for.
+        self.assertEqual(search.query_terms("Gedimino pr. 9"), (["gedimino", "9"], ["prospektas"]))
+
+    def test_street_words_and_their_abbreviations_are_one(self):
+        for query, name in (("Katedros aikštė", "Katedros a."), ("Katedros a.", "Katedros aikštė"),
+                            ("Katedros aikštę", "Katedros a."), ("Gedimino prospektas 9", "Gedimino pr. 9"),
+                            ("Laisvės al.", "Laisvės alėja"), ("Vynvyčių skersgatvis", "Vynvyčių skg."),
+                            ("Tilžės gatvė", "Tilžės g.")):
+            with self.subTest(query=query, name=name):
+                a = search.assess(query, self.place(name))
+                self.assertEqual((a["match"], a["confidence"], a["exact"], a["generic"]), ("full", "high", True, 1))
+
+    def test_an_initial_is_not_a_square(self):
+        self.assertEqual(search._words("A. Smetonos al."), ["a", "smetonos", "aleja"])
+        self.assertEqual(search._words("Tilžės g. A"), ["tilzes", "gatve", "a"])
+        self.assertEqual(search.query_terms("k a u"), (["kau"], []))
+
+    def test_street_variants(self):
+        cases = {
+            "Katedros aikštė": ["Katedros a."],
+            "Katedros aikštę": ["Katedros a."],
+            "Europos a.": ["Europos aikštė"],
+            "Gedimino pr. 9": ["Gedimino prospektas 9"],
+            "Gedimino prospektas 9": ["Gedimino pr. 9"],
+            "Laisvės al.": ["Laisvės alėja"],
+            "Vynvyčių skg.": ["Vynvyčių skersgatvis"],
+            "Akropolis": [],
+            "Aikštė": [],
+            "A. Smetonos": [],
+        }
+        for query, expected in cases.items():
+            with self.subTest(query=query):
+                self.assertEqual(search.street_variants(query), expected)
 
     def test_ambiguity(self):
         def r(match, score):
@@ -188,6 +220,23 @@ class Stops(unittest.TestCase):
         self.assertEqual([s["subtitle"] for s in index.search("Stotis")], ["Stotelė · Vilnius"])
         self.assertEqual(index.search("Šiaulių stop A")[0]["subtitle"], "Stotelė · Šiauliai")
 
+    def test_street_words_find_stops_either_way(self):
+        # Real stops, names and places from the five-city timetable. No stop
+        # there is called "Katedros aikštė"; Panevėžys has "Katedros g.".
+        index = vilnius_index([("Europos aikštė", "Vilnius", 54.69564, 25.27743),
+                               ("Vinco Kudirkos aikštė", "Vilnius", 54.68871, 25.27982),
+                               ("Laisvės alėja A", "Kaunas", 54.89804, 23.89972),
+                               ("Prisikėlimo aikštės st.", "Šiauliai", 55.93182, 23.31576),
+                               ("Katedros g.", "Panevėžys", 55.72291, 24.36194)])
+        for query, name in (("Europos a.", "Europos aikštė"), ("Europos aikštė", "Europos aikštė"),
+                            ("Vinco Kudirkos aikštėje", "Vinco Kudirkos aikštė"),
+                            ("Laisvės al.", "Laisvės alėja A"), ("Laisvės alėja", "Laisvės alėja A"),
+                            ("Prisikėlimo a.", "Prisikėlimo aikštės st."),
+                            ("Katedros gatvė", "Katedros g.")):
+            with self.subTest(query=query):
+                self.assertEqual(index.search(query)[0]["name"], name)
+        self.assertEqual(index.search("Katedros aikštė"), [])
+
     def test_city_defaults_to_vilnius(self):
         t = SimpleNamespace(stop_names=["Žaliasis tiltas"], stop_lat=[54.6922], stop_lon=[25.2802])
         found = search.StopIndex(t).search("Žaliasis tiltas")
@@ -196,16 +245,20 @@ class Stops(unittest.TestCase):
 
 def fake_photon(query, origin):
     fake_photon.origins.append(origin)
+    fake_photon.queries.append(query)
     if query not in PHOTON:
         raise OSError("offline in tests")
     return PHOTON[query]
+
+
+fake_photon.origins, fake_photon.queries = [], []
 
 
 class EndToEnd(unittest.TestCase):
 
     def setUp(self):
         search._cache.clear()
-        fake_photon.origins = []
+        fake_photon.origins, fake_photon.queries = [], []
         patcher = mock.patch.object(search, "_fetch_photon", fake_photon)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -220,6 +273,28 @@ class EndToEnd(unittest.TestCase):
                 self.assertEqual(top["name"], "ISM Vadybos ir ekonomikos universitetas")
                 self.assertEqual(top["confidence"], "high")
                 self.assertFalse(found["ambiguous"])
+
+    def test_katedros_aikste_is_found_as_osm_writes_it(self):
+        # Photon finds nothing for "Katedros aikštė" (recorded); OSM has the
+        # square as "Katedros a.".
+        self.assertFalse(PHOTON["Katedros aikštė"]["features"])
+        found = search.search(self.index, "Katedros aikštė")
+        top = found["results"][0]
+        self.assertEqual((top["name"], top["city"], top["match"], top["confidence"]),
+                         ("Katedros a.", "Vilnius", "full", "high"))
+        self.assertFalse(found["ambiguous"])
+        self.assertEqual(fake_photon.queries, ["Katedros aikštė", "Katedros a."])
+
+    def test_katedros_aikste_from_speech(self):
+        found = search.resolve(self.index, parse("Man reikia į Katedros aikštę").candidates)
+        self.assertEqual((found["results"][0]["name"], found["results"][0]["city"]), ("Katedros a.", "Vilnius"))
+        self.assertEqual(found["results"][0]["confidence"], "high")
+
+    def test_a_sure_answer_asks_photon_once(self):
+        index = vilnius_index([("Europos aikštė", "Vilnius", 54.69564, 25.27743)])
+        found = search.search(index, "Europos a.")
+        self.assertEqual((found["results"][0]["name"], found["results"][0]["confidence"]), ("Europos aikštė", "high"))
+        self.assertEqual(fake_photon.queries, ["Europos a."])
 
     def test_position_reaches_photon(self):
         search.search(self.index, "Akropolis")

@@ -3,8 +3,9 @@
     python prototype/server.py
 
 Standard library only: nothing to install. The first start downloads the
-timetable (about 3 MB) from the project's GitHub release; after that it works
-offline except for address search and speech, which need the internet.
+timetables of five cities (about 6.7 MB) from the project's GitHub release;
+after that it works offline except for address search and speech, which need
+the internet.
 """
 
 from __future__ import annotations
@@ -57,6 +58,16 @@ def position(query: dict) -> tuple[float | None, float | None]:
     return None, None
 
 
+def local_time(value: str) -> datetime:
+    """An ISO time as the planner's clock: Vilnius wall-clock time, naive.
+    "at" and "now" come without an offset; one with an offset is converted
+    to this computer's local time."""
+    moment = datetime.fromisoformat(value)
+    if moment.tzinfo is not None:
+        moment = moment.astimezone().replace(tzinfo=None)
+    return moment
+
+
 def minutes_of(now: str | None) -> int | None:
     if not now:
         return None
@@ -107,14 +118,18 @@ class Handler(BaseHTTPRequestHandler):
                     found = search.resolve(State.index, parsed.candidates or [parsed.destination], *position(query))
                 return self.send_json({"parsed": parsed.as_json(), **found})
             if url.path == "/api/plan":
+                # "now" (optional, like "at"): with mode=arrive, trips that
+                # should already have started are dropped, and when none is
+                # left the answer says "late" and by how many minutes.
                 result = planner.plan(
                     State.timetable,
                     point(query["from"], query.get("from_name", "Tavo vieta")),
                     point(query["to"], query.get("to_name", "Tikslas")),
-                    datetime.fromisoformat(query["at"]),
+                    local_time(query["at"]),
                     query.get("mode") == "arrive",
                     query.get("priority", "fastest"),
                     query.get("walk", "normal"),
+                    now=local_time(query["now"]) if query.get("now") else None,
                 )
                 return self.send_json(result)
             if url.path.startswith("/api/"):

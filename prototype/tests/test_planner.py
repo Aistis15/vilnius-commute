@@ -5,16 +5,21 @@ data is rebuilt daily. Each test asserts something that must hold whatever
 the timetable says. Skipped when the database has not been downloaded yet.
 """
 
+import math
 import unittest
 from datetime import datetime, timedelta
 
 from vc import data
-from vc.planner import Point, plan
+from vc.planner import Point, intercity_patterns, plan, stops_near
 
 TIMETABLE = data.load_timetable() if data.DB_PATH.exists() else None
 
 ISM = Point(54.68688, 25.2827, "ISM")                 # Gedimino pr. 7
 AKROPOLIS = Point(54.71051, 25.26314, "Akropolis")    # Ozo g. 25
+# Where search puts "Stotis" in Vilnius (the middle of its platforms), and a
+# Šiauliai city stop 300 m from the bus station there.
+STOTIS = Point(54.67104, 25.28376, "Stotis")
+SIAULIAI = Point(55.93047, 23.30905, "Dvaro st.")
 
 
 def busy_weekday() -> datetime:
@@ -73,6 +78,104 @@ class Planner(unittest.TestCase):
                 if a["transfers"] > b["transfers"] and a["leave_s"] <= b["leave_s"] + 300:
                     self.assertLess(a["arrive_s"], b["arrive_s"] - 60,
                                     f"{a['id']} adds changes for nothing over {b['id']}")
+
+
+def seconds_of(moment: datetime) -> int:
+    return moment.hour * 3600 + moment.minute * 60 + moment.second
+
+
+@unittest.skipIf(TIMETABLE is None, "timetable not downloaded yet")
+class ArriveByFromNow(unittest.TestCase):
+    """"Be there by" asked late in the day: never a trip that has gone."""
+
+    def test_never_offers_a_trip_that_should_have_started(self):
+        deadline = busy_weekday().replace(hour=9)
+        for minutes_before in (60, 40, 25, 12):
+            now = deadline - timedelta(minutes=minutes_before)
+            with self.subTest(now=now.strftime("%H:%M")):
+                result = plan(TIMETABLE, ISM, AKROPOLIS, deadline, arrive_by=True, now=now)
+                self.assertTrue(result["options"])
+                for option in result["options"]:
+                    self.assertGreaterEqual(option["leave_s"], seconds_of(now) - 60)
+                    if not result["late"]:
+                        self.assertLessEqual(option["arrive_s"], seconds_of(deadline))
+
+    def test_too_late_offers_the_fastest_from_now(self):
+        # ISM to Akropolis is 3 km: nothing gets there in two minutes.
+        deadline = busy_weekday().replace(hour=9)
+        now = deadline - timedelta(minutes=2)
+        result = plan(TIMETABLE, ISM, AKROPOLIS, deadline, arrive_by=True, now=now)
+        self.assertIs(result["late"], True)
+        options = result["options"]
+        self.assertTrue(options)
+        best = min(o["arrive_s"] for o in options)
+        self.assertEqual(result["late_by_min"], math.ceil((best - seconds_of(deadline)) / 60))
+        self.assertGreater(result["late_by_min"], 0)
+        self.assertEqual(options[0]["arrive_s"] + 180 * options[0]["transfers"],
+                         min(o["arrive_s"] + 180 * o["transfers"] for o in options))
+        for option in options:
+            self.assertGreaterEqual(option["leave_s"], seconds_of(now) - 60)
+            self.assertIs(option["late"], True)
+
+    def test_in_time_says_so(self):
+        deadline = busy_weekday().replace(hour=9)
+        for now in (deadline - timedelta(hours=2), None):
+            with self.subTest(now=now):
+                result = plan(TIMETABLE, ISM, AKROPOLIS, deadline, arrive_by=True, now=now)
+                self.assertEqual((result["late"], result["late_by_min"]), (False, None))
+                self.assertTrue(result["options"])
+                self.assertFalse([o for o in result["options"] if o["late"]])
+
+
+def coach_links(origin: Point, destination: Point) -> bool:
+    """Whether the data has an intercity line between walking reach of both."""
+    coaches = intercity_patterns(TIMETABLE)
+    near = lambda point: set().union(*(coaches.get(a.stop, ()) for a in stops_near(TIMETABLE, point, 800)))  # noqa: E731
+    return bool(near(origin) & near(destination))
+
+
+@unittest.skipIf(TIMETABLE is None, "timetable not downloaded yet")
+class Intercity(unittest.TestCase):
+    """Vilnius to Šiauliai by the coach from the bus station by "Stotis"."""
+
+    def setUp(self):
+        if not coach_links(STOTIS, SIAULIAI):
+            self.skipTest("no Vilnius–Šiauliai coach in this timetable")
+
+    def test_the_coach_stand_is_in_reach_of_the_station(self):
+        # Vilnius AS is farther than the dozen nearest "Stotis" platforms.
+        coaches = intercity_patterns(TIMETABLE)
+        self.assertTrue(any(coaches.get(a.stop) for a in stops_near(TIMETABLE, STOTIS, 800)))
+
+    def test_takes_the_coach_straight_away(self):
+        result = plan(TIMETABLE, STOTIS, SIAULIAI, busy_weekday().replace(hour=7), arrive_by=False)
+        transit = [o for o in result["options"] if not o["walk_only"]]
+        self.assertTrue(transit, "no option from Vilnius Stotis to Šiauliai")
+        # Not a city bus away from the station first, to walk back to it.
+        self.assertEqual(transit[0]["transfers"], 0)
+
+    def test_arrive_by_looks_back_further_than_a_city_trip(self):
+        when = busy_weekday().replace(hour=7)
+        depart = plan(TIMETABLE, STOTIS, SIAULIAI, when, arrive_by=False)
+        first = min(o["arrive_s"] for o in depart["options"] if not o["walk_only"])
+        deadline = when.replace(hour=0) + timedelta(minutes=math.ceil(first / 60))
+        result = plan(TIMETABLE, STOTIS, SIAULIAI, deadline, arrive_by=True)
+        transit = [o for o in result["options"] if not o["walk_only"]]
+        self.assertTrue(transit, "arrive-by found nothing although the coach runs")
+        for option in transit:
+            self.assertLessEqual(option["arrive_s"], seconds_of(deadline))
+            # The coach takes longer than the three hours a city trip gets.
+            self.assertGreater(seconds_of(deadline) - option["leave_s"], 3 * 3600)
+
+    def test_too_late_for_the_coach(self):
+        # 190 km in an hour: never. The answer is the first way from now.
+        deadline = busy_weekday().replace(hour=7)
+        now = deadline - timedelta(hours=1)
+        result = plan(TIMETABLE, STOTIS, SIAULIAI, deadline, arrive_by=True, now=now)
+        self.assertIs(result["late"], True)
+        self.assertGreater(result["late_by_min"], 60)
+        for option in result["options"]:
+            self.assertGreaterEqual(option["leave_s"], seconds_of(now) - 60)
 
 
 if __name__ == "__main__":

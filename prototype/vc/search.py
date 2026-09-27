@@ -67,9 +67,59 @@ EXACT, STEM, INITIALS, CONTEXT, PREFIX = 1.0, 0.9, 0.85, 0.6, 0.5
 TIERS = {"full": 3, "partial": 2, "generic": 1, "none": 0}
 CLOSE = 0.15     # scores this near are a coin toss
 
+# Street words, every case of them, and how OpenStreetMap and the timetables
+# shorten them. Photon knows "Katedros a." but finds nothing for "Katedros
+# aikštė", so both spellings are tried, and matching counts them as one word.
+STREET_WORDS = {
+    "aikštė": ("a.", "aikštė aikštės aikštei aikštę aikšte aikštėje"),
+    "gatvė": ("g.", "gatvė gatvės gatvei gatvę gatve gatvėje"),
+    "prospektas": ("pr.", "prospektas prospekto prospektui prospektą prospektu prospekte"),
+    "alėja": ("al.", "alėja alėjos alėjai alėją alėjoje"),
+    "skersgatvis": ("skg.", "skersgatvis skersgatvio skersgatviui skersgatvį skersgatviu skersgatvyje"),
+}
+_SPELLED = {short.rstrip("."): word for word, (short, _) in STREET_WORDS.items()}
+_SHORTENED = {fold(word): short for word, (short, _) in STREET_WORDS.items()}
+# Folded word -> folded base form. Written-out abbreviations of two letters or
+# more are unmistakable; "a." and "g." only with the full stop, below.
+_STREET_WORD = {fold(form): fold(word) for word, (_, forms) in STREET_WORDS.items() for form in forms.split()}
+_STREET_WORD.update({short: fold(word) for short, word in _SPELLED.items() if len(short) > 1})
+# "Katedros a.", "Tilžės g. A": a lower-case abbreviation after a word. "A." at
+# the start or in capitals is someone's initial (A. Smetonos al.).
+_ABBREVIATED = re.compile(r"(?<=\w)(\s+)(a|g|pr|al|skg)\.(?!\w)")
+
 
 def _words(text: str) -> list[str]:
-    return re.findall(r"[^\W_]+", fold(text or ""))
+    spelled = _ABBREVIATED.sub(lambda m: m.group(1) + _SPELLED[m.group(2)], text or "")
+    return [_STREET_WORD.get(w, w) for w in re.findall(r"[^\W_]+", fold(spelled))]
+
+
+def _plain(text: str) -> str:
+    """A name as matching sees it: folded, street words spelled out, no
+    punctuation. "Katedros a." and "Katedros aikštė" are the same."""
+    return " ".join(_words(text))
+
+
+def street_variants(query: str) -> list[str]:
+    """The query with its street words shortened the way OpenStreetMap writes
+    them ("Katedros aikštę" -> "Katedros a."), and spelled out ("Europos a."
+    -> "Europos aikštė"). Empty when there is no street word after a name."""
+    tokens = query.split()
+    short, full = [], []
+    for i, token in enumerate(tokens):
+        bare = token.rstrip(".,;")
+        tail = token[len(bare):]
+        key = fold(bare)
+        if i and key in _STREET_WORD and key not in _SPELLED:
+            short.append(_SHORTENED[_STREET_WORD[key]] + tail.lstrip("."))
+            full.append(token)
+        elif i and key in _SPELLED and bare.islower() and (tail.startswith(".") or len(key) > 1):
+            full.append(_SPELLED[key] + (tail[1:] if tail.startswith(".") else tail))
+            short.append(token)
+        else:
+            short.append(token)
+            full.append(token)
+    original = " ".join(tokens)
+    return [v for v in dict.fromkeys((" ".join(short), " ".join(full))) if v != original]
 
 
 def _same_word(a: str, b: str) -> bool:
@@ -166,7 +216,7 @@ def assess(query: str, candidate: dict) -> dict:
 
     generic_hits = sum(1 for g in generic if any(_same_word(g, n) for n in name_words))
     generic_share = generic_hits / len(generic) if generic else 0.0
-    exact_name = fold(candidate["name"]).strip() == fold(query or "").strip()
+    exact_name = _plain(candidate["name"]) == _plain(query)
 
     if distinctive:
         best = [max(pair) for pair in qualities]
@@ -319,17 +369,17 @@ class StopIndex:
             lat = sum(t.stop_lat[i] for i in ids) / len(ids)
             lon = sum(t.stop_lon[i] for i in ids) / len(ids)
             context = [w for word in _words(city) for w in (word, _genitive(word))]
-            self.entries.append((fold(name), name, city, lat, lon, context))
+            self.entries.append((_plain(name), name, city, lat, lon, context))
         self.by_name: dict[str, list[tuple[float, float]]] = {}
         for folded, _, _, lat, lon, _ in self.entries:
             self.by_name.setdefault(folded, []).append((lat, lon))
 
     def has_stop_near(self, name: str, lat: float, lon: float, km: float = 0.3) -> bool:
-        return any(distance_km(lat, lon, where) <= km for where in self.by_name.get(fold(name), []))
+        return any(distance_km(lat, lon, where) <= km for where in self.by_name.get(_plain(name), []))
 
     def search(self, query: str, limit: int = 5, origin: tuple[float, float] = VILNIUS) -> list[dict]:
         """Stops whose name matches, each tagged with how strongly."""
-        q = fold(query).strip()
+        q = _plain(query)
         if len(q) < 2:
             return []
         words = q.split()
@@ -430,31 +480,49 @@ def search(index: StopIndex, query: str, lat: float | None = None, lon: float | 
     """{"results": [...], "ambiguous": bool}, biased to (lat, lon), or to the
     centre of Vilnius when no position is known."""
     origin = (lat, lon) if lat is not None and lon is not None else VILNIUS
-    found = [p for p in places(query, origin)
-             if not (p["category"] in TRANSIT_STOPS and index.has_stop_near(p["name"], p["lat"], p["lon"]))]
-    candidates = index.search(query, origin=origin) + found
-    ranked = rank(query, candidates, origin)
+
+    def found(text: str) -> list[dict]:
+        return [p for p in places(text, origin)
+                if not (p["category"] in TRANSIT_STOPS and index.has_stop_near(p["name"], p["lat"], p["lon"]))]
+
+    candidates = index.search(query, origin=origin) + found(query)
+    out = _best(rank(query, candidates, origin))
+    # Nothing sure: ask Photon again with the street word spelled the other
+    # way ("Katedros aikštė" -> "Katedros a."). Ranked by what was asked.
+    for variant in street_variants(query):
+        if out and out[0]["confidence"] == "high" and not is_ambiguous(out):
+            break
+        more = found(variant)
+        if more:
+            candidates += more
+            out = _best(rank(query, candidates, origin))
+    return {"results": out, "ambiguous": is_ambiguous(out)}
+
+
+def _best(ranked: list[dict]) -> list[dict]:
+    """The first ten, each place once."""
     seen, out = set(), []
     for item in ranked:
         identity = (fold(item["name"]), round(item["lat"], 3), round(item["lon"], 3))
         if identity not in seen:
             seen.add(identity)
             out.append(item)
-    out = out[:10]
-    return {"results": out, "ambiguous": is_ambiguous(out)}
+    return out[:10]
 
 
 def resolve(index: StopIndex, candidates: list[str], lat: float | None = None,
             lon: float | None = None) -> dict:
     """The best reading of a spoken destination. Speech gives several spellings
     ("ISM universitetas", "i SM universitetas"); each is searched in turn,
-    stopping at the first whose best result is a clear, full match."""
+    stopping at the first whose best result is a clear, full match on every
+    word. "Katedra aikštė" finds a cathedral but not the square, so
+    "Katedros aikštė", read next, gets its turn."""
     best, best_key = None, None
     for query in candidates[:4]:
         found = search(index, query, lat, lon)
         found["query"] = query
         top = found["results"][0] if found["results"] else None
-        if top and top["match"] == "full" and not found["ambiguous"]:
+        if top and top["match"] == "full" and top["score"] >= 0.999 and not found["ambiguous"]:
             return found
         key = (TIERS[top["match"]], top["score"]) if top else (-1, 0.0)
         if best_key is None or key > best_key:

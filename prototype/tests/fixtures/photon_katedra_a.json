@@ -1,0 +1,367 @@
+{
+ "query": "Katedra a.",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=Katedra+a.&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-27",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 4870323,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "2",
+     "name": "Vilniaus Šv. Stanislovo ir Šv. Vladislovo arkikatedra bazilika",
+     "street": "Katedros a.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01122",
+     "countrycode": "LT",
+     "extent": [
+      25.2872252,
+      54.6861589,
+      25.2883651,
+      54.6856206
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2877949,
+      54.6858867
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 48954340,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "10A",
+     "name": "Vilniaus Šv. Dvasios cerkvė",
+     "street": "Aušros Vartų g.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01303",
+     "countrycode": "LT",
+     "extent": [
+      25.2902073,
+      54.6756903,
+      25.2911235,
+      54.6753719
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2906883,
+      54.6755349
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 343751993,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "14",
+     "name": "Vilniaus Dievo Motinos Ėmimo į Dangų katedra",
+     "street": "Maironio g.",
+     "locality": "Tymo kvartalas",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01124",
+     "countrycode": "LT",
+     "extent": [
+      25.2919147,
+      54.6813061,
+      25.2927255,
+      54.6808688
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2923691,
+      54.6810863
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 142984336,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "1",
+     "name": "Panevėžio Kristaus Karaliaus katedra",
+     "street": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Panevėžys",
+     "county": "Panevėžio miesto savivaldybė",
+     "state": "Panevėžio apskritis",
+     "country": "Lietuva",
+     "postcode": "35240",
+     "countrycode": "LT",
+     "extent": [
+      24.3559612,
+      55.7230163,
+      24.3568725,
+      55.7226351
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.3564169,
+      55.7228484
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 133797590,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "6",
+     "name": "Kaišiadorių Kristaus Atsimainymo katedra",
+     "street": "T. Brazio g.",
+     "city": "Kaišiadorys",
+     "county": "Kaišiadorių miesto seniūnija",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "56121",
+     "countrycode": "LT",
+     "extent": [
+      24.4569446,
+      54.8607898,
+      24.4576658,
+      54.8603683
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.4573252,
+      54.8605849
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 341003618,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "2",
+     "name": "Telšių Šv. Antano Paduviečio katedra",
+     "street": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Telšiai",
+     "county": "Telšių miesto seniūnija",
+     "state": "Telšių apskritis",
+     "country": "Lietuva",
+     "postcode": "87131",
+     "countrycode": "LT",
+     "extent": [
+      22.2460538,
+      55.9825511,
+      22.2463658,
+      55.9821885
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      22.2462098,
+      55.9823427
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 149213708,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "14",
+     "name": "Vilkaviškio Švč. Mergelės Marijos Apsilankymo katedra",
+     "street": "Vytauto g.",
+     "district": "Naujamiestis",
+     "city": "Vilkaviškis",
+     "county": "Vilkaviškio miesto seniūnija",
+     "state": "Marijampolės apskritis",
+     "country": "Lietuva",
+     "postcode": "70140",
+     "countrycode": "LT",
+     "extent": [
+      23.0365936,
+      54.6482847,
+      23.0373385,
+      54.6479285
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.0369637,
+      54.6480981
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 5341732530,
+     "osm_key": "highway",
+     "osm_value": "bus_stop",
+     "type": "house",
+     "name": "Katedra",
+     "district": "Naujamiestis",
+     "city": "Vilkaviškis",
+     "county": "Vilkaviškio miesto seniūnija",
+     "state": "Marijampolės apskritis",
+     "country": "Lietuva",
+     "postcode": "70101",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.0358421,
+      54.6487763
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 61281971,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "1",
+     "name": "Šiaulių Šv. apaštalų Petro ir Pauliaus katedra",
+     "street": "Aušros tak.",
+     "district": "Senamiestis",
+     "city": "Šiauliai",
+     "county": "Šiaulių miesto savivaldybė",
+     "state": "Šiaulių apskritis",
+     "country": "Lietuva",
+     "postcode": "76294",
+     "countrycode": "LT",
+     "extent": [
+      23.3195354,
+      55.9328824,
+      23.3203889,
+      55.9325483
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.3199619,
+      55.9327128
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 317969795,
+     "osm_key": "building",
+     "osm_value": "yes",
+     "type": "house",
+     "name": "Lietuvos Sveikatos Mokslų Universiteto Veterinarijos Akademijos Veterinarinės Patobiologijos Katedra",
+     "street": "Tilžės g.",
+     "locality": "Vilijampolė",
+     "district": "Vilijampolės seniūnija",
+     "city": "Kaunas",
+     "county": "Kauno miesto savivaldybė",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "48332",
+     "countrycode": "LT",
+     "extent": [
+      23.8809334,
+      54.908858,
+      23.8816833,
+      54.908372
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      23.881336,
+      54.9086234
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 88592954,
+     "osm_key": "amenity",
+     "osm_value": "place_of_worship",
+     "type": "house",
+     "housenumber": "2",
+     "name": "Daugavpils Svētā Borisa un Gļeba pareizticīgo katedrāle",
+     "street": "Tautas iela",
+     "district": "Jaunbūve",
+     "city": "Daugavpils",
+     "country": "Latvija",
+     "postcode": "LV-5404",
+     "countrycode": "LV",
+     "extent": [
+      26.5376066,
+      55.8708543,
+      26.538409,
+      55.8704471
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      26.5380116,
+      55.8706507
+     ]
+    }
+   }
+  ]
+ }
+}

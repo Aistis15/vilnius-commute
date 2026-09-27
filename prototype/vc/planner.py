@@ -34,6 +34,32 @@ class Point:
     name: str
 
 
+# Longer than any city or suburban route in the five feeds (the longest,
+# Klaipėda's 115 to Rusnė, spans 43 km); the intercity coaches span 120 km
+# and more.
+INTERCITY_KM = 60
+_intercity: tuple[Timetable, dict[int, frozenset[int]]] | None = None
+
+
+def intercity_patterns(t: Timetable) -> dict[int, frozenset[int]]:
+    """Per stop, the intercity patterns that call there. Worked out once."""
+    global _intercity
+    if _intercity is not None and _intercity[0] is t:
+        return _intercity[1]
+    at_stop: dict[int, set[int]] = {}
+    for pattern, stops in enumerate(t.pattern_stops):
+        if not stops:
+            continue
+        first = stops[0]
+        extent = max(distance_m(t.stop_lat[first], t.stop_lon[first], t.stop_lat[s], t.stop_lon[s]) for s in stops)
+        if extent >= INTERCITY_KM * 1000:
+            for stop in stops:
+                at_stop.setdefault(stop, set()).add(pattern)
+    frozen = {stop: frozenset(patterns) for stop, patterns in at_stop.items()}
+    _intercity = (t, frozen)
+    return frozen
+
+
 def stops_near(t: Timetable, point: Point, limit_m: int, max_count: int = 12) -> list[Access]:
     found = []
     for stop, (lat, lon) in enumerate(zip(t.stop_lat, t.stop_lon)):
@@ -44,7 +70,19 @@ def stops_near(t: Timetable, point: Point, limit_m: int, max_count: int = 12) ->
         if metres <= limit_m:
             found.append(Access(stop, metres))
     found.sort(key=lambda a: a.metres)
-    return found[:max_count]
+    chosen = found[:max_count]
+    # A coach stand is rarely among the dozen nearest platforms of a busy
+    # interchange: Vilnius AS is the 14th nearest stop to "Stotis". A stop
+    # with an intercity line that no nearer stop has is kept, whatever its
+    # rank. City lines are left alone, so city trips plan as before.
+    coaches = intercity_patterns(t)
+    served = set().union(*(coaches.get(a.stop, ()) for a in chosen))
+    for access in found[max_count:]:
+        extra = coaches.get(access.stop, frozenset()) - served
+        if extra:
+            chosen.append(access)
+            served |= extra
+    return chosen
 
 
 def service_day(moment: datetime) -> tuple[int, int]:
@@ -59,9 +97,61 @@ def plan(
     arrive_by: bool,
     priority: str = "fastest",
     walk: str = "normal",
+    now: datetime | None = None,
 ) -> dict:
-    """Plan a trip. `when` is a Vilnius wall-clock time, naive."""
+    """Plan a trip. `when` and `now` are Vilnius wall-clock times, naive.
+
+    With `now`, "be there by" never offers a trip that should already have
+    started. When none is left, the answer is the fastest way from now,
+    marked late: "late_by_min" is how many minutes after `when` the best of
+    them arrives, and each option that arrives after `when` has "late" set.
+    """
     prefs = Preferences(max_walk_metres=WALK_LIMITS.get(walk, 800))
+    options, counts = _options(t, origin, destination, when, arrive_by, prefs)
+    late_by_min = None
+
+    if arrive_by and now is not None:
+        midnight = when.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff = (now - midnight).total_seconds() - 60
+        options = [o for o in options if o["leave_s"] >= cutoff]
+        if not options:
+            # The router sees one service day at a time: when nothing runs
+            # for the rest of today (the last coach has gone), start from the
+            # next morning, up to the day that was asked about.
+            start = now
+            for _ in range(3):
+                options, counts = _options(t, origin, destination, start, False, prefs)
+                if options or start.date() >= when.date():
+                    break
+                start = start.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            priority, arrive_by = "fastest", False
+            start_midnight = start.replace(hour=0, minute=0, second=0, microsecond=0)
+            for o in options:
+                o["late"] = start_midnight + timedelta(seconds=o["arrive_s"]) > when
+            if options:
+                best = start_midnight + timedelta(seconds=min(o["arrive_s"] for o in options))
+                if best > when:
+                    late_by_min = math.ceil((best - when).total_seconds() / 60)
+
+    rank(options, priority, arrive_by)
+    tag(options, arrive_by)
+    return {
+        "options": options,
+        "late": late_by_min is not None,
+        "late_by_min": late_by_min,
+        **counts,
+    }
+
+
+def _options(
+    t: Timetable,
+    origin: Point,
+    destination: Point,
+    when: datetime,
+    arrive_by: bool,
+    prefs: Preferences,
+) -> tuple[list[dict], dict]:
+    """Trip options, not yet ranked or tagged, and how many stops each end has."""
     router = Router(t, prefs)
 
     midnight = when.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -89,10 +179,18 @@ def plan(
             if all(not same(journey, known) for known in journeys):
                 journeys.append(journey)
 
+    direct = walk_m(origin.lat, origin.lon, destination.lat, destination.lon)
+
     if arrive_by:
         # The latest departure that still arrives in time. Arrival does not
         # get earlier by leaving later, so a binary search over minutes works.
-        low, high = seconds - 3 * 3600, seconds
+        # Three hours covers any trip within a city. A coach between cities
+        # takes nearly four and runs a few times a day, so look further back
+        # there; a trip that must start more than twelve hours ahead is no
+        # answer to "be there by", and the caller says so instead.
+        apart = distance_m(origin.lat, origin.lon, destination.lat, destination.lon)
+        window = 3 * 3600 if apart < INTERCITY_KM * 1000 else 12 * 3600
+        low, high = seconds - window, seconds
         found_at = None
         while low <= high:
             middle = (low + high) // 2 // 60 * 60
@@ -129,19 +227,12 @@ def plan(
     journeys = pareto(journeys)[:6]
     options = [option_json(t, j, midnight, origin, destination) for j in journeys]
 
-    direct = walk_m(origin.lat, origin.lon, destination.lat, destination.lon)
     if direct <= max(prefs.max_walk_metres * 2, 1000):
         duration = prefs.walk_seconds(direct)
         start = seconds - duration if arrive_by else seconds
         options.append(walk_only_json(midnight, start, duration, direct, origin, destination))
 
-    rank(options, priority, arrive_by)
-    tag(options, arrive_by)
-    return {
-        "options": options,
-        "origin_stops": len(origins),
-        "destination_stops": len(destinations),
-    }
+    return options, {"origin_stops": len(origins), "destination_stops": len(destinations)}
 
 
 def same(a: Journey, b: Journey) -> bool:
@@ -303,6 +394,7 @@ def option_json(t: Timetable, journey: Journey, midnight: datetime, origin: Poin
         "walk_m": journey.walk_metres,
         "transfers": max(0, len(rides) - 1),
         "walk_only": False,
+        "late": False,
         "routes": [l["route"] for l in rides],
         "first_departure": rides[0]["departure"] if rides else None,
         "first_stop": rides[0]["from"]["name"] if rides else None,
@@ -330,6 +422,7 @@ def walk_only_json(midnight, start, duration, metres, origin: Point, destination
         "walk_m": metres,
         "transfers": 0,
         "walk_only": True,
+        "late": False,
         "routes": [],
         "first_departure": None,
         "first_stop": None,

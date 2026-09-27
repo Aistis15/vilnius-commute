@@ -38,8 +38,8 @@ function plural(n, one, few, many) {
 }
 const transfersText = (n) => (n === 0 ? 'be persėdimų' : `${n} ${plural(n, 'persėdimas', 'persėdimai', 'persėdimų')}`);
 const stopsText = (n) => `${n} ${plural(n, 'stotelė', 'stotelės', 'stotelių')}`;
-// After "po" Lithuanian wants the genitive: po 1 stotelės, po 5 stotelių.
-const stopsAfterText = (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'stotelės' : 'stotelių'}`;
+// As an object: važiuok 1 stotelę, 3 stoteles, 10 stotelių.
+const stopsAccText = (n) => `${n} ${plural(n, 'stotelę', 'stoteles', 'stotelių')}`;
 const placesText = (n) => `${n} ${plural(n, 'vieta', 'vietos', 'vietų')}`;
 const roundMetres = (m) => (m >= 1000 ? (m / 1000).toFixed(1).replace('.', ',') : String(Math.max(10, Math.round(m / 10) * 10)));
 const metresText = (m) => `${roundMetres(m)} ${m >= 1000 ? 'km' : 'm'}`;
@@ -51,7 +51,8 @@ const ICONS = {
   walk: '<circle cx="13" cy="4.5" r="1.8"/><path d="m10 21 2-6 3 3v3M9 11l2.5-3.5 3 1.5 2 3M11.5 7.5 9.5 14"/>',
   chevron: '<path d="m9 6 6 6-6 6"/>',
   back: '<path d="m15 5-7 7 7 7"/>',
-  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',
+  // A toothed wheel, not rays: rays read as brightness.
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M10.06 5.07L10.15 5.04L10.30 2.65L13.70 2.65L13.85 5.04L13.94 5.07L15.53 5.73L15.61 5.77L17.41 4.19L19.81 6.59L18.23 8.39L18.27 8.47L18.93 10.06L18.96 10.15L21.35 10.30L21.35 13.70L18.96 13.85L18.93 13.94L18.27 15.53L18.23 15.61L19.81 17.41L17.41 19.81L15.61 18.23L15.53 18.27L13.94 18.93L13.85 18.96L13.70 21.35L10.30 21.35L10.15 18.96L10.06 18.93L8.47 18.27L8.39 18.23L6.59 19.81L4.19 17.41L5.77 15.61L5.73 15.53L5.07 13.94L5.04 13.85L2.65 13.70L2.65 10.30L5.04 10.15L5.07 10.06L5.73 8.47L5.77 8.39L4.19 6.59L6.59 4.19L8.39 5.77L8.47 5.73z"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
   location: '<path d="M3 11 21 3l-8 18-2-8-8-2z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -380,14 +381,42 @@ async function planTrip(place, mode, time) {
     throw error;
   }
   const prefs = state.prefs || { priority: 'fastest', walk: 'normal' };
-  return api('/api/plan', {
+  const plan = await api('/api/plan', {
     from: `${from.lat},${from.lon}`, from_name: from.name,
     to: `${place.lat},${place.lon}`, to_name: place.name,
     at: localIso(atFor(mode, time)),
+    // The prototype's clock, not the computer's: "be there by 9" must not
+    // offer a trip that left before the simulated now.
+    now: localIso(now()),
     mode: mode === 'arrive' ? 'arrive' : 'depart',
     priority: prefs.priority, walk: prefs.walk,
   });
+  plan.options = (plan.options || []).map(mergeWalks);
+  return plan;
 }
+
+/* The router can hand back two walks in a row: to a stop, then on to the
+   destination without boarding anything there. To the rider that is one
+   walk, and its distance may only ever go down. */
+function mergeWalks(option) {
+  if (!option || !option.legs) return option;
+  const legs = [];
+  for (const leg of option.legs) {
+    const prev = legs[legs.length - 1];
+    if (prev && prev.kind === 'walk' && leg.kind === 'walk') {
+      legs[legs.length - 1] = {
+        ...prev, to: leg.to, arrival: leg.arrival, metres: prev.metres + leg.metres,
+        minutes: Math.max(1, Math.round((new Date(leg.arrival.iso) - new Date(prev.departure.iso)) / 60_000)),
+      };
+    } else {
+      legs.push(leg);
+    }
+  }
+  return legs.length === option.legs.length ? option : { ...option, legs };
+}
+
+/* Earliest arrival first: what "you will not make it" should offer. */
+const earliest = (options) => options.slice().sort((a, b) => new Date(a.arrive.iso) - new Date(b.arrive.iso))[0] || null;
 
 // -------------------------------------------------------------- navigation
 
@@ -418,6 +447,18 @@ function routeLine(option, small = false) {
   });
   return parts.join('<span class="sep">›</span>');
 }
+
+/* "Prekybos centras, Ozo g. 25, Vilnius" → "Ozo g. 25": on a tile, the
+   street is what tells two places apart. */
+function shortAddress(subtitle) {
+  const parts = String(subtitle || '').split(',').map((x) => x.trim()).filter(Boolean);
+  return parts.find((x) => /\d|(^|\s)(g|pr|al|pl|a)\.(\s|$)/.test(x)) || parts[0] || '';
+}
+
+/* Some sources write names in capitals ("AKROPOLIS"); show them as names.
+   Short words stay as they are: "PC", "UAB" are abbreviations. */
+const nameCase = (name) => (name === name.toUpperCase()
+  ? name.replace(/\p{Lu}{4,}/gu, (w) => w[0] + w.slice(1).toLowerCase()) : name);
 
 function placeIcon(place) {
   const name = fold(place.name);
@@ -570,7 +611,7 @@ function onboardingView() {
       <div style="margin-top:28px">
         <button class="prominent" data-action="draft-next">${draft.step < steps.length - 1 ? 'Toliau' : 'Pradėti'}</button>
       </div>
-      <p class="footnote">Pakeisti galėsi bet kada nustatymuose.</p>
+      <p class="footnote inset">Pakeisti galėsi bet kada nustatymuose.</p>
     </div>`;
 }
 
@@ -581,21 +622,26 @@ function homeView() {
   return `<div class="nav">
       ${navBar({ title: 'Kur keliausime?', right: `<button class="icon-button" data-action="settings" aria-label="Nustatymai">${icon('gear')}</button>` })}
     </div>
-    <div class="content">
-      <h1 class="large">Kur keliausime šiandien?</h1>
-      <button class="voice${listening ? ' listening' : ''}" data-action="app-mic" aria-pressed="${listening}">
-        <span class="voice-disc">${icon('mic')}</span>
-        <span class="voice-text">
-          <span class="voice-title">${listening ? `Klausau${dotsHtml}` : 'Pasakyk, kur keliauji'}</span>
-          <span class="voice-sub">${listening
-            ? (state.interim ? `„${esc(state.interim)}“` : 'Paliesk dar kartą, kad sustabdytum')
-            : 'Pvz.: „Į Akropolį keturiolika dvidešimt“'}</span>
-        </span>
-      </button>
-      <label class="search">
-        ${icon('search')}
-        <input id="search" type="search" placeholder="Arba įrašyk adresą ar stotelę" value="${esc(state.query)}" autocomplete="off" aria-label="Kur keliausi">
-      </label>
+    <div class="content${state.searchActive ? ' searching' : ''}">
+      <div class="collapsible"><div>
+        <h1 class="large one-line">Kur keliausime šiandien?</h1>
+        <button class="voice${listening ? ' listening' : ''}" data-action="app-mic" aria-pressed="${listening}">
+          <span class="voice-disc">${icon('mic')}</span>
+          <span class="voice-text">
+            <span class="voice-title">${listening ? `Klausau${dotsHtml}` : 'Pasakyk, kur keliauji'}</span>
+            <span class="voice-sub">${listening
+              ? (state.interim ? `„${esc(state.interim)}“` : 'Paliesk dar kartą, kad sustabdytum')
+              : 'Pvz.: „Į Akropolį keturiolika dvidešimt“'}</span>
+          </span>
+        </button>
+      </div></div>
+      <div class="search-row">
+        <label class="search">
+          ${icon('search')}
+          <input id="search" type="search" placeholder="${state.searchActive ? 'Adresas, vieta ar stotelė' : 'Arba įrašyk adresą ar stotelę'}" value="${esc(state.query)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Kur keliausi">
+        </label>
+        <button class="search-cancel" data-action="search-cancel" tabindex="${state.searchActive ? 0 : -1}" aria-hidden="${!state.searchActive}">Atšaukti</button>
+      </div>
       ${originChip()}
       <div id="home-content">${homeContent(saveSuggestions())}</div>
     </div>`;
@@ -631,13 +677,13 @@ function homeContent(suggestions) {
   const tiles = state.places.map((p) => `
       <button class="tile" data-action="go-place" data-id="${p.id}" data-key="${p.id}">
         <span class="glyph">${placeIcon({ ...p, saved: true })}</span>
-        <span><span class="title">${esc(p.name)}</span><span class="sub">${esc(p.subtitle || ' ')}</span></span>
+        <span><span class="title">${esc(p.name)}</span><span class="sub">${esc(shortAddress(p.subtitle) || ' ')}</span></span>
       </button>`).join('');
   return `
     ${locationNotice()}
     ${suggestions.map((s) => `<div class="notice reveal" data-key="suggest-${esc(s.key)}">
-        <div class="notice-title">Dažnai važiuoji į „${esc(s.name)}“</div>
-        <p>Išsaugoti ir pavadinti savaip?</p>
+        <div class="notice-title">${esc(s.name)}</div>
+        <p>Dažnai čia važiuoji. Išsaugoti ir pavadinti savaip?</p>
         <div class="notice-actions">
           <button class="secondary" data-action="save-suggestion" data-key-ref="${esc(s.key)}">Išsaugoti</button>
           <button class="secondary" data-action="dismiss-suggestion" data-key-ref="${esc(s.key)}">Ne</button>
@@ -648,10 +694,7 @@ function homeContent(suggestions) {
       <button class="tile add" data-action="add-place" data-key="add"><span class="glyph">${icon('plus')}</span>
         <span><span class="title">Pridėti vietą</span><span class="sub">Kiek tik nori</span></span></button>
     </div>
-    ${state.places.length ? '' : '<p class="footnote">Namai, mokykla, darbas, močiutė: paliesk vietą, ir maršrutas jau skaičiuojamas.</p>'}
-    <div class="group lock-row"><button class="row" data-action="lock"><span class="lead">${icon('lock')}</span>
-      <span class="main"><div class="title">Užrakinti telefoną</div>
-      <div class="sub">Užrakto ekrane — mygtukas, kuris atidaro banerį</div></span></button></div>`;
+    ${state.places.length ? '' : '<p class="footnote">Namai, mokykla, darbas, močiutė: paliesk vietą, ir maršrutas jau skaičiuojamas.</p>'}`;
 }
 
 function searchResultsHtml(action) {
@@ -664,7 +707,7 @@ function searchResultsHtml(action) {
   return `${heard}<div class="group stagger" style="margin-top:14px">${items.map((item, i) => `
     <button class="row" data-action="${action}" data-index="${i}" data-key="${esc(item.saved ? `saved-${item.id}` : placeKey(item))}">
       <span class="lead">${placeIcon(item)}</span>
-      <span class="main"><div class="title">${esc(item.name)}</div><div class="sub">${esc(placeSubtitle(item))}</div></span>
+      <span class="main"><div class="title">${esc(nameCase(item.name))}</div><div class="sub">${esc(placeSubtitle(item))}</div></span>
     </button>`).join('')}</div>`;
 }
 
@@ -723,17 +766,20 @@ const leaveCaption = (o) => (isLate(o)
   ? '<div class="cap late">Reikėjo išeiti</div>'
   : `<div class="cap">Išeik ${esc(inText(new Date(o.leave.iso).getTime()))}</div>`);
 
+/* A row like Apple Maps' transit rows: the time span and how long, the
+   vehicles, one line of detail. Where to board is on the route screen. The
+   first row is the recommended one, and only it says why. */
 function optionCard(o, i) {
-  const meta = o.walk_only ? `${metresText(o.walk_m)} pėsčiomis`
-    : `${metresText(o.walk_m)} pėsčiomis · ${transfersText(o.transfers)}${o.first_stop ? ` · nuo „${esc(o.first_stop)}“` : ''}`;
+  const when = isLate(o) ? '<span class="late">Reikėjo išeiti</span>' : `Išeik ${esc(inText(new Date(o.leave.iso).getTime()))}`;
+  const meta = [when, `${metresText(o.walk_m)} pėsčiomis`, o.walk_only ? '' : transfersText(o.transfers)].filter(Boolean).join(' · ');
   return `<button class="option${isLate(o) ? ' late' : ''}" data-action="open-option" data-index="${i}" data-key="${esc(o.id)}">
       <div class="top">
-        <div>${leaveCaption(o)}<div class="leave">${esc(o.leave.hm)}</div></div>
-        <div class="right"><div class="dur">${o.duration_min} min</div><div class="cap">atvyksi ${esc(o.arrive.hm)}</div></div>
+        <div class="span">${esc(o.leave.hm)}–<span class="${o.late ? 'late' : ''}">${esc(o.arrive.hm)}</span></div>
+        <div class="dur">${o.duration_min} min</div>
       </div>
       <div class="route-line">${routeLine(o)}</div>
       <div class="meta">${meta}</div>
-      ${o.tags && o.tags.length ? `<div class="tags">${o.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+      ${i === 0 && o.tags && o.tags.length ? `<div class="tags">${o.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
     </button>`;
 }
 
@@ -744,9 +790,7 @@ function resultsView() {
   else if (state.planError) body = `<p class="footnote error-text">${esc(state.planError)}</p>`;
   else if (state.plan && !state.plan.options.length) body = '<p class="footnote">Maršruto šiuo laiku nerasta. Pabandyk kitą laiką.</p>';
   else if (state.plan) {
-    const allLate = state.plan.options.every(isLate);
-    body = `${allLate && state.timeMode === 'arrive' ? `<p class="footnote error-text reveal" style="margin-top:16px">Iki ${esc(state.timeValue)} nebespėsi: visi keliai prasideda anksčiau nei dabar. Pasirink „Dabar“ — parodysiu greičiausią.</p>` : ''}
-      <div class="options stagger">${state.plan.options.map(optionCard).join('')}</div>`;
+    body = `${lateNotice(state.plan)}<div class="options stagger">${state.plan.options.map(optionCard).join('')}</div>`;
   } else body = '';
   const from = origin();
   return `<div class="nav">${navBar({ back: true, title: place ? place.name : '' })}</div>
@@ -756,6 +800,28 @@ function resultsView() {
       ${timeControls()}
       ${body}
     </div>`;
+}
+
+/* "Be there by 9" that cannot be kept. The options below are then the
+   fastest from now, so say by how much they miss, not "leave now". */
+function lateNotice(plan) {
+  if (state.timeMode !== 'arrive') return '';
+  const by = esc(state.timeValue);
+  if (plan.late) {
+    const first = earliest(plan.options.filter((o) => !isLate(o)));
+    return `<div class="late-note reveal" data-key="late" role="status">
+        <div class="late-title">Nespėsi iki ${by}</div>
+        ${first ? `<p>Anksčiausiai atvyksi ${esc(first.arrive.hm)}${plan.late_by_min ? `, ${plan.late_by_min} min vėliau` : ''}.</p>` : ''}
+      </div>`;
+  }
+  // A server that does not know "now" yet sends trips that have left.
+  if (plan.options.length && plan.options.every(isLate)) {
+    return `<div class="late-note reveal" data-key="late" role="status">
+        <div class="late-title">Nespėsi iki ${by}</div>
+        <p>Visi šie keliai turėjo prasidėti anksčiau. Pasirink „Dabar“ — parodysiu greičiausią.</p>
+      </div>`;
+  }
+  return '';
 }
 
 async function runPlan() {
@@ -773,6 +839,7 @@ async function runPlan() {
 
 function openDestination(place) {
   state.destination = place;
+  state.searchActive = false;
   state.query = ''; state.results = []; state.heard = '';
   if (currentScreen().name !== 'results') state.stack.push({ name: 'results', id: uid() });
   runPlan();
@@ -788,13 +855,15 @@ function detailView() {
     if (leg.kind === 'ride') {
       const between = leg.stops.slice(1, -1).map((s) => esc(s.name)).join(' · ');
       const open = !!state.openStops[i];
+      // Names stay in the nominative after a colon; "išlipk „X“" would not.
       what = `<div class="route-line">${badge(leg.route)} <span class="headsign">${esc(leg.headsign || '')}</span></div>
-        <div class="sub">Lipk „${esc(leg.from.name)}“ · išlipk „${esc(leg.to.name)}“ ${esc(leg.arrival.hm)}</div>
+        <div class="sub">Įlipk: ${esc(leg.from.name)}</div>
+        <div class="sub">Išlipk: ${esc(leg.to.name)} · ${esc(leg.arrival.hm)}</div>
         ${between ? `<button class="stops-toggle" data-action="toggle-stops" data-index="${i}" aria-expanded="${open}">${stopsText(leg.stop_count)}${icon('chevron')}</button>
           ${open ? `<div class="stops reveal">${between}</div>` : ''}` : `<div class="sub">${stopsText(leg.stop_count)}</div>`}`;
       seg = `<b class="seg" style="background:#${esc(leg.route.color)}"></b>`;
     } else {
-      const target = leg.to.stop == null ? `iki „${esc(leg.to.name)}“` : (leg.from.name === leg.to.name ? 'į kitą tos pačios stotelės peroną' : `į stotelę „${esc(leg.to.name)}“`);
+      const target = leg.to.stop == null ? 'iki tikslo' : (leg.from.name === leg.to.name ? 'į kitą tos pačios stotelės peroną' : `į stotelę „${esc(leg.to.name)}“`);
       what = `<div>Eik ${target}</div><div class="sub">${metresText(leg.metres)} · ${leg.minutes} min</div>`;
       seg = '<b class="seg walk"></b>';
     }
@@ -804,7 +873,7 @@ function detailView() {
       <div class="what">${what}</div>
     </div>`;
   }).join('') + `<div class="step"><div class="t">${esc(o.arrive.hm)}</div><div class="rail"><i class="node end"></i></div>
-      <div class="what">Atvyksti į „${esc(state.destination ? state.destination.name : '')}“</div></div>`;
+      <div class="what"><b class="arrive-name">${esc(state.destination ? state.destination.name : '')}</b></div></div>`;
 
   const running = state.trip && state.trip.option.id === o.id && state.trip.option.leave.iso === o.leave.iso;
   return `<div class="nav">${navBar({ back: true, title: 'Maršrutas', always: true })}</div>
@@ -812,7 +881,7 @@ function detailView() {
       <div id="map" class="map" data-morph="keep"></div>
       <div class="summary">
         <div>${leaveCaption(o)}<div class="leave${isLate(o) ? ' late' : ''}">${esc(o.leave.hm)}</div></div>
-        <div class="right"><div class="dur">${o.duration_min} min</div><div class="cap">atvyksi ${esc(o.arrive.hm)}</div></div>
+        <div class="right"><div class="dur">${o.duration_min} min</div><div class="cap${o.late ? ' late' : ''}">atvyksi ${esc(o.arrive.hm)}</div></div>
       </div>
       <div class="summary-meta">${metresText(o.walk_m)} pėsčiomis · ${transfersText(o.transfers)}</div>
       <div class="timeline">${steps}</div>
@@ -830,6 +899,8 @@ function drawMap() {
   if (map && map.getContainer() === el && mapFor === o) return;
   if (map) { map.remove(); map = null; }
   map = L.map(el, { zoomControl: false, attributionControl: true });
+  // Plain text: the only colour on the map is the route's own.
+  map.attributionControl.setPrefix('Leaflet');
   mapFor = o;
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '© OpenStreetMap',
@@ -896,7 +967,7 @@ function pickView(screen) {
     <div class="content">
       <h1 class="large title2">${title}</h1>
       <label class="search">${icon('search')}
-        <input id="search" type="search" placeholder="Adresas, vieta ar stotelė" value="${esc(state.query)}" autocomplete="off" aria-label="Paieška"></label>
+        <input id="search" type="search" placeholder="Adresas, vieta ar stotelė" value="${esc(state.query)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Paieška"></label>
       <div id="pick-content">${state.query.trim().length >= 2 ? searchResultsHtml('picked') : pickContent()}</div>
     </div>`;
 }
@@ -1013,8 +1084,9 @@ function straightMetres(a, b) {
   return Math.hypot(dx, dy);
 }
 
-const COMPASS = ['šiaurė', 'šiaurės rytai', 'rytai', 'pietryčiai', 'pietūs', 'pietvakariai', 'vakarai', 'šiaurės vakarai'];
-const compassWord = (deg) => COMPASS[Math.round(deg / 45) % 8];
+// Which way, as the rider would say it: "į šiaurės vakarus".
+const TOWARDS = ['į šiaurę', 'į šiaurės rytus', 'į rytus', 'į pietryčius', 'į pietus', 'į pietvakarius', 'į vakarus', 'į šiaurės vakarus'];
+const towards = (deg) => TOWARDS[Math.round(deg / 45) % 8];
 
 /* The needle turns the short way round: 350° to 10° is 20°, not 340°. */
 const needleTurns = {};
@@ -1071,9 +1143,22 @@ function activityContent(where) {
 
   switch (b.stage) {
     case 'ask':
+      // Without a microphone the question stays, and writing is the way on:
+      // not speaking is a first-class path, not a dead end.
       return `<div class="question">Kur keliausime šiandien?${state.listening === 'lock' ? dotsHtml : ''}</div>
-        <div class="heard">${state.interim ? `„${esc(state.interim)}“` : state.listening === 'lock' ? 'Klausau…' : 'Paliesk, kad rašytum'}</div>
-        ${actions([['Rašyti', 'banner-open-search'], ['Atšaukti', 'banner-cancel']])}`;
+        <div class="heard">${b.problem ? esc(b.problem) : state.interim ? `„${esc(state.interim)}“` : state.listening === 'lock' ? 'Klausau…' : 'Paliesk, kad rašytum'}</div>
+        ${b.problem
+          ? actions([['Rašyti', 'banner-open-search', true], ['Bandyti dar', 'lock-button']])
+          : actions([['Rašyti', 'banner-open-search'], ['Atšaukti', 'banner-cancel']])}`;
+    case 'late':
+      // "Be there by 9" that cannot be kept: say so, and offer the earliest
+      // arrival there is instead of a trip that should have started already.
+      return `<div class="question small problem-text">Nespėsi iki ${esc(b.by)}</div>
+        <div class="heard">${b.option
+          ? `Anksčiausiai atvyksi ${esc(b.option.arrive.hm)}${b.lateBy ? `, ${b.lateBy} min vėliau` : ''}`
+          : `Galiu parodyti greičiausią kelią dabar.`}</div>
+        ${b.option ? actions([['Važiuoti', 'banner-go-late', true], ['Atšaukti', 'banner-cancel']])
+          : actions([['Dabar', 'banner-now', true], ['Atšaukti', 'banner-cancel']])}`;
     case 'thinking':
       return `<div class="question">Ieškau maršruto${dotsHtml}</div><div class="heard">„${esc(b.heard || '')}“</div>`;
     case 'choosePlace':
@@ -1088,18 +1173,18 @@ function activityContent(where) {
         ${actions([['Dabar', 'banner-now', true], ['Planuoti', 'banner-plan']])}`;
     case 'askTime':
       return `<div class="question">Kada turi būti vietoje?${state.listening === 'lock' ? dotsHtml : ''}</div>
-        <div class="heard">${state.interim ? `„${esc(state.interim)}“` : `${esc(b.place.name)} · pasakyk laiką, pvz., „keturiolika dvidešimt“`}</div>
-        ${actions([['Dabar', 'banner-now'], ['Atšaukti', 'banner-cancel']])}`;
+        <div class="heard">${b.problem ? esc(b.problem) : state.interim ? `„${esc(state.interim)}“` : `${esc(b.place.name)} · pasakyk laiką, pvz., „keturiolika dvidešimt“`}</div>
+        ${actions([['Dabar', 'banner-now', !!b.problem], b.problem ? ['Bandyti dar', 'banner-plan'] : ['Atšaukti', 'banner-cancel']])}`;
     case 'error':
       return `<div class="question small">${esc(b.message)}</div>
         ${b.detail ? `<div class="heard wrap">${esc(b.detail)}</div>` : ''}
         ${b.code === 'no-origin' ? actions([['Pasirinkti vietą', 'banner-pick-origin', true], ['Atšaukti', 'banner-cancel']])
-          : b.code === 'late' ? actions([['Dabar', 'banner-now', true], ['Atšaukti', 'banner-cancel']])
-            : actions([['Bandyti dar', 'banner-retry', true], ['Atšaukti', 'banner-cancel']])}`;
+          : actions([['Bandyti dar', 'banner-retry', true], ['Rašyti', 'banner-open-search']])}`;
     case 'saved':
       return `<div class="question small">Išsaugota: ${esc(b.name)}</div>`;
     case 'suggestSave':
-      return `<div class="question small">Dažnai važiuoji į „${esc(b.name)}“. Išsaugoti?</div>
+      return `<div class="question small">Išsaugoti šią vietą?</div>
+        <div class="heard">${esc(b.name)} · važiuoji čia dažnai</div>
         ${actions([['Išsaugoti', 'banner-save', true], ['Ne', 'banner-nosave']])}`;
     case 'trip':
       return tripContent(at, actions, where);
@@ -1108,27 +1193,45 @@ function activityContent(where) {
   }
 }
 
-const PAGES = ['Dabar', 'Kryptis', 'Visa kelionė'];
+const PAGES = ['Dabar', 'Kryptis', 'Maršrutas'];
+
+/* The page the banner shows. A new stage is a new instruction, so it opens
+   on "Dabar" again: the rider never misses "Ruoškis išlipti" because the
+   compass was left up. */
+const stageOf = (phase) => `${phase.kind}:${phase.i ?? ''}`;
+function pageOf(trip, phase) {
+  if (trip.pageStage !== stageOf(phase)) {
+    trip.pageStage = stageOf(phase);
+    trip.page = 0;
+  }
+  return trip.page || 0;
+}
+
+// The first two minutes of the first walk are "leave now": the prototype
+// has no location, and that is the moment the rider must be told to go.
+const LEAVE_NOW_MS = 2 * 60_000;
+const leavingNow = (trip, phase, at) => phase.kind === 'walk' && phase.i === 0
+  && !!nextRide(trip.option.legs, 1) && at - t(phase.leg.departure) < LEAVE_NOW_MS;
 
 /* Identity of what the banner shows. When it changes the content cross-fades;
    when it stays, only the numbers inside it move. */
 function activityKey() {
   const b = state.banner;
   if (!b) return '';
-  if (b.stage !== 'trip' || !state.trip) return b.stage;
+  if (b.stage !== 'trip' || !state.trip) return b.problem ? `${b.stage}:problem` : b.stage;
   const at = now().getTime();
   const phase = phaseOf(state.trip, at);
   if (phase.kind === 'arrived') return `arrived:${state.trip.snoozeUntil > at}`;
-  return `trip:${phase.kind}:${phase.i ?? ''}|${state.trip.page || 0}`;
+  return `trip:${stageOf(phase)}${leavingNow(state.trip, phase, at) ? ':now' : ''}|${pageOf(state.trip, phase)}`;
 }
 
+/* One button that names the next page. No dots: a Live Activity cannot be
+   swiped, so nothing should look as if it could. */
 function activityPager() {
   const b = state.banner, trip = state.trip;
   if (!b || b.stage !== 'trip' || !trip || phaseOf(trip, now().getTime()).kind === 'arrived') return '';
-  const page = trip.page || 0;
-  const next = (page + 1) % PAGES.length;
-  return `<div class="dots">${PAGES.map((name, i) => `<button class="dot" data-action="banner-page" data-page="${i}" aria-label="${esc(name)}"${i === page ? ' aria-current="true"' : ''}><i></i></button>`).join('')}</div>
-    <button class="pager-next" data-action="banner-page" data-page="${next}" aria-label="Rodyti: ${esc(PAGES[next])}">${esc(PAGES[next])}${icon('chevron')}</button>`;
+  const next = (pageOf(trip, phaseOf(trip, now().getTime())) + 1) % PAGES.length;
+  return `<button class="pager-next" data-action="banner-page" data-page="${next}" aria-label="Rodyti: ${esc(PAGES[next])}">${esc(PAGES[next])}${icon('chevron')}</button>`;
 }
 
 function tripContent(at, actions, where) {
@@ -1145,117 +1248,145 @@ function tripContent(at, actions, where) {
       <div class="heard">${esc(trip.place.name)} · ${esc(o.arrive.hm)}</div>
       ${actions([['Taip', 'trip-done', true], ['Dar ne', 'trip-snooze']])}`;
   }
-  const page = trip.page || 0;
+  const page = pageOf(trip, phase);
   if (page === 1) return directionPage(trip, phase, at, where);
-  if (page === 2) return wholeTripPage(trip, phase);
+  if (page === 2) return routePage(trip, phase);
   return nowPage(trip, phase, at);
 }
+
+/* One template for every stage, so nothing moves between them. Left: what to
+   do, then where. Right: how long until the next thing happens, and what and
+   when that is. The bottom line holds the distance or the ride's progress,
+   beside the page button. Three type sizes: the number, the instruction,
+   everything else. */
+function stageHtml({ title, meta = '', label = '', hero = '', long = false, foot = '' }) {
+  return `<div class="stage">
+      <div class="stage-text"><div class="stage-title">${title}</div><div class="stage-meta">${meta}</div></div>
+      <div class="stage-hero"><div class="stage-label">${label}</div><div class="big${long ? ' hours' : ''}">${hero}</div></div>
+    </div>
+    <div class="stage-foot">${foot}</div>`;
+}
+const clip = (html) => `<span class="clip">${html}</span>`;
+const distanceHtml = (m) => `${roll(roundMetres(m))} ${m >= 1000 ? 'km' : 'm'}`;
+const progressHtml = (f) => `<div class="progress"><i style="width:${(clamp01(f) * 100).toFixed(1)}%"></i></div>`;
+// Counts to the minute that is shown beside it: "išeik 08:01" never sits
+// over "2 min" at 08:00 because the plan said 08:01:40.
+const countdown = (ms, at) => {
+  const m = ms > at ? Math.max(1, minutesUntil(Math.floor(ms / 60_000) * 60_000, at)) : 0;
+  return { hero: durationHtml(m), long: m >= 60 };
+};
 
 // Page 1: what to do now.
 function nowPage(trip, phase, at) {
   const o = trip.option;
   const legs = o.legs;
-  const dest = `<span class="dest">${esc(trip.place.name)} ${esc(o.arrive.hm)}</span>`;
-  const row2 = `<div class="row2"><div class="route-line">${routeLine(o, true)}</div>${dest}</div>`;
 
   if (phase.kind === 'before') {
     const leave = t(legs[0].departure);
-    const left = minutesUntil(leave, at);
-    return `<div class="top">
-        <div><div class="caption">Išeik${dayWord(leave)}</div><div class="big">${esc(o.leave.hm)}</div></div>
-        <div class="right"><div class="caption">Liko</div><div class="big${left >= 60 ? ' hours' : ''}">${durationHtml(left)}</div></div>
-      </div>${row2}`;
+    const ride = nextRide(legs, 0);
+    const walk = legs[0].kind === 'walk' ? legs[0] : null;
+    return stageHtml({
+      title: `Išeik${esc(dayWord(leave))} ${esc(o.leave.hm)}`,
+      meta: ride ? `${badge(ride.route, true)}${clip(esc(ride.from.name))}` : clip(esc(trip.place.name)),
+      label: 'liko',
+      ...countdown(leave, at),
+      foot: clip([walk ? `${metresText(walk.metres)} pėsčiomis` : '', ride ? `išvyksta ${esc(ride.departure.hm)}` : `atvyksi ${esc(o.arrive.hm)}`]
+        .filter(Boolean).join(' · ')),
+    });
   }
 
   const leg = phase.leg;
   if (phase.kind === 'wait') {
-    return `<div class="top">
-        <div><div class="caption">Lauk stotelėje</div><div class="instruction">${esc(leg.from.name)}</div>
-          <div class="heard">→ ${esc(leg.headsign || '')} · ${esc(leg.departure.hm)}</div></div>
-        <div class="right"><div class="route-line end">${badge(leg.route, true)}</div>
-          <div class="big mid">${durationHtml(minutesUntil(t(leg.departure), at))}</div></div>
-      </div>`;
-  }
-  if (phase.kind === 'ride') {
-    const remaining = leg.stops.filter((s) => t(s.time) > at).length;
-    const progress = clamp01((at - t(leg.departure)) / (t(leg.arrival) - t(leg.departure)));
-    return `<div class="top">
-        <div><div class="route-line">${badge(leg.route)} <span class="instruction">${esc(leg.headsign || '')}</span></div>
-          <div class="heard">Išlipk „${esc(leg.to.name)}“ · po ${stopsAfterText(Math.max(1, remaining))}</div></div>
-        <div class="right"><div class="caption">Išlipk</div><div class="big mid">${esc(leg.arrival.hm)}</div></div>
-      </div>
-      <div class="progress"><i style="width:${(progress * 100).toFixed(1)}%"></i></div>`;
+    const transfer = phase.i > 0 && legs[phase.i - 1].kind === 'ride';
+    return stageHtml({
+      title: transfer ? 'Persėsk' : 'Lauk stotelėje',
+      meta: `${badge(leg.route, true)}${clip(esc(leg.from.name))}`,
+      label: `išvyksta ${esc(leg.departure.hm)}`,
+      ...countdown(t(leg.departure), at),
+      foot: leg.headsign ? clip(`→ ${esc(leg.headsign)}`) : '',
+    });
   }
 
-  // Walking: to the first stop, between vehicles, or to the destination.
-  const last = phase.i === legs.length - 1;
-  const ride = nextRide(legs, phase.i + 1);
-  const g = guidance(trip, phase, at);
-  if (last || !ride) {
-    return `<div class="top">
-        <div><div class="caption">Liko nueiti</div><div class="instruction">${esc(trip.place.name)}</div>
-          <div class="heard">${pointer(g.deg)}${metresText(g.metres)}</div></div>
-        <div class="right"><div class="caption">Atvyksi</div><div class="big mid">${esc(o.arrive.hm)}</div></div>
-      </div>`;
+  if (phase.kind === 'ride') {
+    const remaining = Math.max(1, leg.stops.filter((s) => t(s.time) > at).length);
+    return stageHtml({
+      title: remaining === 1 ? 'Ruoškis išlipti' : `Važiuok ${stopsAccText(remaining)}`,
+      meta: `${badge(leg.route, true)}${clip(`iki stotelės „${esc(leg.to.name)}“`)}`,
+      label: `išlipsi ${esc(leg.arrival.hm)}`,
+      ...countdown(t(leg.arrival), at),
+      foot: progressHtml((at - t(leg.departure)) / Math.max(1, t(leg.arrival) - t(leg.departure))),
+    });
   }
-  const busIn = minutesUntil(t(ride.departure), at);
-  const title = phase.i === 0 ? 'Eik į stotelę' : 'Persėdimas · eik į stotelę';
-  return `<div class="top">
-      <div><div class="caption">${title}</div><div class="instruction">${esc(leg.to.name)}</div>
-        <div class="heard">${pointer(g.deg)}${metresText(g.metres)} · išvyksta ${esc(ride.departure.hm)}</div></div>
-      <div class="right"><div class="route-line end">${badge(ride.route, true)}</div>
-        <div class="big mid">${durationHtml(busIn)}</div></div>
-    </div>`;
+
+  // Walking: to the first stop, between vehicles, or to the destination. The
+  // distance is what is left of this walk, so it only ever goes down.
+  const g = guidance(trip, phase, at);
+  const foot = clip(`${pointer(g.deg)}${distanceHtml(g.metres)}`);
+  const ride = nextRide(legs, phase.i + 1);
+  if (!ride) {
+    return stageHtml({
+      title: 'Eik pėsčiomis',
+      meta: clip(esc(trip.place.name)),
+      label: `atvyksi ${esc(o.arrive.hm)}`,
+      ...countdown(t(o.arrive), at),
+      foot,
+    });
+  }
+  let title = 'Eik į stotelę';
+  if (phase.i > 0) title = 'Persėsk';
+  else if (leavingNow(trip, phase, at)) title = 'Išeik dabar';
+  return stageHtml({
+    title,
+    meta: `${badge(ride.route, true)}${clip(esc(ride.from.name))}`,
+    label: `išvyksta ${esc(ride.departure.hm)}`,
+    ...countdown(t(ride.departure), at),
+    foot,
+  });
 }
 
 // Page 2: which way. Walking, towards the next stop or the destination;
 // riding, the direction of travel and the next stop.
 function directionPage(trip, phase, at, where) {
   const g = guidance(trip, phase, at);
+  const view = (inner, title, meta) => `<div class="dir">
+      <div class="compass"><span class="north">Š</span>${inner}</div>
+      <div class="stage-text"><div class="stage-title">${title}</div><div class="stage-meta">${meta}</div></div>
+    </div><div class="stage-foot"></div>`;
   if (phase.kind === 'wait') {
     const leg = phase.leg;
-    return `<div class="dir">
-        <div class="compass"><span class="north">Š</span>${needle(where, g.deg)}</div>
-        <div><div class="caption">Autobusas važiuos</div><div class="instruction">${capital(compassWord(g.deg))}</div>
-          <div class="heard">→ ${esc(leg.headsign || '')}</div></div>
-        <div class="right"><div class="caption">Liko</div><div class="big mid">${durationHtml(minutesUntil(t(leg.departure), at))}</div></div>
-      </div>`;
+    return view(needle(where, g.deg), capital(towards(g.deg)), `${badge(leg.route, true)}${clip(`→ ${esc(leg.headsign || leg.to.name)}`)}`);
   }
   if (g.mode === 'ride') {
-    return `<div class="dir">
-        <div class="compass"><span class="north">Š</span>${needle(where, g.deg)}</div>
-        <div><div class="caption">Kita stotelė</div><div class="instruction">${esc(g.next)}</div>
-          <div class="heard">Kryptis: ${compassWord(g.deg)}</div></div>
-        <div class="right"><div class="caption">Liko</div><div class="big mid">${durationHtml(g.minutes)}</div></div>
-      </div>`;
+    return view(needle(where, g.deg), capital(towards(g.deg)), clip(`Kita stotelė: ${esc(g.next)} · ${g.minutes} min`));
   }
-  const arrived = g.straight < 15 || g.metres < 15;
-  const target = g.toStop ? `į stotelę „${esc(g.target)}“` : `iki „${esc(g.target)}“`;
-  return `<div class="dir">
-      <div class="compass"><span class="north">Š</span>${arrived ? '<i class="here"></i>' : needle(where, g.deg)}</div>
-      <div><div class="caption">Kryptis</div><div class="instruction">${arrived ? 'Tu jau čia' : capital(compassWord(g.deg))}</div>
-        <div class="heard">${target}</div></div>
-      ${arrived ? '' : `<div class="right"><div class="caption">Liko</div><div class="big mid">${metresHtml(g.metres)}</div></div>`}
-    </div>`;
+  if (g.straight < 15 || g.metres < 15) return view('<i class="here"></i>', 'Tu jau čia', clip(esc(g.target)));
+  return view(needle(where, g.deg), capital(towards(g.deg)), clip(`${esc(g.target)} · ${distanceHtml(g.metres)}`));
 }
 
-// Page 3: the whole trip, the current leg lit.
-function wholeTripPage(trip, phase) {
+// Page 3: now, next, arrival. Three lines fit a Live Activity; the whole
+// list lives in the app, one tap away.
+function routePage(trip, phase) {
   const o = trip.option;
-  const current = phase.kind === 'before' ? -1 : phase.i;
-  const rows = [];
-  o.legs.forEach((leg, i) => {
-    // A 50 m shuffle to the next platform is not a step worth a line.
-    if (leg.kind === 'walk' && leg.metres < 120 && o.legs.length > 1 && i !== current) return;
-    const cls = i < current ? ' past' : i === current ? ' now' : '';
-    const glyph = leg.kind === 'ride' ? badge(leg.route, true) : icon('walk');
-    const text = leg.kind === 'ride'
-      ? `iki „${esc(leg.to.name)}“`
-      : `${leg.to.stop == null ? 'iki' : 'į'} „${esc(leg.to.name)}“ · ${metresText(leg.metres)}`;
-    rows.push(`<div class="leg-row${cls}"><span class="t">${esc(leg.departure.hm)}</span><span class="glyph">${glyph}</span><span class="text">${text}</span></div>`);
-  });
-  rows.push(`<div class="leg-row"><span class="t">${esc(o.arrive.hm)}</span><span class="glyph">${icon('pin')}</span><span class="text">Atvyksti · ${esc(trip.place.name)}</span></div>`);
-  return `<div class="legs">${rows.join('')}</div>`;
+  const legs = o.legs;
+  const current = phase.kind === 'before' ? 0 : phase.i;
+  const row = (leg, cls) => {
+    let glyph = icon('walk'), text;
+    if (leg.kind === 'ride') {
+      glyph = badge(leg.route, true);
+      text = `iki stotelės „${esc(leg.to.name)}“`;
+    } else if (leg.to.stop == null) {
+      text = `${metresText(leg.metres)} iki tikslo`;
+    } else {
+      text = leg.from.name === leg.to.name ? 'į kitą tos pačios stotelės peroną' : `${metresText(leg.metres)} iki stotelės „${esc(leg.to.name)}“`;
+    }
+    return `<div class="leg-row${cls}"><span class="t">${esc(leg.departure.hm)}</span><span class="glyph">${glyph}</span><span class="text">${text}</span></div>`;
+  };
+  const rows = [row(legs[current], phase.kind === 'before' ? '' : ' now')];
+  // A few metres across the same stop is not a step worth a line.
+  const next = legs.slice(current + 1).find((l) => l.kind === 'ride' || l.metres >= 120);
+  if (next) rows.push(row(next, ''));
+  rows.push(`<div class="leg-row"><span class="t">${esc(o.arrive.hm)}</span><span class="glyph">${icon('pin')}</span><span class="text">${esc(trip.place.name)}</span></div>`);
+  return `<div class="legs">${rows.join('')}</div><div class="stage-foot"></div>`;
 }
 
 function islandCompact() {
@@ -1307,6 +1438,7 @@ function renderActivity(host, where, { fresh = false } = {}) {
       card.setAttribute('aria-label', 'Kelionės baneris');
     }
     card.innerHTML = '<div class="act-body"></div><div class="act-pager"></div>';
+    card.classList.toggle('trip', key.startsWith('trip:'));
     card.firstChild.innerHTML = body;
     card.lastChild.innerHTML = pager;
     card.dataset.key = key;
@@ -1324,7 +1456,12 @@ function renderActivity(host, where, { fresh = false } = {}) {
     const dx = oldStage === newStage && oldPage !== newPage
       ? ((Number(newPage) - Number(oldPage) + PAGES.length) % PAGES.length === 1 ? 1 : -1) : 0;
     card.dataset.key = key;
-    crossfade(card, bodyEl, () => { bodyEl.innerHTML = body; morph(pagerEl, pager); }, { dx, animateHeight: where === 'lock' });
+    // A trip keeps one height on every stage and page, so the banner's top
+    // edge stays put; only questions and answers around it change size.
+    crossfade(card, bodyEl, () => {
+      card.classList.toggle('trip', key.startsWith('trip:'));
+      bodyEl.innerHTML = body; morph(pagerEl, pager);
+    }, { dx, animateHeight: where === 'lock' });
     return card;
   }
   morph(bodyEl, body);
@@ -1348,7 +1485,7 @@ function renderLock() {
         <button class="control ours" data-action="lock-button" aria-label="Vilnius · Kur keliausime">${icon('bus')}</button>
         <button class="control" aria-label="Kamera" tabindex="-1">${icon('camera')}</button>
       </div>
-      <div class="unlock-hint">Braukite aukštyn arba paspauskite juostelę</div>
+      <div class="unlock-hint">Braukite aukštyn, kad atidarytumėte</div>
       <div class="home-indicator" data-action="unlock" role="button" tabindex="0" aria-label="Atrakinti"></div>`;
   }
   if (state.locked !== lockShown) {
@@ -1365,12 +1502,14 @@ function renderLock() {
   if (dateEl.textContent !== date) dateEl.textContent = date;
   rollTo($('.clock .roll', lock), hm(d));
   const card = renderActivity($('.stack', lock), 'lock');
+  // The system's own hint gives way to a banner, as on the iPhone.
+  lock.classList.toggle('has-activity', !!card);
   // Until the button has been used once, say what it is for.
   const coach = $('.coach', lock);
   const showCoach = !card && !store.get('lockButtonUsed', false);
   if (coach.hidden === showCoach) {
     coach.hidden = !showCoach;
-    coach.innerHTML = showCoach ? 'Paspausk <b>mygtuką apačioje</b> ir pasakyk, kur keliauji.' : '';
+    coach.innerHTML = showCoach ? 'Paspausk <b>mygtuką</b> ir pasakyk, kur keliauji.' : '';
     if (showCoach) play(coach, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'content', { delay: 300, fill: 'backwards' });
   }
 }
@@ -1504,8 +1643,10 @@ function listen(surface, onText) {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   stopListening();
   state.interim = '';
+  // Inside the phone the words are the phone's: no "browser". The panel's
+  // typed field is the desk's stand-in for a microphone.
   if (!Recognition) {
-    failVoice(surface, 'Ši naršyklė neatpažįsta balso. Naudok „Balsas be mikrofono“ šone arba Chrome / Edge.');
+    failVoice(surface, 'Balso atpažinimas nepasiekiamas.');
     return;
   }
   const r = new Recognition();
@@ -1513,7 +1654,11 @@ function listen(surface, onText) {
   r.interimResults = true;
   r.maxAlternatives = 1;
   let finished = false;
+  // Cancelling aborts the recognition, which then reports "aborted": by then
+  // it is no longer the one listening, and has nothing more to say.
+  const stale = () => recognition !== r;
   r.onresult = (event) => {
+    if (stale()) return;
     let text = '', final = false;
     for (const result of event.results) { text += result[0].transcript; if (result.isFinal) final = true; }
     state.interim = text;
@@ -1521,28 +1666,38 @@ function listen(surface, onText) {
     if (final && !finished) { finished = true; stopListening(); onText(text); }
   };
   r.onerror = (event) => {
-    if (finished) return;
+    if (finished || stale()) return;
     finished = true;
     state.listening = null;
+    recognition = null;
     const message = {
-      'not-allowed': 'Naršyklė neleidžia naudoti mikrofono.',
+      'not-allowed': 'Mikrofonas nepasiekiamas.',
+      'service-not-allowed': 'Mikrofonas nepasiekiamas.',
+      'audio-capture': 'Mikrofonas nepasiekiamas.',
       'no-speech': 'Nieko neišgirdau.',
-      'language-not-supported': 'Naršyklė nemoka lietuvių kalbos. Naudok laukelį šone.',
+      'language-not-supported': 'Lietuvių kalbos atpažinimas nepasiekiamas.',
       network: 'Balso atpažinimui reikia interneto.',
-    }[event.error] || `Balso klaida: ${event.error}`;
+    }[event.error] || 'Balso atpažinimas nepasiekiamas.';
     failVoice(surface, message);
   };
-  r.onend = () => { if (!finished) { state.listening = null; renderAll(); } };
+  r.onend = () => { if (!finished && !stale()) { state.listening = null; recognition = null; renderAll(); } };
   recognition = r;
   state.listening = surface;
   state.pendingVoice = onText;
-  try { r.start(); } catch (e) { failVoice(surface, e.message); }
+  try { r.start(); } catch { recognition = null; failVoice(surface, 'Balso atpažinimas nepasiekiamas.'); }
   renderAll();
 }
 
+/* On the lock screen the question stays up with the reason under it, and
+   the banner offers writing instead: see activityContent. */
 function failVoice(surface, message) {
-  if (surface === 'lock') state.banner = { ...state.banner, stage: 'error', message, retry: state.banner && state.banner.stage };
-  else toast(message);
+  if (surface === 'lock' && state.banner && ['ask', 'askTime'].includes(state.banner.stage)) {
+    state.banner = { ...state.banner, problem: message };
+  } else if (surface === 'lock') {
+    state.banner = { stage: 'ask', problem: message };
+  } else {
+    toast(message);
+  }
   renderAll();
 }
 
@@ -1628,9 +1783,17 @@ async function planAndGo(place, mode, time, surface) {
     try {
       const plan = await planTrip(place, mode, time);
       if (!plan.options.length) throw new Error('Maršruto šiuo laiku nerasta.');
+      if (plan.late) {
+        // Nothing gets there in time: the plan is already the fastest way
+        // from now. Say so before starting it.
+        state.banner = { stage: 'late', by: time, option: earliest(plan.options.filter((o) => !isLate(o))), lateBy: plan.late_by_min, place };
+        renderAll();
+        return;
+      }
       const reachable = mode === 'arrive' ? plan.options.find((o) => !isLate(o)) : plan.options[0];
       if (!reachable) {
-        state.banner = { stage: 'error', message: `Iki ${time} nebespėsi.`, detail: `Galiu parodyti greičiausią kelią į „${place.name}“ dabar.`, code: 'late', place };
+        // A server that does not know "now" yet: only the fallback offer.
+        state.banner = { stage: 'late', by: time, option: null, place };
         renderAll();
         return;
       }
@@ -1790,9 +1953,16 @@ const actions = {
     }
     renderAll();
   },
+  'search-cancel': () => {
+    state.searchActive = false; state.query = ''; state.results = []; state.heard = '';
+    const field = inPage('#search');
+    if (field) { field.value = ''; field.blur(); }
+    renderApp();
+  },
   'banner-open-search': () => { stopListening(); state.banner = null; state.locked = false; state.stack = [HOME()]; renderAll(); setTimeout(() => { const s = inPage('#search'); if (s) s.focus(); }, 50); },
   'banner-cancel': () => { stopListening(); state.banner = state.trip ? { stage: 'trip' } : null; renderAll(); },
   'banner-now': () => { const place = state.banner.place; stopListening(); planAndGo(place, 'now', null, 'lock'); },
+  'banner-go-late': () => { const b = state.banner; if (b && b.option) startTrip(b.option, b.place); },
   'banner-plan': () => {
     const place = state.banner.place;
     state.banner = { stage: 'askTime', place };
@@ -1821,6 +1991,7 @@ const actions = {
   'banner-page': (el) => {
     if (!state.trip) return;
     state.trip.page = Number(el.dataset.page) % PAGES.length;
+    state.trip.pageStage = stageOf(phaseOf(state.trip, now().getTime()));
     store.set('trip', state.trip);
     renderLock(); renderIsland();
   },
@@ -1854,7 +2025,7 @@ function askName(item) {
   state.pendingPlace = item;
   state.sheet = `<div class="sheet-backdrop" data-action="close-sheet"><div class="sheet" data-stop="1" role="dialog" aria-label="Kaip pavadinti">
       <h3>Kaip pavadinti?</h3><p>${esc(item.name)}${placeSubtitle(item) ? ` · ${esc(placeSubtitle(item))}` : ''}</p>
-      <input id="new-name" class="time-input name-input" value="${esc(item.name)}" aria-label="Pavadinimas">
+      <input id="new-name" class="time-input name-input" value="${esc(item.name)}" spellcheck="false" autocorrect="off" aria-label="Pavadinimas">
       <div class="buttons"><button class="secondary" style="height:52px" data-action="close-sheet">Atšaukti</button>
       <button class="prominent" data-action="confirm-name">Išsaugoti</button></div></div></div>`;
   renderOverlay();
@@ -1870,6 +2041,14 @@ function readTime(text) {
   const h = Number(digits.slice(0, 2)), m = Number(digits.slice(2));
   return h < 24 && m < 60 ? `${pad(h)}:${pad(m)}` : null;
 }
+
+/* Like iOS search: once the field is in use, the title and the voice card
+   fold away, the field moves up and "Atšaukti" leads back. */
+document.addEventListener('focusin', (event) => {
+  if (event.target.id !== 'search' || currentScreen().name !== 'home' || state.searchActive) return;
+  state.searchActive = true;
+  renderApp();
+});
 
 document.addEventListener('input', (event) => {
   const el = event.target;
@@ -1949,6 +2128,17 @@ lockEl.addEventListener('pointercancel', endSwipe);
 
 // ------------------------------------------------------------------ panel
 
+/* On a phone-sized window the panel sits under the phone, a screen away
+   from it. Whatever is done there shows up in the phone, so go back to it —
+   and let go of the field, so its focus ring does not hold the page down. */
+const stacked = window.matchMedia('(max-width: 800px)');
+function showPhone() {
+  const active = document.activeElement;
+  if (active && active.closest && active.closest('.panel')) active.blur();
+  if (stacked.matches && window.scrollY > 0) window.scrollTo({ top: 0, behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+}
+$('.panel').addEventListener('click', (event) => { if (event.target.closest('button')) showPhone(); });
+
 $('#speed-buttons').addEventListener('click', (event) => {
   const button = event.target.closest('button');
   if (!button) return;
@@ -1984,6 +2174,7 @@ $('#typed-voice').addEventListener('keydown', (event) => {
   const text = event.target.value.trim();
   if (!text) return;
   event.target.value = '';
+  showPhone();
   stopListening();
   state.interim = text;
   if (state.locked) {
@@ -2001,10 +2192,12 @@ $('#origin-select').addEventListener('change', (event) => {
     actions['pick-origin']();
     renderAll();
     fillOrigins();
+    showPhone();
     return;
   }
   state.originChoice = event.target.value;
   save(); renderAll(); fillOrigins();
+  showPhone();
 });
 $('#locate').addEventListener('click', () => locate(true));
 
@@ -2027,7 +2220,7 @@ function fillOrigins() {
   // A trip survives a reload, like a Live Activity survives the app quitting.
   const trip = store.get('trip', null);
   if (trip && new Date(trip.option.arrive.iso).getTime() > Date.now() - 2 * 3600_000) {
-    state.trip = trip;
+    state.trip = { ...trip, option: mergeWalks(trip.option) };
     state.banner = { stage: 'trip' };
   }
   // Once set up, the phone starts locked: the banner is the product, and the
@@ -2043,7 +2236,7 @@ function fillOrigins() {
       const status = $('#server-status');
       if (s.ready) {
         const built = s.built_at ? new Date(s.built_at) : null;
-        state.dataInfo = `${s.stops} stotelių · atnaujinta ${built ? built.toLocaleDateString('lt-LT') : '—'}`;
+        state.dataInfo = `${stopsText(s.stops)} · atnaujinta ${built ? built.toLocaleDateString('lt-LT') : '—'}`;
         status.textContent = `Tvarkaraščiai: ${state.dataInfo}`;
         state.serverReady = true;
         return;

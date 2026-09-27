@@ -1,15 +1,18 @@
-"""The search endpoints over HTTP, offline: recorded Photon, sampled stops."""
+"""The endpoints over HTTP: search offline (recorded Photon, sampled stops),
+planning on the real timetable when it has been downloaded."""
 
 import json
 import threading
 import unittest
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer
 from unittest import mock
 
 import server
 from vc import search
+from tests.test_planner import AKROPOLIS, ISM, TIMETABLE, busy_weekday
 from tests.test_search import KAUNAS, fake_photon, vilnius_index
 
 
@@ -67,6 +70,37 @@ class Endpoints(unittest.TestCase):
         body = self.get("/api/parse", text="Man reikia į Akropolį keturiolika dvidešimt", now="10:00")
         self.assertTrue({"text", "destination", "candidates", "time", "mode", "then", "home", "now"} <= body.keys())
         self.assertEqual((body["candidates"][0], body["time"]), ("Akropolis", "14:20"))
+
+    def test_plan_passes_now_through(self):
+        calls = []
+
+        def fake_plan(*args, **kwargs):
+            calls.append((args, kwargs))
+            return {"options": [], "late": False, "late_by_min": None}
+
+        trip = {"from": "54.68688,25.2827", "to": "54.71051,25.26314", "at": "2026-09-28T09:00:00", "mode": "arrive"}
+        with mock.patch.object(server.planner, "plan", fake_plan):
+            self.get("/api/plan", **trip, now="2026-09-28T08:58:00")
+            self.get("/api/plan", **trip)
+        (args, kwargs), (_, without) = calls
+        self.assertEqual((args[3], args[4]), (datetime(2026, 9, 28, 9, 0), True))
+        self.assertEqual(kwargs["now"], datetime(2026, 9, 28, 8, 58))
+        self.assertIsNone(without["now"])
+
+    @unittest.skipIf(TIMETABLE is None, "timetable not downloaded yet")
+    def test_plan_says_late(self):
+        server.State.timetable = TIMETABLE
+        deadline = busy_weekday().replace(hour=9)
+        body = self.get("/api/plan", **{
+            "from": f"{ISM.lat},{ISM.lon}", "to": f"{AKROPOLIS.lat},{AKROPOLIS.lon}",
+            "at": deadline.isoformat(), "mode": "arrive",
+            "now": (deadline - timedelta(minutes=2)).isoformat(),
+        })
+        self.assertIs(body["late"], True)
+        self.assertGreater(body["late_by_min"], 0)
+        self.assertTrue(body["options"])
+        self.assertTrue(all(o["late"] for o in body["options"]))
+        self.assertGreater(body["options"][0]["arrive"]["iso"], deadline.isoformat())
 
 
 if __name__ == "__main__":

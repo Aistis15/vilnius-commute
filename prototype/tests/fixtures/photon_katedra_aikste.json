@@ -1,0 +1,11 @@
+{
+ "query": "Katedra aikštė",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=Katedra+aik%C5%A1t%C4%97&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-27",
+ "response": {
+  "type": "FeatureCollection",
+  "features": []
+ }
+}

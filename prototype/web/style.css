@@ -164,6 +164,8 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 
 .large { font: 700 34px/1.12 var(--font-display); letter-spacing: 0.1px; margin: 2px 4px 18px; text-wrap: balance; }
 .large.title2 { font-size: 28px; margin-bottom: 2px; }
+/* The home question is one line, as iOS large titles are. */
+.large.one-line { font-size: 28px; white-space: nowrap; }
 .lede { font-size: 15px; color: var(--label2); margin: 0 4px 14px; line-height: 1.4; }
 .from-line { font-size: 15px; color: var(--label2); margin: 0 4px; }
 
@@ -183,6 +185,16 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .voice.listening .voice-disc { animation: breathe 1.4s ease-in-out infinite; }
 @keyframes breathe { 50% { transform: scale(1.09); } }
 
+/* The title and the voice card fold away while searching: the rows
+   collapse to nothing rather than jump, and fade as they go. */
+.collapsible { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--t-push) var(--ease-move), opacity var(--t-fade) var(--ease-out); }
+.collapsible > div { min-height: 0; overflow: hidden; }
+.searching .collapsible { grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--t-push) var(--ease-move), opacity var(--t-quick) var(--ease-in), visibility 0s linear var(--t-push); }
+.search-row { display: flex; align-items: center; margin-top: 12px; }
+.searching .search-row { margin-top: 4px; }
+.search-row .search { flex: 1; min-width: 0; margin-top: 0; }
+.search-cancel { flex: none; max-width: 0; overflow: hidden; opacity: 0; font-size: 17px; white-space: nowrap; transition: max-width var(--t-content) var(--ease-out), padding var(--t-content) var(--ease-out), opacity var(--t-fade) var(--ease-out); }
+.searching .search-cancel { max-width: 100px; padding-left: 12px; opacity: 1; }
 .search {
   display: flex; align-items: center; gap: 8px; height: 44px; border-radius: 12px; margin-top: 12px;
   background: var(--fill); padding: 0 12px; color: var(--label2);
@@ -217,6 +229,7 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .row .trail .icon { font-size: 17px; }
 .row .check { color: var(--label); font-size: 19px; }
 .footnote { font-size: 13px; color: var(--label2); margin: 8px 16px 0; line-height: 1.4; }
+.footnote.inset { margin: 12px 4px 0; }
 .error-text { color: var(--red); }
 .heard-line { font-size: 15px; color: var(--label2); margin: 16px 4px 0; line-height: 1.4; }
 .heard-line b { color: var(--label); font-weight: 600; }
@@ -233,7 +246,6 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .tile.add { background: var(--fill); }
 .tile.add .glyph { color: var(--label); }
 
-.lock-row { margin-top: 28px; }
 
 .notice { background: var(--card); border-radius: 16px; padding: 14px 16px 16px; margin-top: 16px; }
 .notice-title { display: flex; align-items: center; gap: 8px; font-weight: 600; }
@@ -284,7 +296,7 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 /* ---------- Press feedback ----------
    Pressing answers in 90 ms, letting go settles in 240 ms. Rows darken like
    iOS table cells; cards and buttons give a little. No hover scaling. */
-.row, .tile, .option, .choice, .prominent, .secondary, .voice, .chip, .icon-button, .back, .stops-toggle, .dot, .pager-next, .choices button, .link-button, .activity .actions button {
+.row, .tile, .option, .choice, .prominent, .secondary, .voice, .chip, .icon-button, .back, .stops-toggle, .pager-next, .choices button, .link-button, .activity .actions button {
   transition: transform var(--t-release) var(--ease-out), background-color var(--t-release) var(--ease-out), border-color var(--t-release) var(--ease-out), opacity var(--t-release) var(--ease-out);
 }
 :is(.row, .tile, .option, .choice, .prominent, .secondary, .voice, .chip, .icon-button, .back, .stops-toggle, .pager-next, .choices button, .link-button, .activity .actions button):active { transition-duration: var(--t-press); }
@@ -314,17 +326,18 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 
 /* ---------- Trip option ---------- */
 .options { margin-top: 16px; }
-.option { background: var(--card); border-radius: 16px; padding: 14px 16px 14px; margin-top: 10px; width: 100%; text-align: left; display: block; }
+.option { background: var(--card); border-radius: 16px; padding: 12px 16px 13px; margin-top: 10px; width: 100%; text-align: left; display: block; }
 .option:first-child { margin-top: 0; }
-.option .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
-.option .cap { font-size: 13px; color: var(--label2); font-variant-numeric: tabular-nums; }
-.cap.late { color: var(--red); }
-.option.late .leave, .summary .leave.late { color: var(--label2); }
-.option .leave { font: 600 26px/1.1 var(--font-display); font-variant-numeric: tabular-nums; margin-top: 1px; }
-.option .right { text-align: right; }
-.option .dur { font: 600 17px var(--font); font-variant-numeric: tabular-nums; }
-.option .route-line { margin-top: 12px; }
-.option .meta { font-size: 14px; color: var(--label2); margin-top: 8px; font-variant-numeric: tabular-nums; line-height: 1.35; }
+.option .top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.option .span, .option .dur { font: 600 17px var(--font); font-variant-numeric: tabular-nums; }
+.cap.late, .option .late { color: var(--red); }
+.summary .leave.late { color: var(--label2); }
+.option .route-line { margin-top: 9px; }
+.option .meta { font-size: 13px; color: var(--label2); margin-top: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* "You will not make it": a problem, so the one red heading on the screen. */
+.late-note { margin: 16px 4px 0; }
+.late-title { font: 600 17px var(--font); color: var(--red); }
+.late-note p { margin: 2px 0 0; font-size: 15px; color: var(--label2); font-variant-numeric: tabular-nums; }
 .tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .tag { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: var(--fill); color: var(--label); }
 .loading { display: flex; align-items: center; gap: 2px; margin-top: 18px; }
@@ -332,6 +345,15 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 
 /* ---------- Trip detail ---------- */
 .map { height: 210px; border-radius: 16px; overflow: hidden; margin-top: 4px; background: var(--fill); position: relative; z-index: 0; isolation: isolate; }
+/* A monochrome base under the route: the tiles lose their colour, and in
+   dark mode turn dark, so only the transit line is saturated. */
+.map .leaflet-tile-pane { filter: grayscale(1) contrast(0.92); }
+.map .leaflet-control-attribution { background: color-mix(in srgb, var(--card) 80%, transparent); color: var(--label2); font-size: 10px; }
+.map .leaflet-control-attribution a { color: inherit; }
+:root[data-theme="dark"] .map .leaflet-tile-pane { filter: grayscale(1) invert(1) brightness(0.9) contrast(0.85); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .map .leaflet-tile-pane { filter: grayscale(1) invert(1) brightness(0.9) contrast(0.85); }
+}
 .summary { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin: 16px 4px 0; }
 .summary .cap { font-size: 13px; color: var(--label2); }
 .summary .leave { font: 700 28px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
@@ -354,7 +376,12 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .stops-toggle .icon { transition: transform var(--t-content) var(--ease-out); }
 .stops-toggle[aria-expanded="true"] .icon { transform: rotate(90deg); }
 .step .stops { font-size: 13px; color: var(--label2); margin-top: 6px; line-height: 1.55; }
-.sticky-bottom { position: sticky; bottom: 0; z-index: 2; padding: 14px 0 10px; background: var(--page); margin-top: 6px; }
+/* The button sits on a solid bar the width of the screen, down to its
+   bottom edge, so rows pass under it rather than behind a floating pill. */
+.sticky-bottom { position: sticky; bottom: 0; z-index: 2; margin: 8px -16px 0; padding: 14px 16px 34px; background: var(--page); box-shadow: 0 -0.5px 0 var(--separator); }
+/* Sticky insets count from inside the scroller's padding: without this the
+   bar would stop 40 px short of the bottom edge. */
+.content:has(> .sticky-bottom) { padding-bottom: 0; }
 .trip-running { display: flex; gap: 10px; }
 .trip-running .prominent { flex: 1; }
 
@@ -366,7 +393,7 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .lock .clock { font: 700 96px/1 var(--font-display); letter-spacing: -2px; font-variant-numeric: tabular-nums; margin-top: 2px; }
 /* Live Activities sit low on the lock screen, where the thumb is. */
 .lock .stack { position: absolute; left: 12px; right: 12px; bottom: 112px; display: flex; flex-direction: column; gap: 8px; }
-.lock .coach { position: absolute; left: 30px; right: 30px; bottom: 108px; font-size: 15px; color: rgba(235,235,245,.72); line-height: 1.35; }
+.lock .coach { position: absolute; left: 20px; right: 20px; bottom: 112px; font-size: 15px; color: rgba(235,235,245,.72); line-height: 1.35; text-align: center; }
 .lock .coach b { color: #fff; font-weight: 600; }
 .lock .controls { position: absolute; bottom: 44px; left: 46px; right: 46px; display: flex; justify-content: space-between; }
 .lock .control {
@@ -379,7 +406,8 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .lock .home-indicator { position: absolute; bottom: 0; left: 50%; width: 180px; height: 26px; margin-left: -90px; cursor: pointer; display: grid; place-items: end center; padding-bottom: 9px; }
 .lock .home-indicator::before { content: ""; width: 139px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.8); transition: transform var(--t-release) var(--ease-out); }
 .lock .home-indicator:hover::before { transform: translateY(-2px); }
-.lock .unlock-hint { position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; font-size: 13px; opacity: .6; pointer-events: none; }
+.lock .unlock-hint { position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; font-size: 13px; opacity: .6; pointer-events: none; transition: opacity var(--t-fade) var(--ease-out); }
+.lock.has-activity .unlock-hint { opacity: 0; }
 
 /* The Live Activity itself */
 .activity {
@@ -390,20 +418,14 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .island .activity { background: none; backdrop-filter: none; padding: 0; border-radius: 0; overflow: visible; cursor: inherit; }
 .act-ghost { position: absolute; pointer-events: none; }
 :is(.activity, .island) .caption { font-size: 13px; color: rgba(235,235,245,0.62); }
-:is(.activity, .island) .big { font: 600 34px/1.05 var(--font-display); font-variant-numeric: tabular-nums; white-space: nowrap; }
-:is(.activity, .island) .big.mid { font-size: 28px; }
+:is(.activity, .island) .big { font: 600 32px/1.1 var(--font-display); font-variant-numeric: tabular-nums; white-space: nowrap; }
 :is(.activity, .island) .big.hours { font-size: 26px; }
-:is(.activity, .island) .big small { font: 600 18px var(--font); margin-left: 3px; }
+:is(.activity, .island) .big small { font: 600 20px var(--font); margin-left: 3px; }
+:is(.activity, .island) .problem-text { color: #FF453A; }
 :is(.activity, .island) .question { font: 700 24px/1.15 var(--font-display); text-wrap: balance; }
 :is(.activity, .island) .question.small { font-size: 20px; }
 :is(.activity, .island) .heard { font-size: 15px; color: rgba(235,235,245,0.8); margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :is(.activity, .island) .heard.wrap { white-space: normal; }
-:is(.activity, .island) .row2 { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
-:is(.activity, .island) .dest { font-size: 15px; color: rgba(235,235,245,0.62); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-:is(.activity, .island) .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
-:is(.activity, .island) .top > :first-child { min-width: 0; }
-:is(.activity, .island) .right { text-align: right; flex: none; }
-:is(.activity, .island) .instruction { font: 600 20px/1.2 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :is(.activity, .island) .actions { display: flex; gap: 8px; margin-top: 12px; }
 :is(.activity, .island) .actions button { flex: 1; height: 42px; border-radius: 21px; background: rgba(255,255,255,0.16); color: #fff; font-weight: 600; font-size: 16px; text-align: center; }
 :is(.activity, .island) .actions button.primary { background: #fff; color: #000; }
@@ -419,35 +441,48 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .choices .s { display: block; font-size: 13px; color: rgba(235,235,245,0.62); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .link-button { display: block; width: 100%; height: 36px; margin-top: 6px; font-weight: 600; font-size: 15px; color: rgba(235,235,245,0.8); text-align: center; }
 
-/* Pages of the trip banner, flipped by tapping: a real Live Activity has
-   buttons, never swipes. */
-.act-pager { display: flex; align-items: center; justify-content: space-between; margin: 12px -4px -4px; }
+/* A trip: one height for every stage and page (a Lock Screen Live Activity
+   is at most 160 pt tall), so the top edge never jumps. */
+.activity.trip .act-body { height: 106px; display: flex; flex-direction: column; }
+.act-ghost.act-body { display: flex; flex-direction: column; }
+
+/* One template for every stage: what to do and where on the left, how long
+   until the next thing on the right. Three sizes: 32, 20, 15. */
+.stage { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.stage-text { flex: 1; min-width: 0; }
+.stage-title { font: 600 20px/1.25 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage-meta { display: flex; align-items: center; gap: 7px; height: 22px; margin-top: 3px; font-size: 15px; color: rgba(235,235,245,0.8); min-width: 0; }
+.stage-hero { flex: none; text-align: right; }
+.stage-label { font-size: 15px; line-height: 20px; color: rgba(235,235,245,0.62); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.clip { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The last line: distance, direction or progress, beside the page button. */
+.stage-foot { display: flex; align-items: center; height: 30px; margin-top: auto; padding-right: 124px; font-size: 15px; color: rgba(235,235,245,0.8); font-variant-numeric: tabular-nums; min-width: 0; }
+.stage-foot .progress { flex: 1; margin: 0; }
+
+/* Pages of the trip banner, flipped by tapping one button: a real Live
+   Activity has buttons, never swipes. */
+.act-pager { position: absolute; right: 16px; bottom: 14px; }
+.island .act-pager { right: 0; bottom: 0; }
 .act-pager:empty { display: none; }
-.dots { display: flex; }
-.dot { width: 22px; height: 28px; display: grid; place-items: center; }
-.dot i { display: block; width: 6px; height: 6px; border-radius: 3px; background: rgba(235,235,245,0.32); transition: width var(--t-content) var(--ease-out), background-color var(--t-content) var(--ease-out); }
-.dot[aria-current="true"] i { width: 16px; background: #fff; }
-.pager-next { display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px 0 12px; border-radius: 14px; background: rgba(255,255,255,0.14); font: 600 13px var(--font); color: #fff; }
-.pager-next .icon { font-size: 14px; }
+.pager-next { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 0 9px 0 13px; border-radius: 15px; background: rgba(255,255,255,0.14); font: 600 15px var(--font); color: #fff; }
+.pager-next .icon { font-size: 15px; }
 .pager-next:active { background: rgba(255,255,255,0.26); }
 
 /* Page 2: which way. North is up; the arrow says where the target is. */
-.dir { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; }
-.compass { position: relative; width: 62px; height: 62px; border-radius: 31px; border: 1.5px solid rgba(235,235,245,0.26); display: grid; place-items: center; }
-.compass .north { position: absolute; top: 3px; left: 0; right: 0; text-align: center; font: 700 9px/1 var(--font); color: rgba(235,235,245,0.62); }
-.compass .needle { width: 30px; height: 30px; fill: #fff; stroke: none; transition: transform var(--t-turn) var(--ease-out); }
+.dir { display: flex; gap: 14px; align-items: center; }
+.compass { position: relative; flex: none; width: 52px; height: 52px; border-radius: 26px; border: 1.5px solid rgba(235,235,245,0.26); display: grid; place-items: center; }
+.compass .north { position: absolute; top: 3px; left: 0; right: 0; text-align: center; font: 700 11px/1 var(--font); color: rgba(235,235,245,0.62); }
+.compass .needle { width: 24px; height: 24px; margin-top: 4px; fill: #fff; stroke: none; transition: transform var(--t-turn) var(--ease-out); }
 .compass .here { width: 12px; height: 12px; border-radius: 6px; background: #fff; }
-.dir .heard { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.pointer { display: inline-flex; vertical-align: -2px; margin-right: 4px; }
+.pointer { display: inline-flex; vertical-align: -2px; margin-right: 5px; }
 .pointer svg { width: 14px; height: 14px; fill: currentColor; transition: transform var(--t-turn) var(--ease-out); }
 
-/* Page 3: the whole trip at a glance. */
+/* Page 3: now, next, arrival. */
 .legs { display: grid; gap: 2px; }
-.leg-row { display: grid; grid-template-columns: 46px 28px minmax(0, 1fr); align-items: center; gap: 6px; min-height: 26px; padding: 0 6px; margin: 0 -6px; border-radius: 8px; font-size: 15px; color: rgba(235,235,245,0.8); transition: opacity var(--t-content) var(--ease-out), background-color var(--t-content) var(--ease-out); }
+.leg-row { display: grid; grid-template-columns: 46px 28px minmax(0, 1fr); align-items: center; gap: 6px; height: 24px; padding: 0 6px; margin: 0 -6px; border-radius: 8px; font-size: 15px; color: rgba(235,235,245,0.8); transition: background-color var(--t-content) var(--ease-out); }
 .leg-row .t { font-weight: 600; font-variant-numeric: tabular-nums; }
 .leg-row .glyph { display: flex; justify-content: center; font-size: 16px; }
 .leg-row .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.leg-row.past { opacity: .42; }
 .leg-row.now { background: rgba(255,255,255,0.12); color: #fff; }
 
 .listening-dots { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
@@ -455,7 +490,7 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .listening-dots i:nth-child(2) { animation-delay: .15s; } .listening-dots i:nth-child(3) { animation-delay: .3s; }
 @keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .listening-dots i { opacity: .8; } }
-.progress { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.18); margin-top: 12px; overflow: hidden; }
+.progress { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.18); overflow: hidden; }
 /* Glides between the 250 ms ticks instead of stepping. */
 .progress i { display: block; height: 100%; background: #fff; border-radius: 2px; transition: width 250ms linear; }
 

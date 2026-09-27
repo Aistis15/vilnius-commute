@@ -1,0 +1,459 @@
+{
+ "query": "Katedros a.",
+ "lat": 54.687,
+ "lon": 25.28,
+ "url": "https://photon.komoot.io/api/?q=Katedros+a.&lat=54.687&lon=25.28&limit=15&bbox=20.9%2C53.89%2C26.84%2C56.45",
+ "fetched": "2026-09-27",
+ "response": {
+  "type": "FeatureCollection",
+  "features": [
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "R",
+     "osm_id": 5361117,
+     "osm_key": "highway",
+     "osm_value": "pedestrian",
+     "type": "street",
+     "name": "Katedros a.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01122",
+     "countrycode": "LT",
+     "extent": [
+      25.2860909,
+      54.686325,
+      25.2903718,
+      54.6849247
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2866399,
+      54.6856296
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 70237475,
+     "osm_key": "highway",
+     "osm_value": "living_street",
+     "type": "street",
+     "name": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Panevėžys",
+     "county": "Panevėžio miesto savivaldybė",
+     "state": "Panevėžio apskritis",
+     "country": "Lietuva",
+     "postcode": "35240",
+     "countrycode": "LT",
+     "extent": [
+      24.355048,
+      55.7225421,
+      24.3577561,
+      55.7220682
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.3564023,
+      55.722304
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 9836974419,
+     "osm_key": "tourism",
+     "osm_value": "attraction",
+     "type": "house",
+     "housenumber": "2",
+     "name": "Vilniaus katedros Šv. Kazimiero koplyčia",
+     "street": "Katedros a.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01122",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.28824,
+      54.6856827
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 142984334,
+     "osm_key": "highway",
+     "osm_value": "residential",
+     "type": "street",
+     "name": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Panevėžys",
+     "county": "Panevėžio miesto savivaldybė",
+     "state": "Panevėžio apskritis",
+     "country": "Lietuva",
+     "postcode": "35240",
+     "countrycode": "LT",
+     "extent": [
+      24.3546664,
+      55.7234201,
+      24.3567303,
+      55.7230659
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.3556999,
+      55.7232337
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 70237474,
+     "osm_key": "highway",
+     "osm_value": "residential",
+     "type": "street",
+     "name": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Panevėžys",
+     "county": "Panevėžio miesto savivaldybė",
+     "state": "Panevėžio apskritis",
+     "country": "Lietuva",
+     "postcode": "36235",
+     "countrycode": "LT",
+     "extent": [
+      24.3573296,
+      55.7235258,
+      24.3577561,
+      55.7225421
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.3575196,
+      55.7230241
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 899197809,
+     "osm_key": "highway",
+     "osm_value": "residential",
+     "type": "street",
+     "name": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Telšiai",
+     "county": "Telšių miesto seniūnija",
+     "state": "Telšių apskritis",
+     "country": "Lietuva",
+     "postcode": "87131",
+     "countrycode": "LT",
+     "extent": [
+      22.2456913,
+      55.9826991,
+      22.2457968,
+      55.9824136
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      22.2456952,
+      55.9825889
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 1042169953,
+     "osm_key": "highway",
+     "osm_value": "footway",
+     "type": "street",
+     "name": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Telšiai",
+     "county": "Telšių miesto seniūnija",
+     "state": "Telšių apskritis",
+     "country": "Lietuva",
+     "postcode": "87131",
+     "countrycode": "LT",
+     "extent": [
+      22.245677,
+      55.9823862,
+      22.2456895,
+      55.9821577
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      22.2456833,
+      55.982272
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 899197812,
+     "osm_key": "highway",
+     "osm_value": "steps",
+     "type": "street",
+     "name": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Telšiai",
+     "county": "Telšių miesto seniūnija",
+     "state": "Telšių apskritis",
+     "country": "Lietuva",
+     "postcode": "87333",
+     "countrycode": "LT",
+     "extent": [
+      22.2456691,
+      55.9821577,
+      22.2458234,
+      55.9816943
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      22.2457157,
+      55.9819192
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 1106657312,
+     "osm_key": "highway",
+     "osm_value": "steps",
+     "type": "street",
+     "name": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Telšiai",
+     "county": "Telšių miesto seniūnija",
+     "state": "Telšių apskritis",
+     "country": "Lietuva",
+     "postcode": "87131",
+     "countrycode": "LT",
+     "extent": [
+      22.2456895,
+      55.9824136,
+      22.2456913,
+      55.9823862
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      22.2456904,
+      55.9823999
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 4164104792,
+     "osm_key": "place",
+     "osm_value": "house",
+     "type": "house",
+     "housenumber": "3A",
+     "street": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Panevėžys",
+     "county": "Panevėžio miesto savivaldybė",
+     "state": "Panevėžio apskritis",
+     "country": "Lietuva",
+     "postcode": "35240",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.3562864,
+      55.7218042
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 8372455534,
+     "osm_key": "place",
+     "osm_value": "house",
+     "type": "house",
+     "housenumber": "1A",
+     "street": "Katedros a.",
+     "district": "Senamiestis",
+     "city": "Telšiai",
+     "county": "Telšių miesto seniūnija",
+     "state": "Telšių apskritis",
+     "country": "Lietuva",
+     "postcode": "87131",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      22.2453336,
+      55.9823819
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "N",
+     "osm_id": 1664258774,
+     "osm_key": "amenity",
+     "osm_value": "pub",
+     "type": "house",
+     "housenumber": "5",
+     "name": "Prie Katedros",
+     "street": "Gedimino pr.",
+     "locality": "Senamiestis",
+     "district": "Senamiesčio seniūnija",
+     "city": "Vilnius",
+     "county": "Vilniaus miesto savivaldybė",
+     "state": "Vilniaus apskritis",
+     "country": "Lietuva",
+     "postcode": "01101",
+     "countrycode": "LT"
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      25.2834874,
+      54.6866131
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 27340462,
+     "osm_key": "highway",
+     "osm_value": "secondary",
+     "type": "street",
+     "name": "Katedros g.",
+     "city": "Kaišiadorys",
+     "county": "Kaišiadorių miesto seniūnija",
+     "state": "Kauno apskritis",
+     "country": "Lietuva",
+     "postcode": "56128",
+     "countrycode": "LT",
+     "extent": [
+      24.4568522,
+      54.8613059,
+      24.4572633,
+      54.8612448
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.4570525,
+      54.8612479
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 143044762,
+     "osm_key": "landuse",
+     "osm_value": "cemetery",
+     "type": "other",
+     "name": "Panevėžio Kristaus Karaliaus Katedros kapinės",
+     "city": "Panevėžys",
+     "county": "Panevėžio miesto savivaldybė",
+     "state": "Panevėžio apskritis",
+     "country": "Lietuva",
+     "countrycode": "LT",
+     "extent": [
+      24.3714678,
+      55.7141962,
+      24.3834008,
+      55.7102336
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.377087,
+      55.7121774
+     ]
+    }
+   },
+   {
+    "type": "Feature",
+    "properties": {
+     "osm_type": "W",
+     "osm_id": 42130362,
+     "osm_key": "highway",
+     "osm_value": "residential",
+     "type": "street",
+     "name": "Katedros g.",
+     "district": "Senamiestis",
+     "city": "Panevėžys",
+     "county": "Panevėžio miesto savivaldybė",
+     "state": "Panevėžio apskritis",
+     "country": "Lietuva",
+     "postcode": "36230",
+     "countrycode": "LT",
+     "extent": [
+      24.3574945,
+      55.7239879,
+      24.3621438,
+      55.7230753
+     ]
+    },
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      24.3598186,
+      55.7235418
+     ]
+    }
+   }
+  ]
+ }
+}

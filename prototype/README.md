@@ -2,9 +2,10 @@
 
 The whole product, working, before it can be installed on an iPhone: the
 lock-screen button, the banner that asks "Kur keliausime šiandien?", voice in
-Lithuanian, real routes on the real Vilnius timetable, the banner changing as
-the trip goes on, the Dynamic Island, "Ar baigėte kelionę?", unlimited saved
-places and the "you go there often — save it?" prompt.
+Lithuanian, real routes on the real timetables of five cities (Vilnius, Kaunas,
+Klaipėda, Šiauliai, Panevėžys), the banner changing as the trip goes on, the
+Dynamic Island, "Ar baigėte kelionę?", unlimited saved places and the "you go
+there often — save it?" prompt.
 
 It exists because a free Apple ID cannot sign the widget extension the banner
 lives in (see `docs/decisions.md`, D12). The iPhone app keeps being built in
@@ -20,16 +21,16 @@ python prototype/server.py
 
 then open <http://localhost:8765> in **Chrome or Edge** (they recognise
 Lithuanian speech; Firefox does not). Nothing to install beyond Python 3.10+.
-The first start downloads the timetable (~3 MB) from the `data-latest`
-release; after that routing works offline. Place search and speech need the
-internet.
+The first start downloads the timetables of all five cities in one file
+(~6.7 MB) from the `data-latest` release; after that routing works offline.
+Place search and speech need the internet.
 
 ## What is real and what is simulated
 
 | Real | Simulated |
 |---|---|
-| Timetable, stops, routes, colours — the same SQLite the app uses | The phone frame, lock screen and Dynamic Island are drawn in HTML |
-| Routing: RAPTOR from any point to any point, arrive-by, night service | The clock can be sped up (panel on the right) to watch a trip unfold |
+| Timetables, stops, routes, colours of five cities — the same SQLite the app uses | The phone frame, lock screen and Dynamic Island are drawn in HTML |
+| Routing: RAPTOR from any point to any point, arrive-by, night service, the intercity coaches in the feeds | The clock can be sped up (panel on the right) to watch a trip unfold |
 | Address and place search: Photon (OpenStreetMap), Lithuania-wide | "Balsas be mikrofono" stands in for a microphone when there is none |
 | Lithuanian speech: the browser's recogniser + `vc/speech_lt.py` | Your location comes from the browser, or a place you pick |
 
@@ -40,10 +41,10 @@ this repository.
 
 ```
 server.py          standard-library HTTP server: static files + /api/*
-vc/data.py         download, verify (sha256 from the manifest) and load the timetable
+vc/data.py         download, verify (sha256 from the manifest) and load the timetables
 vc/router.py       RAPTOR with walking access/egress, one option per number of rides
 vc/planner.py      points -> options: arrive-by, later departures, ranking, tags
-vc/search.py       stop names + Photon geocoder, ranked for Vilnius
+vc/search.py       stop names + Photon geocoder, ranked for where you are
 vc/speech_lt.py    "Man reikia į Akropolį keturiolika dvidešimt" -> Akropolis, 14:20
 web/               the app: index.html, style.css, app.js (no build step)
 tests/             python -m unittest discover -s prototype/tests -t prototype
@@ -61,3 +62,15 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
   directions exist; it errs towards promising too little time.
 - **A spoken time means "be there by"** unless the words say otherwise
   ("išvykti", "išeiti"), matching the banner's "Išeik 13:52 · ISM 14:20".
+- **"Be there by" never offers a trip that has already left.** `/api/plan`
+  takes `now` (local time, like `at`); with `mode=arrive` it drops options
+  that should have started more than a minute ago. When none is left it
+  answers with the fastest way from now and `"late": true, "late_by_min"`:
+  the app shows "Nespėsi iki 09:00 · anksčiausiai 09:22".
+- **Intercity coaches are routed like any bus.** The coach stand is kept in
+  reach even when a dozen city platforms are nearer (Vilnius AS by
+  "Stotis"), and arrive-by looks back 12 hours between cities instead of 3.
+- **Street words are one word, short or long.** OpenStreetMap writes
+  "Katedros a.", people say "Katedros aikštė": matching treats aikštė/a.,
+  gatvė/g., prospektas/pr., alėja/al., skersgatvis/skg. as equal, and a
+  search with no sure answer asks Photon again with the other spelling.
