@@ -185,6 +185,25 @@ class Live:
         snapshot = self._snapshot(city)
         return snapshot[1] if snapshot else None
 
+    def in_box(self, south: float, west: float, north: float, east: float) -> list[dict]:
+        """The vehicles in service inside a map view, in their route's colour.
+        Ones not matched to a trip (to or from the depot) are left out: a bus
+        that takes nobody anywhere is noise on the map."""
+        out = []
+        for city in FEEDS:
+            for vehicle in self.vehicles(city) or []:
+                if vehicle.trip is None or not (south <= vehicle.lat <= north and west <= vehicle.lon <= east):
+                    continue
+                pattern = vehicle.trip[0]
+                route = self.t.routes[self.t.pattern_route[pattern]]
+                out.append({
+                    "key": f"{city}:{vehicle.number or vehicle.route}:{pattern}",
+                    "route": route.short_name, "color": route.color, "text_color": route.text_color,
+                    "headsign": self.t.pattern_headsign[pattern] or "",
+                    "lat": vehicle.lat, "lon": vehicle.lon, "bearing": vehicle.bearing, "delay_s": vehicle.delay,
+                })
+        return out
+
     def vehicle_on(self, pattern: int, trip: int) -> Vehicle | None:
         stops = self.t.pattern_stops[pattern]
         city = self.t.stop_city[stops[0]] if stops and self.t.stop_city else "Vilnius"

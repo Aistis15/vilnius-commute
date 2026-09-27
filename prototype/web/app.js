@@ -63,6 +63,7 @@ const ICONS = {
   stop: '<rect x="6" y="3" width="12" height="9" rx="2"/><path d="M12 12v9"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  map: '<path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5L9 4z"/><path d="M9 4v13.5M15 6.5V20"/>',
   // The "this time is live" mark transit apps share: a source and two waves.
   live: '<circle cx="6.5" cy="17.5" r="2" class="fill"/><path d="M5 11.5a7.5 7.5 0 0 1 7.5 7.5M5 5a14 14 0 0 1 14 14"/>',
 };
@@ -685,6 +686,11 @@ async function pollLive() {
   if (!state.serverReady) return;
   const screen = currentScreen().name;
   if (screen === 'home' && !state.locked) { refreshNearby(); refreshPlaceTimes(); }
+  if (screen === 'map' && !state.locked) {
+    loadMapData();
+    const sel = state.mapSel;
+    if (sel && sel.kind === 'stop') api('/api/stop', { id: sel.stop.id, now: localIso(now()) }).then((board) => { if (state.mapSel === sel) { sel.board = board; refreshMapCard(); } }).catch(() => {});
+  }
   if (!liveClock()) return;
   const refs = new Set();
   const add = (o) => o && !o.walk_only && o.legs.forEach((l) => { const r = refOf(l); if (r) refs.add(r); });
@@ -815,7 +821,7 @@ function renderApp() {
   const screen = state.prefs ? currentScreen() : onboardingScreen();
   const view = {
     onboarding: onboardingView, home: homeView, results: resultsView, detail: detailView,
-    settings: settingsView, places: placesView, pick: pickView,
+    settings: settingsView, places: placesView, pick: pickView, map: mapView,
   }[screen.name] || homeView;
   const html = view(screen);
 
@@ -840,6 +846,7 @@ function renderApp() {
     pageEl = page; pageScreen = screen; pageDepth = depth;
   }
   if (screen.name === 'detail') drawMap();
+  if (screen.name === 'map') drawBigMap();
   $('#statusbar').classList.toggle('on-lock', state.locked);
 }
 
@@ -937,7 +944,7 @@ function onboardingView() {
 
 function homeView() {
   return `<div class="nav">
-      ${navBar({ title: 'Šalia tavęs', right: `<button class="icon-button" data-action="settings" aria-label="Nustatymai">${icon('gear')}</button>` })}
+      ${navBar({ title: 'Šalia tavęs', right: `<span class="bar-buttons"><button class="icon-button" data-action="map" aria-label="Žemėlapis">${icon('map')}</button><button class="icon-button" data-action="settings" aria-label="Nustatymai">${icon('gear')}</button></span>` })}
     </div>
     <div class="content home-scroll">
       <h1 class="large">Šalia tavęs</h1>
@@ -1090,26 +1097,29 @@ function boardHtml() {
           `<button class="secondary" data-action="origin-city" data-city="${esc(c.name)}">Pradėti ${esc(cityIn(c.name))}</button>`).join('')}</div>` : ''}
       </div>`;
   }
-  const at = now().getTime();
-  const minutes = (d) => Math.round((new Date(d.iso).getTime() - at) / 60_000);
-  const time = (d, i) => {
-    const m = minutes(d);
-    return `<span class="${i === 0 ? 'first' : ''}">${d.live && i === 0 ? icon('live') : ''}${m <= 0 ? 'dabar' : m}</span>`;
-  };
-  const line = (l) => {
-    const shown = l.departures.filter((d) => minutes(d) >= 0).slice(0, 3);
-    if (!shown.length) return '';
-    const unit = shown.some((d) => minutes(d) > 0) ? '<small>min</small>' : '';
-    return `<div class="dep" data-key="${esc(`${l.route.name}>${l.headsign}`)}">
-        ${badge(l.route)}<span class="dep-dir">${esc(l.headsign)}</span>
-        <span class="dep-times">${shown.map(time).join('<i>·</i>')}${unit}</span>
-      </div>`;
-  };
+  const line = depLine;
   return `<div class="board stagger">${stops.slice(0, 3).map((stop) => `
       <div class="stop-card" data-key="stop-${esc(stop.name)}">
         <div class="stop-head"><span class="stop-name">${esc(stop.name)}</span><span class="stop-dist">${metresText(stop.metres)}</span></div>
         ${stop.lines.slice(0, 4).map(line).join('')}
       </div>`).join('')}</div>`;
+}
+
+/* A line on a stop's board: badge, direction, the next times in minutes. */
+function depLine(l) {
+  const at = now().getTime();
+  const minutes = (d) => Math.round((new Date(d.iso).getTime() - at) / 60_000);
+  const shown = l.departures.filter((d) => minutes(d) >= 0).slice(0, 3);
+  if (!shown.length) return '';
+  const time = (d, i) => {
+    const m = minutes(d);
+    return `<span class="${i === 0 ? 'first' : ''}">${d.live && i === 0 ? icon('live') : ''}${m <= 0 ? 'dabar' : m}</span>`;
+  };
+  const unit = shown.some((d) => minutes(d) > 0) ? '<small>min</small>' : '';
+  return `<div class="dep" data-key="${esc(`${l.route.name}>${l.headsign}`)}">
+      ${badge(l.route)}<span class="dep-dir">${esc(l.headsign)}</span>
+      <span class="dep-times">${shown.map(time).join('<i>·</i>')}${unit}</span>
+    </div>`;
 }
 
 /* Placeholders the shape of what is coming: the screen answers at once
@@ -1483,6 +1493,138 @@ function drawVehicles() {
   Object.keys(vehicleMarkers).forEach((ref) => {
     if (!seen.has(ref)) { vehicleLayer.removeLayer(vehicleMarkers[ref]); delete vehicleMarkers[ref]; }
   });
+}
+
+// ---- the map: stops, the buses on the road, and a pin to go anywhere
+
+/* The city as a map, opened from home. Stops appear once zoomed in close
+   enough to tell them apart; the buses in service move on it in their own
+   colours. Tap a stop: what leaves it. Tap anywhere else: a pin, its
+   address, and "Keliauti čia". The card sits at the bottom, under the
+   thumb. The map's own colours never change with the banner's palette. */
+function mapView() {
+  return `<div class="nav">${navBar({ back: true, title: 'Žemėlapis', always: true })}</div>
+    <div class="map-screen">
+      <div id="bigmap" class="bigmap" data-morph="keep"></div>
+      <div class="map-card" id="map-card">${mapCard()}</div>
+    </div>`;
+}
+
+function mapCard() {
+  const sel = state.mapSel;
+  const me = `<button class="map-me" data-action="map-me" aria-label="Rodyti mano vietą">${icon('location')}</button>`;
+  const from = origin();
+  const away = (p) => (from ? ` · ${metresText(Math.round(straightMetres(from, p) * 1.3))} pėsčiomis` : '');
+  if (!sel) {
+    return `${me}<p class="map-hint">${state.mapTooWide ? 'Priartink, kad matytum stoteles.' : 'Paliesk stotelę arba bet kurią vietą.'}</p>`;
+  }
+  if (sel.kind === 'pin') {
+    return `${me}<div class="map-card-head"><span class="glyph">${icon('pin')}</span>
+        <div class="main"><div class="title">${esc(sel.name || (sel.naming ? 'Ieškau adreso…' : 'Pažymėta vieta'))}</div><div class="sub">Pažymėta vieta${away(sel)}</div></div></div>
+      <button class="prominent" data-action="map-go">Keliauti čia</button>`;
+  }
+  const board = sel.board;
+  const lines = board ? board.lines.slice(0, 4).map(depLine).join('') : '';
+  return `${me}<div class="map-card-head"><span class="glyph">${icon('stop')}</span>
+      <div class="main"><div class="title">${esc(sel.stop.name)}</div><div class="sub">Stotelė${away(sel.stop)}${board && board.live ? ' · realiu laiku' : ''}</div></div></div>
+    <div class="map-deps">${!board ? '<div class="skel skel-row"></div>' : lines || '<p class="footnote">Artimiausią valandą iš čia nieko neišvyksta.</p>'}</div>
+    <button class="secondary map-go" data-action="map-go">Keliauti čia</button>`;
+}
+
+function refreshMapCard() {
+  const card = inPage('#map-card');
+  if (card && currentScreen().name === 'map') morph(card, mapCard());
+}
+
+let bigmap = null, bigLayers = null, busMarkers = {}, mapLoadTimer = null, lastLayerClick = 0;
+function drawBigMap() {
+  const el = inPage('#bigmap');
+  if (!el || !window.L) return;
+  if (bigmap && bigmap.getContainer() === el) return;
+  if (bigmap) { bigmap.remove(); bigmap = null; }
+  const from = origin() || { lat: 54.6872, lon: 25.2797 };
+  bigmap = L.map(el, { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([from.lat, from.lon], 16);
+  bigmap.attributionControl.setPrefix('Leaflet');
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(bigmap);
+  bigLayers = { stops: L.layerGroup().addTo(bigmap), buses: L.layerGroup().addTo(bigmap), marks: L.layerGroup().addTo(bigmap) };
+  busMarkers = {};
+  if (origin()) L.circleMarker([from.lat, from.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1C1C1E', fillOpacity: 1, interactive: false }).addTo(bigLayers.marks);
+  bigmap.on('moveend', () => { clearTimeout(mapLoadTimer); mapLoadTimer = setTimeout(loadMapData, 250); });
+  bigmap.on('click', (e) => { if (Date.now() - lastLayerClick > 350) dropPin(e.latlng.lat, e.latlng.lng); });
+  // The page slides in; once it has, the map knows its real size and asks
+  // for everything that size shows.
+  setTimeout(() => { if (bigmap) { bigmap.invalidateSize(); loadMapData(); } }, 480);
+  loadMapData();
+}
+
+async function loadMapData() {
+  if (!bigmap || currentScreen().name !== 'map') return;
+  const b = bigmap.getBounds();
+  const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((v) => v.toFixed(5)).join(',');
+  try {
+    const [stops, buses] = await Promise.all([api('/api/stops', { bbox }), api('/api/vehicles', { bbox, now: localIso(now()) })]);
+    if (!bigmap) return;
+    const wasWide = state.mapTooWide;
+    state.mapTooWide = !!stops.too_wide;
+    drawStops(stops.stops || []);
+    drawBuses(buses.vehicles || []);
+    if (!state.mapSel && wasWide !== state.mapTooWide) refreshMapCard();
+  } catch { /* the map still pans; the next move asks again */ }
+}
+
+function drawStops(stops) {
+  bigLayers.stops.clearLayers();
+  for (const stop of stops) {
+    const chosen = state.mapSel && state.mapSel.kind === 'stop' && state.mapSel.stop.id === stop.id;
+    L.circleMarker([stop.lat, stop.lon], {
+      radius: chosen ? 8 : 5, color: '#3A3A3C', weight: chosen ? 3 : 2, fillColor: '#fff', fillOpacity: 1,
+    }).on('click', () => { lastLayerClick = Date.now(); selectStop(stop); }).addTo(bigLayers.stops);
+  }
+}
+
+function drawBuses(list) {
+  const seen = new Set();
+  for (const v of list) {
+    seen.add(v.key);
+    const known = busMarkers[v.key];
+    if (known) {
+      const el = known.getElement();
+      if (el) { el.classList.add('gliding'); clearTimeout(el.glide); el.glide = setTimeout(() => el.classList.remove('gliding'), 1300); }
+      known.setLatLng([v.lat, v.lon]);
+      continue;
+    }
+    const html = `<span class="bus-marker" style="background:#${esc(v.color)};color:#${esc(v.text_color)}">${esc(v.route)}</span>`;
+    busMarkers[v.key] = L.marker([v.lat, v.lon], {
+      icon: L.divIcon({ className: 'bus-icon', html, iconSize: null }), keyboard: false, interactive: false,
+    }).addTo(bigLayers.buses);
+  }
+  for (const key of Object.keys(busMarkers)) {
+    if (!seen.has(key)) { bigLayers.buses.removeLayer(busMarkers[key]); delete busMarkers[key]; }
+  }
+}
+
+async function selectStop(stop) {
+  state.mapSel = { kind: 'stop', stop, board: null };
+  bigLayers.marks.eachLayer((layer) => { if (layer.options && layer.options.pin) bigLayers.marks.removeLayer(layer); });
+  refreshMapCard();
+  loadMapData();
+  try {
+    const board = await api('/api/stop', { id: stop.id, now: localIso(now()) });
+    if (state.mapSel && state.mapSel.stop === stop) { state.mapSel.board = board; refreshMapCard(); }
+  } catch { if (state.mapSel && state.mapSel.stop === stop) { state.mapSel.board = { lines: [] }; refreshMapCard(); } }
+}
+
+async function dropPin(lat, lon) {
+  const sel = { kind: 'pin', lat, lon, name: null, naming: true };
+  state.mapSel = sel;
+  bigLayers.marks.eachLayer((layer) => { if (layer.options && layer.options.pin) bigLayers.marks.removeLayer(layer); });
+  L.marker([lat, lon], { pin: true, interactive: false, keyboard: false,
+    icon: L.divIcon({ className: 'pin-icon', html: `<span class="map-pin">${icon('pin')}</span>`, iconSize: null }) }).addTo(bigLayers.marks);
+  refreshMapCard();
+  try {
+    const found = await api('/api/reverse', { lat: lat.toFixed(6), lon: lon.toFixed(6) });
+    if (state.mapSel === sel) { sel.name = found.name; sel.naming = false; refreshMapCard(); }
+  } catch { if (state.mapSel === sel) { sel.naming = false; refreshMapCard(); } }
 }
 
 // ---- settings, places, pick
@@ -2698,6 +2840,16 @@ const actions = {
     pop();
   },
   settings: () => push({ name: 'settings' }),
+  map: () => { state.mapSel = null; push({ name: 'map' }); },
+  'map-me': () => { const from = origin(); if (bigmap && from) bigmap.flyTo([from.lat, from.lon], 16, { duration: 0.6 }); },
+  'map-go': () => {
+    const sel = state.mapSel;
+    if (!sel) return;
+    const place = sel.kind === 'stop'
+      ? { name: sel.stop.name, subtitle: 'Stotelė', lat: sel.stop.lat, lon: sel.stop.lon }
+      : { name: sel.name || 'Pažymėta vieta', subtitle: '', lat: sel.lat, lon: sel.lon };
+    openDestination(place);
+  },
   places: () => push({ name: 'places' }),
   'add-place': () => { state.query = ''; state.results = []; state.heard = ''; push({ name: 'pick', purpose: 'place' }); },
   'pick-origin': () => { state.query = ''; state.results = []; state.heard = ''; push({ name: 'pick', purpose: 'origin' }); },

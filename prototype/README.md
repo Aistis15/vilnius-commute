@@ -65,6 +65,12 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
   a street that only changes its name is not a turn, and the round minimap
   turns with the phone so the path ahead always runs up. Offline, the walk
   is a straight line and the arrow says "Tiesiai".
+- **A map, one tap from home.** Stops show once zoomed in far enough to
+  tell apart; the buses in service move on it in their route colours
+  (`/api/vehicles`). Tap a stop for its board (`/api/stop`), or anywhere
+  for a pin with its address (`/api/reverse`) and "Keliauti čia".
+- **Banner colourways are presets.** 21 of three colours each, contrast
+  checked; route colours and the minimap never change with them.
 - **The board at the stop is on the home screen** (`/api/nearby`): the three
   nearest stops, their lines and the next times, live where known.
 

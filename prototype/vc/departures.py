@@ -56,38 +56,7 @@ def nearby(t: Timetable, lat: float, lon: float, when: datetime, live=None,
 
     out = []
     for group in groups.values():
-        lines: dict[tuple[int, str], dict] = {}
-        for stop in group["platforms"]:
-            for pattern, index in t.patterns_at_stop[stop]:
-                stops = t.pattern_stops[pattern]
-                if index == len(stops) - 1:
-                    continue  # the line ends here: it takes nobody away
-                headsign = t.pattern_headsign[pattern] or t.stop_names[stops[-1]]
-                for trip, (service, _arrivals, departures) in enumerate(t.pattern_trips[pattern]):
-                    for (date, weekday), shift in days:
-                        scheduled = departures[index] + shift
-                        if not now_s - 900 <= scheduled <= now_s + HORIZON_S:
-                            continue
-                        if not t.runs(service, date, weekday):
-                            continue
-                        vehicle = live.vehicle_on(pattern, trip) if live is not None else None
-                        delay = vehicle.delay if vehicle is not None else None
-                        expected = scheduled + (delay or 0)
-                        if expected < now_s - 30 or expected > now_s + HORIZON_S:
-                            continue
-                        key = (t.pattern_route[pattern], headsign)
-                        line = lines.setdefault(key, {"route": route_json(t, pattern),
-                                                      "headsign": headsign, "departures": []})
-                        line["departures"].append({
-                            **_clock(midnight, expected),
-                            "scheduled": _clock(midnight, scheduled)["hm"],
-                            "delay_s": delay,
-                            "live": delay is not None,
-                        })
-        for line in lines.values():
-            line["departures"].sort(key=lambda d: d["iso"])
-            line["departures"] = line["departures"][:PER_LINE]
-        ordered = sorted(lines.values(), key=lambda l: l["departures"][0]["iso"])
+        ordered = _lines_at(t, group["platforms"], midnight, now_s, days, live)
         out.append({
             "name": group["name"],
             "metres": group["metres"],
@@ -98,3 +67,66 @@ def nearby(t: Timetable, lat: float, lon: float, when: datetime, live=None,
             "live": any(d["live"] for l in ordered for d in l["departures"]),
         })
     return {"stops": out, "live_available": live is not None}
+
+
+def _lines_at(t: Timetable, platforms: list[int], midnight: datetime, now_s: int, days, live) -> list[dict]:
+    """The lines leaving these platforms in the next hour, soonest first."""
+    lines: dict[tuple[int, str], dict] = {}
+    for stop in platforms:
+        for pattern, index in t.patterns_at_stop[stop]:
+            stops = t.pattern_stops[pattern]
+            if index == len(stops) - 1:
+                continue  # the line ends here: it takes nobody away
+            headsign = t.pattern_headsign[pattern] or t.stop_names[stops[-1]]
+            for trip, (service, _arrivals, departures) in enumerate(t.pattern_trips[pattern]):
+                for (date, weekday), shift in days:
+                    scheduled = departures[index] + shift
+                    if not now_s - 900 <= scheduled <= now_s + HORIZON_S:
+                        continue
+                    if not t.runs(service, date, weekday):
+                        continue
+                    vehicle = live.vehicle_on(pattern, trip) if live is not None else None
+                    delay = vehicle.delay if vehicle is not None else None
+                    expected = scheduled + (delay or 0)
+                    if expected < now_s - 30 or expected > now_s + HORIZON_S:
+                        continue
+                    key = (t.pattern_route[pattern], headsign)
+                    line = lines.setdefault(key, {"route": route_json(t, pattern),
+                                                  "headsign": headsign, "departures": []})
+                    line["departures"].append({
+                        **_clock(midnight, expected),
+                        "scheduled": _clock(midnight, scheduled)["hm"],
+                        "delay_s": delay,
+                        "live": delay is not None,
+                    })
+    for line in lines.values():
+        line["departures"].sort(key=lambda d: d["iso"])
+        line["departures"] = line["departures"][:PER_LINE]
+    return sorted(lines.values(), key=lambda l: l["departures"][0]["iso"])
+
+
+def at_stop(t: Timetable, stop: int, when: datetime, live=None) -> dict:
+    """The board of one platform, for the map's stop card. One platform, not
+    the name's group: the one tapped faces one way."""
+    midnight = when.replace(hour=0, minute=0, second=0, microsecond=0)
+    now_s = int((when - midnight).total_seconds())
+    days = ((service_day(midnight), 0), (service_day(midnight - timedelta(days=1)), -86_400))
+    lines = _lines_at(t, [stop], midnight, now_s, days, live)
+    return {"id": stop, "name": t.stop_names[stop], "lat": t.stop_lat[stop], "lon": t.stop_lon[stop],
+            "lines": lines[:LINES_PER_STOP], "live": any(d["live"] for l in lines for d in l["departures"]),
+            "live_available": live is not None}
+
+
+# A map zoomed out to half a city would draw thousands of stops; past this
+# span it shows none and says to zoom in.
+MAX_BOX_DEG = 0.05
+
+
+def in_box(t: Timetable, south: float, west: float, north: float, east: float, limit: int = 600) -> dict:
+    """The stops inside a map view that anything leaves from."""
+    if north - south > MAX_BOX_DEG or east - west > MAX_BOX_DEG * 1.8:
+        return {"stops": [], "too_wide": True}
+    stops = [{"id": i, "name": t.stop_names[i], "lat": lat, "lon": lon}
+             for i, (lat, lon) in enumerate(zip(t.stop_lat, t.stop_lon))
+             if south <= lat <= north and west <= lon <= east and t.patterns_at_stop[i]]
+    return {"stops": stops[:limit], "too_wide": False}

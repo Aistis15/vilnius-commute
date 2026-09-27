@@ -126,6 +126,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(speech_lt.parse(query.get("text", ""), minutes_of(query.get("now"))).as_json())
             if url.path == "/api/cities":
                 return self.send_json({"cities": State.cities})
+            if url.path == "/api/reverse":
+                return self.send_json({"name": search.reverse(float(query["lat"]), float(query["lon"]))})
             if url.path == "/api/walk":
                 # The street path of one walk and every turn on it, for the
                 # banner's arrow and minimap. Needs the internet.
@@ -175,6 +177,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(departures.nearby(
                     State.timetable, float(query["lat"]), float(query["lon"]), when,
                     State.live if real is not None else None))
+            if url.path == "/api/stops":
+                # The stops inside the map's view (none when zoomed out too far).
+                south, west, north, east = (float(x) for x in query["bbox"].split(","))
+                return self.send_json(departures.in_box(State.timetable, south, west, north, east))
+            if url.path == "/api/stop":
+                # One platform's board, for the map's stop card.
+                when = local_time(query["now"]) if query.get("now") else datetime.now()
+                real = live_now(query)
+                return self.send_json(departures.at_stop(State.timetable, int(query["id"]), when,
+                                                         State.live if real is not None else None))
+            if url.path == "/api/vehicles":
+                # The buses in service inside the map's view, live.
+                south, west, north, east = (float(x) for x in query["bbox"].split(","))
+                real = live_now(query)
+                vehicles = State.live.in_box(south, west, north, east) if real is not None else []
+                return self.send_json({"vehicles": vehicles, "live_available": real is not None})
             if url.path == "/api/live":
                 # The rides of a trip under way, by the "trip" reference the
                 # plan gave each: "pattern.trip.shift.board.alight.YYYY-MM-DD",

@@ -638,3 +638,29 @@ def resolve(index: StopIndex, candidates: list[str], lat: float | None = None,
         if best_key is None or key > best_key:
             best, best_key = found, key
     return best or {"results": [], "ambiguous": False, "query": None}
+
+
+_reverse_cache: dict[tuple, str | None] = {}
+
+
+def reverse(lat: float, lon: float) -> str | None:
+    """What a point on the map is called: the place or address Photon knows
+    there ("Gedimino pr. 9"), for a pin dropped on the map. None offline."""
+    key = (round(lat, 5), round(lon, 5))
+    if key in _reverse_cache:
+        return _reverse_cache[key]
+    url = "https://photon.komoot.io/reverse?" + urllib.parse.urlencode({"lat": lat, "lon": lon, "limit": 1})
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=6) as response:
+            features = json.loads(response.read()).get("features", [])
+    except Exception:  # noqa: BLE001 - a pin without a name is still a pin
+        return None
+    name = None
+    if features:
+        p = features[0].get("properties", {})
+        street = " ".join(x for x in (p.get("street"), p.get("housenumber")) if x)
+        named = p.get("name") and p.get("osm_key") not in ("highway", "place")
+        name = p.get("name") if named else (street or p.get("name"))
+    _reverse_cache[key] = name
+    return name
