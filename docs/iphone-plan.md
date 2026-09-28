@@ -55,7 +55,11 @@ the prototype's tests, ported.
 | Walking directions | `vc/walking.py` (OSRM foot router), `turnArrow` / `minimapHtml` in `web/app.js`, heading from a panel slider | — | MapKit walking directions (`MKDirections`, free) for the path and turns; `CLLocationManager` heading for the minimap; draw the arrow and minimap with SwiftUI shapes (a Live Activity cannot host a map view). How often a Live Activity may be updated while the phone turns is to be measured on the device, not assumed |
 | Crossings | `vc/crossings.py` + weekly `osm.yml` (7 272 OSM crossings of the three cities), matched by node id on the walk's path | — | Bundle the same `crossings.json.gz`; MapKit walking directions do not return OSM node ids, so match crossings to the MapKit polyline by position (within ~5 m) instead |
 | Banner map | OSM tiles drawn in the minimap, turned with the phone; tap opens the app's map | — | A Live Activity cannot host a map view or load tiles itself: the app renders a map snapshot (`MKMapSnapshotter`) into the App Group and the activity shows it as an image. How often that image may change (turning with the phone) must be measured on the device before it is promised |
-| Paging | three dots, tapped | — | A Live Activity takes taps on buttons (App Intents), not swipes: the dots are one `Button(intent:)` |
+| Paging | the banner's corner: a quarter circle in the accent colour, dots inside, tapped | — | A Live Activity takes taps on buttons (App Intents), not swipes: the corner is one `Button(intent:)` clipped to a custom quarter-circle `Shape` |
+| Help | a swiped guide inside the app; tips beside in-app controls | — | Nothing can be drawn over the lock screen or the island: the guide is an in-app page (`TabView`, page style), the tips are in-app popovers (TipKit) |
+| Live buses | server polls every 2 s, pushes at once (server-sent events); each fix moved on along its line's street | — | The app cannot keep a socket open in the background: while the app is open, the same stream; for the Live Activity, the server sends ActivityKit push updates (APNs, needs the push key the user adds as a secret). Move the bus along the street with the same fix + speed + age rule |
+| Streets | `pattern_shape` in the database (encoded polylines) | — | Already in the shared database; decode in Swift and draw with `MKPolyline` |
+| Cancelled trips | GTFS-RT `CANCELED`, parsed without protobuf (`vc/gtfsrt.py`) | — | Decode on the server that sends the pushes, and send the phone a list of called-off trip ids |
 | Location | `watchPosition`, best-fix, accuracy shown, snapped to the walk within 25 m | — | `CLLocationManager`, `kCLLocationAccuracyBest`; GPS outdoors is typically 5–15 m, which meets the 10–25 m target the user set; snap to the walking polyline the same way |
 | Arrival | simulated clock | — | Real GPS: stage changes on position, arrival detection for the question |
 | Design | tokens, motion roles, dark grey | Design system in Core | Port the motion roles (short, varied, reduced-motion aware) to SwiftUI animations |
@@ -72,13 +76,13 @@ In order, each one a yes/no with a screenshot:
 6. The banner changes by itself on a real trip: leave, walk, wait, ride, walk,
    "Ar baigėte kelionę?".
 7. The Dynamic Island compact and expanded views match the banner.
-8. Kaunas, Klaipėda, Šiauliai and Panevėžys trips route.
+8. Kaunas and Klaipėda trips route.
 9. Battery over a morning of use; the banner survives the app being killed.
 
 ## Known gaps carried over
 
-- Walking distance is straight line × 1.3 until real walking directions.
+- Walking distance in the planner is straight line × 1.3; the walk itself
+  follows the foot router's path once it is shown.
 - Same-named stops far apart show identical labels (e.g. two "Slėnis").
-- Map markers can cover labels; bus lines are drawn stop to stop, not along
-  streets (the feeds' `shapes.txt` is not in the database yet).
+- Map markers can cover labels.
 - "Leave at" late at night cannot see the next morning's first service.

@@ -83,6 +83,50 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
   checked; route colours and the minimap never change with them.
 - **The board at the stop is on the home screen** (`/api/nearby`): the three
   nearest stops, their lines and the next times, live where known.
+- **Buses are drawn where they are now** (measured 2026-09-27, Vilnius,
+  every bus once a second for 200 s):
+  - How it was: a moving bus was shown a median 110 m from where it was
+    (p90 207 m), 16.7 s behind.
+  - The server polls stops.lt every 2 s while anyone looks. An unchanged
+    file answers 304, with no body.
+  - It pushes each change at once (`/api/stream`, server-sent events):
+    0.85 s median from publication to the app.
+  - Every position carries when it was measured and the speed then. The
+    app moves the bus on along its line's street for that long, and holds
+    it at its next stop.
+  - Result: 17.4 m median for moving buses (p90 54 m), on the road.
+  - The comparison scripts and numbers are in `docs/trafi-analysis.md`.
+- **Lines follow the streets.** The feeds' `shapes.txt` is in the database
+  (`pattern_shape`, thinned to 1 m, 1 184 of 1 184 patterns). Rides are
+  drawn along it, and live buses are pulled onto it when within 40 m.
+- **Walks follow footways.** A plan's walking paths are asked for the moment
+  it is shown. A walk is never drawn as a straight line, which would cut
+  through buildings; until its path arrives it is not drawn at all. The
+  path is joined on to the door or the stop when the router ends up to 30 m
+  short of it.
+- **Called-off trips are said** (GTFS-Realtime `CANCELED`, read by
+  `vc/gtfsrt.py` without the protobuf library):
+  - The planner leaves them out.
+  - Boards strike them through and say "23:31 atšauktas".
+  - A trip under way that loses its bus says "Autobusas atšauktas" and
+    offers another way.
+- **The server is fast on this computer too.**
+  - It listens on ::1 as well as 127.0.0.1: the browser tries "localhost"
+    as ::1 first, which cost ~300 ms a request before.
+  - It keeps connections open (HTTP/1.1).
+  - It gzips text, and answers static files with 304 when unchanged.
+  - Result: page ready in 41 ms (was 657 ms), requests in 2-17 ms.
+- **The page button is the banner's corner**: a quarter circle in the
+  accent colour with the dots inside, 56 pt. A Live Activity takes taps on
+  buttons, not swipes.
+- **Help lives inside the app.** Nothing can be drawn over the lock screen
+  or the island on an iPhone, so:
+  - A five-page guide, swiped, explains the banner, its corner, its map, the
+    island and the lock-screen button. It is shown once after the first
+    questions, and from Settings.
+  - In-app tips point at the microphone, places, map, time wheels and
+    "Pradėti kelionę" the first time each is on screen. Tapping the
+    highlighted thing works and moves the tips on.
 
 - **An extra vehicle must save at least 3 minutes**, and options that are no
   better in any way are dropped. Without this RAPTOR offers "10, then 10 the

@@ -622,6 +622,11 @@ function withLive(option, firstShift = null) {
       legs[i].missed = true; missed = true;
     }
   }
+  // A bus the operator has called off will not come at all.
+  legs.forEach((leg, i) => {
+    const live = liveOf(leg);
+    if (live && live.cancelled) { legs[i] = { ...leg, cancelled: true, missed: true }; missed = true; }
+  });
   return wholeMinutes({ ...option, legs, leave: legs[0].departure, arrive: legs[legs.length - 1].arrival, missed, firstShift: shift });
 }
 
@@ -630,6 +635,7 @@ function withLive(option, firstShift = null) {
    `short` keeps only the most useful one. */
 function liveWords(live, { short = false } = {}) {
   if (!live) return null;
+  if (live.cancelled) return [{ text: 'reisas atšauktas', problem: true }];
   if (live.departed) return [{ text: 'jau nuvažiavo', problem: true }];
   const words = [];
   const late = Math.round((live.delay_s || 0) / 60);
@@ -686,6 +692,8 @@ function refreshHome() {
 
 async function pollLive() {
   if (!state.serverReady) return;
+  lastLiveAsk = Date.now();
+  openLiveStream();
   const screen = currentScreen().name;
   if (screen === 'home' && !state.locked) { refreshNearby(); refreshPlaceTimes(); }
   if (screen === 'map' && !state.locked) {
@@ -707,11 +715,33 @@ async function pollLive() {
   if (!state.locked && ['results', 'detail'].includes(currentScreen().name)) renderApp();
   drawVehicles();
 }
-setInterval(pollLive, 5_000);
-// The big map's buses, the rider and the trip, at the same rate.
+/* The server says the moment new positions are in (server-sent events,
+   /api/stream) and the app asks for what it shows right then: a bus moves
+   on screen about a second after stops.lt publishes it, not up to ten. The
+   timer stays as a safety net: every 15 s while the stream is open, every
+   5 s while it is not (EventSource reconnects by itself). */
+let liveStream = null, liveSoon = null, lastLiveAsk = 0, lastMapAsk = 0;
+function onLiveNews() {
+  if (liveSoon) return;
+  // One round of asking per 700 ms, however many cities changed at once.
+  liveSoon = setTimeout(() => {
+    liveSoon = null;
+    pollLive();
+    if (currentScreen().name === 'map' && !state.locked) { lastMapAsk = Date.now(); loadMapData(); }
+  }, Math.max(0, 700 - (Date.now() - lastLiveAsk)));
+}
+function openLiveStream() {
+  if (!window.EventSource || liveStream) return;
+  liveStream = new EventSource('/api/stream');
+  liveStream.addEventListener('live', onLiveNews);
+}
+const streaming = () => !!liveStream && liveStream.readyState === 1;
+setInterval(() => { if (!streaming() || Date.now() - lastLiveAsk > 15_000) pollLive(); }, 5_000);
+// The big map's rider and trip every 5 s; its buses with the stream.
 setInterval(() => {
   if (currentScreen().name !== 'map' || state.locked) return;
-  loadMapData(); drawMe(); drawTripOnMap(); refreshMapCard();
+  if (!streaming() || Date.now() - lastMapAsk > 15_000) { lastMapAsk = Date.now(); loadMapData(); }
+  drawMe(); drawTripOnMap(); refreshMapCard();
 }, 5_000);
 
 /* Earliest arrival first: what "you will not make it" should offer. */
@@ -827,7 +857,7 @@ function renderApp() {
   const screen = state.prefs ? currentScreen() : onboardingScreen();
   const view = {
     onboarding: onboardingView, home: homeView, results: resultsView, detail: detailView,
-    settings: settingsView, places: placesView, pick: pickView, map: mapView,
+    settings: settingsView, places: placesView, pick: pickView, map: mapView, guide: guideView,
   }[screen.name] || homeView;
   const html = view(screen);
 
@@ -1015,6 +1045,138 @@ function onboardingView() {
     </div>`;
 }
 
+// ---- the guide: how the banner works, swiped through inside the app
+
+/* Five pages, one thing each, with the thing drawn and moving: the banner on
+   the lock screen, its corner button, its map, the island, the lock-screen
+   button. Shown once after the first questions, and from Settings. Swiped
+   like any iPhone page (or the button, or the arrow keys). Everything the
+   banner does is told here, because on the iPhone nothing can be drawn over
+   the lock screen to point at it. */
+const GUIDE = [
+  { key: 'lock', title: 'Baneris užrakintame ekrane', text: 'Pradėjus kelionę, jis visada matomas. Telefono atrakinti nereikia.' },
+  { key: 'corner', title: 'Spausk kampą', text: 'Mygtukas kampe keičia puslapius: ką daryti dabar, kryptis ir visas maršrutas.' },
+  { key: 'map', title: 'Apvalus žemėlapis', text: 'Paspausk jį ir atsidarys didelis žemėlapis su visu maršrutu ir autobusais.' },
+  { key: 'island', title: 'Salelė viršuje', text: 'Kai naudojiesi telefonu, laikas iki autobuso matomas salelėje. Palaikyk ją pirštu ir pamatysi daugiau.' },
+  { key: 'control', title: 'Mygtukas užrakintame ekrane', text: 'Palaikyk pirštą ant užrakinto ekrano, pasirink tinkinimą ir apačioje pridėk „Vilnius · Baneris“. Kelionę pradėsi vienu paspaudimu.' },
+];
+const GUIDE_ROUTE = { name: '46', color: '0073AC', text_color: 'FFFFFF' };
+
+// A little map for the drawings: a few streets, the path, you, the stop.
+const guideMap = () => `<span class="g-map" aria-hidden="true"><svg viewBox="0 0 64 64">
+    <path class="g-street" d="M-4 40 L70 22 M20 -4 L30 70 M-4 12 L40 4 M44 70 L58 -4"/>
+    <path class="g-route" d="M32 34 L27 16 L50 10"/><circle class="g-stop" cx="50" cy="10" r="4"/>
+    <path class="g-me" d="M32 28 l5 11 -5 -3 -5 3z"/></svg></span>`;
+
+// The banner as drawn in the guide. `slides` are its pages (the corner page
+// turns through them); `ring` marks what a finger taps.
+function guideBanner({ slides = [0], ring = '', mini = false } = {}) {
+  const pages = [
+    `<div class="g-row">${guideMap()}<div class="g-text"><div class="g-title">Išeik 19:37</div>
+       <div class="g-meta">${badge(GUIDE_ROUTE, true)}<span>Operos ir baleto teatras</span></div></div>
+       <div class="g-hero"><div class="g-cap">liko</div><div class="g-big">1<small>min</small></div></div></div>
+     <div class="g-foot">už 7 stotelių</div>`,
+    `<div class="g-row">${guideMap()}<div class="g-text"><div class="g-title">↰ Pasuk kairėn</div>
+       <div class="g-meta"><span>po 60 m · Vilniaus g.</span></div></div>
+       <div class="g-hero"><div class="g-cap">liko</div><div class="g-big">1<small>min</small></div></div></div>
+     <div class="g-foot"></div>`,
+    `<div class="g-legs"><div><b>19:37</b><span class="g-walk">${icon('walk')}</span>720 m · Operos ir baleto t.</div>
+       <div><b>19:49</b>${badge(GUIDE_ROUTE, true)}Žaliasis tiltas</div>
+       <div><b>20:13</b><span class="g-walk">${icon('pin')}</span>Akropolis</div></div>
+     <div class="g-foot"></div>`,
+  ];
+  const cycle = slides.length > 1;
+  return `<div class="g-banner${mini ? ' mini' : ''}${cycle ? ' cycle' : ''}" aria-hidden="true">
+      ${slides.map((p) => `<div class="g-slide">${pages[p]}</div>`).join('')}
+      <span class="g-corner${ring === 'corner' ? ' ringed' : ''}"><span class="g-dots"><i></i><i></i><i></i></span></span>
+      ${ring === 'map' ? '<span class="g-ring g-ring-map"></span>' : ''}
+    </div>`;
+}
+
+function guideArt(key) {
+  if (key === 'lock') {
+    return `<div class="g-phone" aria-hidden="true"><div class="g-date">Rugsėjo 27 d., sekmadienis</div><div class="g-clock">19:36</div>
+      ${guideBanner({ mini: true })}<div class="g-controls"><span>${icon('bus')}</span><span>${icon('camera')}</span></div></div>`;
+  }
+  if (key === 'corner') return guideBanner({ slides: [0, 1, 2], ring: 'corner' });
+  if (key === 'map') return guideBanner({ ring: 'map' });
+  if (key === 'island') {
+    return `<div class="g-island" aria-hidden="true"><span class="g-isl-compact">${badge(GUIDE_ROUTE, true)}<b>3 min</b></span>
+      <span class="g-isl-open">${guideMap()}<span class="g-text"><span class="g-title">Išeik 19:37</span>
+        <span class="g-meta">${badge(GUIDE_ROUTE, true)}<span>Operos ir baleto t.</span></span></span></span>
+      <span class="g-ring g-ring-island"></span></div>`;
+  }
+  return `<div class="g-phone short" aria-hidden="true"><div class="g-clock small">19:36</div>
+    <div class="g-controls"><span class="ours">${icon('bus')}<span class="g-ring g-ring-control"></span></span><span>${icon('camera')}</span></div></div>`;
+}
+
+function guideView() {
+  const page = Math.min(state.guidePage || 0, GUIDE.length - 1);
+  const last = page === GUIDE.length - 1;
+  return `<div class="nav">${navBar({ right: `<button class="link-button guide-skip" data-action="guide-done">${last ? '' : 'Praleisti'}</button>` })}</div>
+    <div class="guide">
+      <div class="guide-track" id="guide-track" data-morph="keep" tabindex="0" aria-label="Kaip naudotis baneriu">
+        ${GUIDE.map((p, i) => `<section class="guide-page" aria-label="${i + 1} iš ${GUIDE.length}: ${esc(p.title)}">
+          <div class="guide-art art-${p.key}">${guideArt(p.key)}</div>
+          <h1 class="guide-title">${esc(p.title)}</h1><p class="guide-text">${esc(p.text)}</p></section>`).join('')}
+      </div>
+      <div class="guide-foot">
+        <div class="guide-dots" aria-hidden="true">${GUIDE.map((_, i) => `<i class="${i === page ? 'on' : ''}"></i>`).join('')}</div>
+        <button class="prominent" data-action="guide-next">${last ? 'Pradėti' : 'Toliau'}</button>
+      </div>
+    </div>`;
+}
+
+/* The page the track is on, after a swipe: the dots and the button follow. */
+function guideSettle() {
+  const track = inPage('#guide-track');
+  if (!track) return;
+  const page = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+  if (page === state.guidePage) return;
+  state.guidePage = page;
+  const last = page === GUIDE.length - 1;
+  inPage('.guide-dots').querySelectorAll('i').forEach((dot, i) => dot.classList.toggle('on', i === page));
+  inPage('[data-action="guide-next"]').textContent = last ? 'Pradėti' : 'Toliau';
+  inPage('.guide-skip').textContent = last ? '' : 'Praleisti';
+}
+function guideTo(page) {
+  const track = inPage('#guide-track');
+  if (track) track.scrollTo({ left: page * track.clientWidth, behavior: reducedMotion.matches ? 'instant' : 'smooth' });
+}
+document.addEventListener('scroll', (event) => {
+  if (event.target instanceof Element && event.target.id === 'guide-track') requestAnimationFrame(guideSettle);
+}, true);
+document.addEventListener('keydown', (event) => {
+  if (currentScreen().name !== 'guide' || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+  guideTo(Math.max(0, Math.min(GUIDE.length - 1, (state.guidePage || 0) + (event.key === 'ArrowRight' ? 1 : -1))));
+});
+// A mouse drags the pages as a finger swipes them; a finger needs nothing.
+let guideDrag = null;
+document.addEventListener('pointerdown', (event) => {
+  const track = event.target.closest && event.target.closest('#guide-track');
+  if (!track || event.pointerType !== 'mouse') return;
+  guideDrag = { track, x: event.clientX, left: track.scrollLeft, moved: false };
+  track.style.scrollSnapType = 'none';
+});
+document.addEventListener('pointermove', (event) => {
+  if (!guideDrag) return;
+  const dx = event.clientX - guideDrag.x;
+  if (Math.abs(dx) > 4) guideDrag.moved = true;
+  guideDrag.track.scrollLeft = guideDrag.left - dx;
+});
+document.addEventListener('pointerup', (event) => {
+  if (!guideDrag) return;
+  const { track, x, left } = guideDrag;
+  guideDrag = null;
+  const w = track.clientWidth, dx = event.clientX - x;
+  // A short flick is enough to turn the page, as on the iPhone.
+  let page = Math.round(left / w);
+  if (dx < -40) page += 1; else if (dx > 40) page -= 1;
+  page = Math.max(0, Math.min(GUIDE.length - 1, page));
+  track.style.scrollSnapType = '';
+  guideTo(page);
+});
+
 // ---- home: say it, or type it, or tap a place
 
 function homeView() {
@@ -1189,11 +1351,15 @@ function depLine(l) {
   if (!shown.length) return '';
   const time = (d, i) => {
     const m = minutes(d);
+    if (d.cancelled) return `<s class="off" aria-label="${esc(d.hm)} atšauktas">${m <= 0 ? 'dabar' : m}</s>`;
     return `<span class="${i === 0 ? 'first' : ''}">${d.live && i === 0 ? icon('live') : ''}${m <= 0 ? 'dabar' : m}</span>`;
   };
   const unit = shown.some((d) => minutes(d) > 0) ? '<small>min</small>' : '';
+  // A bus that will not come is said in words, not only struck through.
+  const gone = shown.filter((d) => d.cancelled);
+  const off = gone.length ? `<span class="dep-off">${esc(gone.map((d) => d.hm).join(', '))} ${gone.length === 1 ? 'atšauktas' : 'atšaukti'}</span>` : '';
   return `<div class="dep" data-key="${esc(`${l.route.name}>${l.headsign}`)}">
-      ${badge(l.route)}<span class="dep-dir">${esc(l.headsign)}</span>
+      ${badge(l.route)}<span class="dep-dir">${esc(l.headsign)}${off}</span>
       <span class="dep-times">${shown.map(time).join('<i>·</i>')}${unit}</span>
     </div>`;
 }
@@ -1358,7 +1524,8 @@ function heroCard(o, all) {
       <div class="route-line">${routeLine(o)}</div>
       <div class="meta">${meta}</div>
       ${live ? `<div class="live-row">${badge(ride.route, true)}${live}</div>` : ''}
-      ${o.missed ? '<div class="live-row problem-text">Persėdimas gali nepavykti: autobusas vėluoja</div>' : ''}
+      ${o.legs.some((l) => l.cancelled) ? '<div class="live-row problem-text">Reisas atšauktas</div>'
+        : o.missed ? '<div class="live-row problem-text">Persėdimas gali nepavykti: autobusas vėluoja</div>' : ''}
       ${tags.length ? `<div class="tags">${tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
     </button>`;
 }
@@ -1370,7 +1537,8 @@ function altRow(o) {
       <span class="main">
         <div class="title"><span class="alt-when${leave.late ? ' late' : ''}">${ride && liveOf(ride) ? icon('live') : ''}${esc(leave.words)}</span><span class="alt-span">${esc(o.leave.hm)}–${esc(o.arrive.hm)}</span></div>
         <div class="sub alt-route">${routeLine(o, true)}</div>
-        ${o.missed ? '<div class="sub problem-text">Persėdimas gali nepavykti</div>' : ''}
+        ${o.legs.some((l) => l.cancelled) ? '<div class="sub problem-text">Reisas atšauktas</div>'
+          : o.missed ? '<div class="sub problem-text">Persėdimas gali nepavykti</div>' : ''}
       </span>
       <span class="trail">${o.duration_min} min${icon('chevron')}</span>
     </button>`;
@@ -1439,6 +1607,8 @@ async function runPlan() {
   try {
     state.plan = await planTrip(state.destination, state.timeMode, state.timeValue);
     for (const o of state.plan.options) for (const l of o.legs) { const r = refOf(l); if (r) state.live[r] = l.live || null; }
+    // Their walking paths, before anyone opens a map of them.
+    state.plan.options.slice(0, 3).forEach((o) => fetchWalks(o));
   } catch (e) {
     state.planError = e.message;
   }
@@ -1468,7 +1638,8 @@ function detailView() {
       what = `<div class="route-line">${badge(leg.route)} <span class="headsign">${esc(leg.headsign || '')}</span></div>
         <div class="sub">Įlipk: ${esc(leg.from.name)}</div>
         ${liveOf(leg) && i === o.legs.findIndex((l) => l.kind === 'ride') ? `<div class="sub">${liveHtml(leg)}</div>` : ''}
-        ${leg.missed ? '<div class="sub problem-text">Gali nespėti: ankstesnis autobusas vėluoja</div>' : ''}
+        ${leg.cancelled ? '<div class="sub problem-text">Reisas atšauktas</div>'
+          : leg.missed ? '<div class="sub problem-text">Gali nespėti: ankstesnis autobusas vėluoja</div>' : ''}
         <div class="sub">Išlipk: ${esc(leg.to.name)} · ${esc(leg.arrival.hm)}</div>
         ${between ? `<button class="stops-toggle" data-action="toggle-stops" data-index="${i}" aria-expanded="${open}">${stopsText(leg.stop_count)}${icon('chevron')}</button>
           ${open ? `<div class="stops reveal">${between}</div>` : ''}` : `<div class="sub">${stopsText(leg.stop_count)}</div>`}`;
@@ -1533,8 +1704,10 @@ function drawMap() {
   }).addTo(map);
   const bounds = [];
   o.legs.forEach((leg) => {
-    const points = leg.kind === 'ride' ? leg.stops.map((s) => [s.lat, s.lon]) : walkRoute(leg).coords;
-    bounds.push(...points);
+    const points = leg.kind === 'ride' ? rideRoute(leg).coords : walkDrawn(leg);
+    // The ends still frame the map while a walk's path is on its way.
+    bounds.push(...(points || [[leg.from.lat, leg.from.lon], [leg.to.lat, leg.to.lon]]));
+    if (!points) return;
     L.polyline(points, leg.kind === 'ride'
       ? { color: '#' + leg.route.color, weight: 6, opacity: 0.95 }
       : { color: getComputedStyle(document.documentElement).getPropertyValue('--label').trim() || '#000', weight: 4, opacity: 0.75, dashArray: '1 8', lineCap: 'round' }).addTo(map);
@@ -1562,11 +1735,13 @@ function drawVehicles() {
     if (!live || live.lat == null || live.departed === undefined) return;
     seen.add(ref);
     const known = vehicleMarkers[ref];
-    if (known) { glideTo(known, live.lat, live.lon); return; }
+    if (known) { follow(known, live); return; }
     const html = `<span class="bus-marker" style="background:#${esc(leg.route.color)};color:#${esc(leg.route.text_color)}">${esc(leg.route.name)}</span>`;
-    vehicleMarkers[ref] = L.marker([live.lat, live.lon], {
+    const at = ahead(live);
+    vehicleMarkers[ref] = L.marker([at.lat, at.lon], {
       icon: L.divIcon({ className: 'bus-icon', html, iconSize: null }), keyboard: false, interactive: false,
     }).addTo(vehicleLayer);
+    follow(vehicleMarkers[ref], live);
   });
   Object.keys(vehicleMarkers).forEach((ref) => {
     if (!seen.has(ref)) { vehicleLayer.removeLayer(vehicleMarkers[ref]); delete vehicleMarkers[ref]; }
@@ -1679,13 +1854,14 @@ function drawTripOnMap(fit = false) {
   const at = now().getTime();
   const phase = trip ? phaseOf(trip, at) : null;
   const w = trip ? waypointOf(trip, phase) : null;
-  const key = trip ? `${trip.option.id}|${trip.option.leave.iso}|${w ? w.label : ''}|${Object.keys(walkRoutes).length}` : '';
+  const key = trip ? `${trip.option.id}|${trip.option.leave.iso}|${w ? w.label : ''}|${walksLoaded}` : '';
   if (key === tripDrawn && !fit) return;
   tripDrawn = key;
   bigLayers.trip.clearLayers();
   if (!trip) return;
   for (const leg of trip.option.legs) {
-    const points = leg.kind === 'ride' ? leg.stops.map((stop) => [stop.lat, stop.lon]) : walkRoute(leg).coords;
+    const points = leg.kind === 'ride' ? rideRoute(leg).coords : walkDrawn(leg);
+    if (!points) continue;
     L.polyline(points, leg.kind === 'ride'
       ? { color: `#${leg.route.color}`, weight: 6, opacity: 0.9, interactive: false }
       : { color: '#1C1C1E', weight: 4, opacity: 0.75, dashArray: '1 8', lineCap: 'round', interactive: false }).addTo(bigLayers.trip);
@@ -1751,11 +1927,13 @@ function drawBuses(list) {
   for (const v of list) {
     seen.add(v.key);
     const known = busMarkers[v.key];
-    if (known) { glideTo(known, v.lat, v.lon); continue; }
+    if (known) { follow(known, v); continue; }
     const html = `<span class="bus-marker" style="background:#${esc(v.color)};color:#${esc(v.text_color)}">${esc(v.route)}</span>`;
-    busMarkers[v.key] = L.marker([v.lat, v.lon], {
+    const at = ahead(v);
+    busMarkers[v.key] = L.marker([at.lat, at.lon], {
       icon: L.divIcon({ className: 'bus-icon', html, iconSize: null }), keyboard: false, interactive: false,
     }).addTo(bigLayers.buses);
+    follow(busMarkers[v.key], v);
   }
   for (const key of Object.keys(busMarkers)) {
     if (!seen.has(key)) { bigLayers.buses.removeLayer(busMarkers[key]); delete busMarkers[key]; }
@@ -1831,6 +2009,12 @@ function settingsView() {
         <button class="row" data-action="pick-origin"><span class="lead">${icon('location')}</span><span class="main"><div class="title">Iš kur keliauji</div></span><span class="trail">${esc(origin() ? origin().name : 'nežinoma')}${icon('chevron')}</span></button>
       </div>
       ${paletteSection()}
+      <div class="section-title"><span>Pagalba</span></div>
+      <div class="group">
+        <button class="row" data-action="guide"><span class="main"><div class="title">Kaip naudotis baneriu</div>
+          <div class="sub">Užrakintas ekranas, kampo mygtukas, žemėlapis, salelė</div></span><span class="trail">${icon('chevron')}</span></button>
+        <button class="row" data-action="tips-reset"><span class="main"><div class="title">Rodyti patarimus iš naujo</div>
+          <div class="sub">Trumpi patarimai prie mygtukų programėlėje</div></span></button></div>
       <div class="section-title"><span>Duomenys</span></div>
       <div class="group"><div class="row plain"><span class="main"><div class="title">Vilniaus, Kauno ir Klaipėdos tvarkaraščiai</div><div class="sub" id="data-info">${esc(state.dataInfo || '')}</div></span></div></div>
       <div style="margin-top:24px"><button class="secondary" style="width:100%" data-action="reset">Pradėti iš naujo</button></div>
@@ -1924,10 +2108,12 @@ async function replanTrip() {
   if (!trip || state.replanning) return;
   const legs = trip.option.legs;
   const first = legs.findIndex((l) => l.kind === 'ride');
-  const k = legs.findIndex((l, i) => l.missed && i !== first);
+  const k = legs.findIndex((l, i) => l.cancelled || (l.missed && i !== first));
   if (k < 1) return;
   const before = legs[k - 1];
-  const start = { name: before.to.name, lat: before.to.lat, lon: before.to.lon };
+  // The first bus called off: from wherever the trip starts, not its stop.
+  const from = k === first ? legs[0].from : before.to;
+  const start = { name: from.name, lat: from.lat, lon: from.lon };
   state.replanning = true;
   renderAll();
   try {
@@ -2032,36 +2218,56 @@ function needleAngle(where, deg) {
 
 // ---- walking directions: the street path, its turns, a map that turns with you
 
-/* Each walk of a trip gets its real path along the streets (/api/walk,
-   OpenStreetMap's foot router), fetched once when the trip starts. Until it
-   arrives, or without the internet, the walk is a straight line to the stop
-   and the arrow says "tiesiai": nothing invented. */
+/* Each walk gets its real path along footways, pavements, yards and
+   crossings (/api/walk, OpenStreetMap's foot router), asked for as soon as a
+   plan is on screen, so it is there before the map is. Until it arrives, or
+   without the internet, the walk is not drawn at all (a straight line would
+   cut through buildings), and the arrow says "tiesiai": nothing invented. */
 const walkRoutes = {};
+const walkAsked = {};
+let walksLoaded = 0;
+const WALK_STRAIGHT_M = 15;     // shorter than this, a straight line is the path
 const walkKey = (leg) => `${leg.from.lat.toFixed(5)},${leg.from.lon.toFixed(5)}>${leg.to.lat.toFixed(5)},${leg.to.lon.toFixed(5)}`;
 function fetchWalks(option) {
   if (!option || !option.legs) return Promise.resolve();
   return Promise.all(option.legs.map((leg) => {
-    if (leg.kind !== 'walk' || leg.metres < 40) return null;
+    if (leg.kind !== 'walk' || leg.metres < WALK_STRAIGHT_M) return null;
     const key = walkKey(leg);
-    if (key in walkRoutes) return null;
-    walkRoutes[key] = null;
-    return api('/api/walk', { from: `${leg.from.lat},${leg.from.lon}`, to: `${leg.to.lat},${leg.to.lon}` })
-      .then((route) => { walkRoutes[key] = route; }).catch(() => {});
+    if (!walkAsked[key]) {
+      walkRoutes[key] = null;
+      walkAsked[key] = api('/api/walk', { from: `${leg.from.lat},${leg.from.lon}`, to: `${leg.to.lat},${leg.to.lon}` })
+        .then((route) => { walkRoutes[key] = route; walksLoaded++; }).catch(() => {});
+    }
+    return walkAsked[key];
   }));
+}
+/* A walk as drawn on a map: its street path, or nothing yet. */
+function walkDrawn(leg) {
+  const real = walkRoutes[walkKey(leg)];
+  if (real) return real.coords;
+  return leg.metres < WALK_STRAIGHT_M ? [[leg.from.lat, leg.from.lon], [leg.to.lat, leg.to.lon]] : null;
 }
 function straightRoute(a, b) {
   const metres = straightMetres(a, b);
   return { metres, coords: [[a.lat, a.lon], [b.lat, b.lon]], along: [0, metres], turns: [], straight: true };
 }
 const walkRoute = (leg) => walkRoutes[walkKey(leg)] || straightRoute(leg.from, leg.to);
-// A ride's path is its stops in order.
+/* A ride's path: the street its line drives (the feed's shape), with where
+   each stop is along it; without one, its stops joined in order. Straight
+   lines from stop to stop cut through buildings. */
+const rideRoutes = new WeakMap();
 function rideRoute(leg) {
-  const coords = leg.stops.map((stop) => [stop.lat, stop.lon]);
+  const known = rideRoutes.get(leg);
+  if (known) return known;
+  const street = leg.shape && leg.shape.length >= 2 && leg.shape_m && leg.shape_m.length === leg.stops.length;
+  const coords = street ? leg.shape : leg.stops.map((stop) => [stop.lat, stop.lon]);
   const along = [0];
   for (let i = 1; i < coords.length; i++) {
     along.push(along[i - 1] + straightMetres({ lat: coords[i - 1][0], lon: coords[i - 1][1] }, { lat: coords[i][0], lon: coords[i][1] }));
   }
-  return { metres: along[along.length - 1], coords, along, turns: [] };
+  const route = { metres: along[along.length - 1], coords, along, turns: [], stopsAt: street ? leg.shape_m : along.slice() };
+  rideRoutes.set(leg, route);
+  return route;
 }
 
 /* The point `d` metres along a path, and which way the path runs there. */
@@ -2152,7 +2358,7 @@ function minimapHtml(where, { route, here, heading, target, color, done = 0, bus
   if (far > rim) { tx = R + ((tx - R) * rim) / far; ty = R + ((ty - R) * rim) / far; }
   let busDot = '';
   if (bus && bus.lat != null) {
-    const b = smoothPoint(busKey || `${where}-bus`, bus.lat, bus.lon);
+    const b = fixPoint(busKey || `${where}-bus`, bus);
     const [bx, by] = px(b);
     if (Math.hypot(bx - R, by - R) < R + 6) busDot = `<circle class="mm-bus" cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="5" style="fill:#${esc(color || '1C1C1E')}"/>`;
   }
@@ -2160,7 +2366,7 @@ function minimapHtml(where, { route, here, heading, target, color, done = 0, bus
   return `<span class="minimap" data-action="open-map" role="button" aria-label="Atidaryti žemėlapį" style="width:${size}px;height:${size}px">
       <span class="mm-turn" style="transform:rotate(${(-turned).toFixed(1)}deg)">${tiles.join('')}
         <svg viewBox="0 0 ${size} ${size}">
-          <polyline class="mm-case" points="${pts(ahead)}"/><polyline class="mm-done" points="${pts(behind)}"/><polyline class="mm-path" points="${pts(ahead)}"/>
+          ${route.straight ? '' : `<polyline class="mm-case" points="${pts(ahead)}"/><polyline class="mm-done" points="${pts(behind)}"/><polyline class="mm-path" points="${pts(ahead)}"/>`}
           <circle class="mm-target" cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}" r="5.5"${color ? ` style="stroke:#${esc(color)}"` : ''}/>${busDot}
         </svg></span>
       <svg class="mm-me" viewBox="-40 -40 80 80"><path d="M0 -8 6 6.5 0 3.2 -6 6.5Z"/></svg>
@@ -2216,11 +2422,100 @@ function crossingsLine(leg) {
   return `Pereisi ${n === 1 ? 'gatvę' : `${n} ${plural(n, 'gatvę', 'gatves', 'gatvių')}`}${marked ? (n === 1 ? ' per perėją' : ' per perėjas') : ''}${roads.length ? `: ${roads.join(', ')}` : ''}`;
 }
 
-/* Moving things glide from one fix to the next instead of jumping: a bus's
-   new position arrives every ~5 s (stops.lt rewrites its file about every
-   6 s), and the marker travels there over the same time, so on screen it is
-   always moving, never teleporting. A jump of more than 600 m (a vehicle
-   back from nowhere) is taken at once. */
+/* Where a bus is now, not where it was when it last reported. A position
+   is ~8 s old when it arrives (stops.lt's own delay); moved on along its
+   heading at its reported speed for that long (at most AHEAD_MAX_S), a
+   moving bus is drawn a median 20 m from where it really is, against 67 m
+   left where it was reported, and 110 m as the app used to show it
+   (measured on Vilnius' feed, 2026-09-27; see vc/live.py). A new fix eases
+   the drawn position over CORRECT_MS instead of jumping; a jump of more
+   than 600 m (a vehicle back from nowhere) is taken at once. */
+const AHEAD_MAX_S = 30, CORRECT_MS = 900;
+function ahead(fix, at = Date.now()) {
+  const age = fix.measured_ms ? Math.min(Math.max(0, (at - fix.measured_ms) / 1000), AHEAD_MAX_S) : 0;
+  const go = fix.speed > 0.5 ? fix.speed * age : 0;
+  // On its line's street, moved on along it and held at the next stop (a
+  // bus stops there): a median 17 m from the truth for a moving bus, on the
+  // road, never through a building (same recording; 91% of fixes lie within
+  // 40 m of their street, the rest go straight along their heading).
+  const street = fix.pattern != null && fix.along != null ? streetOf(fix.pattern) : null;
+  if (street) {
+    const next = street.stops.find((m) => m > fix.along + 3) ?? street.length;
+    return pointOnStreet(street, Math.min(fix.along + go, next));
+  }
+  if (!go || fix.bearing == null) return { lat: fix.lat, lon: fix.lon };
+  const b = rad(fix.bearing);
+  return { lat: fix.lat + (go * Math.cos(b)) / 111_320, lon: fix.lon + (go * Math.sin(b)) / (111_320 * Math.cos(rad(fix.lat))) };
+}
+/* Each line's street, asked for once when a bus of it first shows. */
+const streets = new Map();
+function streetOf(pattern) {
+  const known = streets.get(pattern);
+  if (known) return known === 'asked' ? null : known;
+  streets.set(pattern, 'asked');
+  api('/api/shape', { pattern }).then((street) => {
+    street.length = street.along[street.along.length - 1];
+    streets.set(pattern, street);
+    // Buses of the line already drawn ease onto the street.
+    for (const [marker, m] of movers) {
+      if (m.fix.pattern === pattern) { const p = marker.getLatLng(); movers.set(marker, nextMotion({ lat: p.lat, lon: p.lng }, m.fix)); }
+    }
+    for (const [key, m] of Object.entries(dotMotion)) {
+      if (m.fix.pattern === pattern) dotMotion[key] = nextMotion(motionAt(m), m.fix);
+    }
+  }).catch(() => streets.delete(pattern));
+  return null;
+}
+function pointOnStreet(street, m) {
+  const { coords, along } = street;
+  let lo = 0, hi = along.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (along[mid] <= m) lo = mid; else hi = mid; }
+  const f = clamp01((m - along[lo]) / Math.max(0.01, along[hi] - along[lo]));
+  return { lat: coords[lo][0] + (coords[hi][0] - coords[lo][0]) * f, lon: coords[lo][1] + (coords[hi][1] - coords[lo][1]) * f };
+}
+const easeOut3 = (x) => 1 - (1 - x) ** 3;
+function nextMotion(shown, fix) {
+  const target = ahead(fix);
+  const off = shown && straightMetres(shown, target) <= 600 ? [shown.lat - target.lat, shown.lon - target.lon] : [0, 0];
+  return { fix, off, t0: performance.now() };
+}
+function motionAt(m, ts = performance.now()) {
+  const p = ahead(m.fix);
+  const k = 1 - easeOut3(Math.min(1, (ts - m.t0) / CORRECT_MS));
+  return { lat: p.lat + m.off[0] * k, lon: p.lon + m.off[1] * k };
+}
+const movers = new Map();
+let moving = false, lastMove = 0;
+function follow(marker, fix) {
+  const was = movers.get(marker);
+  if (was && was.fix.measured_ms === fix.measured_ms && was.fix.lat === fix.lat && was.fix.lon === fix.lon) return;
+  const shown = marker.getLatLng();
+  movers.set(marker, nextMotion(was ? { lat: shown.lat, lon: shown.lng } : null, fix));
+  if (!moving) { moving = true; requestAnimationFrame(moveFrame); }
+}
+function moveFrame(ts) {
+  // About 30 frames a second: smooth for something moving a few pixels a second.
+  if (ts - lastMove >= 33) {
+    lastMove = ts;
+    for (const [marker, m] of movers) {
+      if (!marker._map) { movers.delete(marker); continue; }
+      const p = motionAt(m, ts);
+      marker.setLatLng([p.lat, p.lon]);
+    }
+  }
+  if (movers.size) requestAnimationFrame(moveFrame); else moving = false;
+}
+// The same for a dot drawn by hand (the banner's minimap redraws 4x a second).
+const dotMotion = {};
+function fixPoint(key, fix) {
+  const m = dotMotion[key];
+  if (!m || m.fix.measured_ms !== fix.measured_ms || m.fix.lat !== fix.lat || m.fix.lon !== fix.lon) {
+    dotMotion[key] = nextMotion(m ? motionAt(m) : null, fix);
+  }
+  return motionAt(dotMotion[key]);
+}
+
+/* The rider's own dot glides from one fix to the next instead of jumping. */
 const glides = new Map();
 let gliding = false;
 function glideTo(marker, lat, lon, ms = 5200) {
@@ -2236,19 +2531,6 @@ function glideFrame(ts) {
     if (f >= 1) glides.delete(marker);
   }
   if (glides.size) requestAnimationFrame(glideFrame); else gliding = false;
-}
-// The same for a dot drawn by hand (the banner's minimap redraws 4x a second).
-const tracks = {};
-function smoothPoint(key, lat, lon, ms = 5200) {
-  const at = performance.now();
-  const lerpTrack = (tr) => { const f = Math.min(1, (at - tr.t0) / ms); return { lat: tr.a[0] + (tr.b[0] - tr.a[0]) * f, lon: tr.a[1] + (tr.b[1] - tr.a[1]) * f }; };
-  const tr = tracks[key];
-  if (!tr) { tracks[key] = { a: [lat, lon], b: [lat, lon], t0: at }; return { lat, lon }; }
-  if (tr.b[0] !== lat || tr.b[1] !== lon) {
-    const cur = lerpTrack(tr);
-    tracks[key] = straightMetres(cur, { lat, lon }) > 600 ? { a: [lat, lon], b: [lat, lon], t0: at } : { a: [cur.lat, cur.lon], b: [lat, lon], t0: at };
-  }
-  return lerpTrack(tracks[key]);
 }
 
 // ---- where the rider really is
@@ -2355,12 +2637,16 @@ function guidance(trip, phase, at) {
   const same = a.lat === b.lat && a.lon === b.lon;
   const f = clamp01((at - t(a.time)) / Math.max(1, t(b.time) - t(a.time)));
   const route = rideRoute(leg);
+  const s = route.stopsAt, k2 = Math.min(k + 1, s.length - 1);
+  const done = s[k] + (s[k2] - s[k]) * f;
+  const on = pointAlong(route, Math.min(route.metres, done));
+  const deg = same ? bearing(leg.from, leg.to) : on.heading;
   return {
     mode: 'ride', route,
-    here: lerp(a, b, f),
-    done: route.along[k] + (route.along[Math.min(k + 1, route.along.length - 1)] - route.along[k]) * f,
-    deg: bearing(same ? leg.from : a, same ? leg.to : b),
-    heading: facing(bearing(same ? leg.from : a, same ? leg.to : b)),
+    here: { lat: on.lat, lon: on.lon },
+    done,
+    deg,
+    heading: facing(deg),
     next: b.name,
     left: Math.max(1, stops.filter((stop) => t(stop.time) > at).length),
     minutes: Math.max(1, minutesUntil(t(b.time), at)),
@@ -2465,9 +2751,10 @@ function activityKey() {
   return `trip:${stageOf(phase)}${leavingNow(state.trip, phase, at) ? ':now' : ''}|${pageOf(state.trip, phase)}`;
 }
 
-/* One button that names the next page, with the position in it. The dots
-   live inside the button on purpose: they say "page 2 of 3" without looking
-   like something to swipe, which a Live Activity cannot do. */
+/* The page button: the banner's corner, cut off by a quarter circle, in the
+   banner's accent colour, with the dots inside. A filled shape reads as
+   something to press, where bare dots read as decoration; the dots still say
+   "page 2 of 3". A Live Activity takes taps on buttons, not swipes. */
 function activityPager() {
   const b = state.banner, trip = state.trip;
   if (!b || b.stage !== 'trip' || !trip) return '';
@@ -2553,8 +2840,16 @@ function nowPage(trip, phase, at, where = 'lock') {
   // A late bus has broken a connection ahead: say which, and offer the way on.
   // (An early first bus is not a connection: "Paskubėk" covers it below.)
   const firstRide = legs.find((l) => l.kind === 'ride');
-  const broken = legs.slice((phase.i ?? -1) + 1).find((l) => l.missed && l !== firstRide);
+  const broken = legs.slice((phase.i ?? -1) + 1).find((l) => l.cancelled || (l.missed && l !== firstRide));
   const map = phaseMap(trip, phase, at, where, 64);
+  if (broken && broken.cancelled) {
+    return stageHtml({ map,
+      title: '<span class="problem-text">Autobusas atšauktas</span>',
+      meta: `${badge(broken.route, true)}${clip(`${esc(broken.departure.hm)} · ${esc(broken.from.name)}`)}`,
+      hero,
+      foot: `<button class="foot-action" data-action="trip-replan">${state.replanning ? `Ieškau${dotsHtml}` : 'Rasti kitą kelią'}</button>`,
+    });
+  }
   if (broken) {
     return stageHtml({ map,
       title: '<span class="problem-text">Nespėsi persėsti</span>',
@@ -2799,7 +3094,6 @@ function renderLock() {
   if (state.locked && !lock.firstChild) {
     lock.innerHTML = `
       <div class="lock-top"><div class="date"></div><div class="clock"><span class="roll"></span></div></div>
-      <div class="coach" hidden></div>
       <div class="stack"></div>
       <div class="controls">
         <button class="control ours" data-action="lock-button" aria-label="Vilnius · Kur keliausime">${icon('bus')}</button>
@@ -2826,14 +3120,6 @@ function renderLock() {
   const card = renderActivity($('.stack', lock), 'lock');
   // The system's own hint gives way to a banner, as on the iPhone.
   lock.classList.toggle('has-activity', !!card);
-  // Until the button has been used once, say what it is for.
-  const coach = $('.coach', lock);
-  const showCoach = !card && !store.get('lockButtonUsed', false);
-  if (coach.hidden === showCoach) {
-    coach.hidden = !showCoach;
-    coach.innerHTML = showCoach ? 'Paspausk <b>mygtuką</b> ir pasakyk, kur keliauji.' : '';
-    if (showCoach) play(coach, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'content', { delay: 300, fill: 'backwards' });
-  }
 }
 
 /* Locking fades the lock screen in; unlocking slides it up and the app
@@ -2957,7 +3243,7 @@ function renderAll() {
 // Four times a second, but the DOM only changes where the content did.
 let lastMinute = '';
 setInterval(() => {
-  renderClock(); renderLock(); renderIsland();
+  renderClock(); renderLock(); renderIsland(); coachTick();
   const minute = hm(now());
   if (minute !== lastMinute) {
     lastMinute = minute;
@@ -2966,6 +3252,192 @@ setInterval(() => {
     else if (state.prefs && currentScreen().name === 'home') refreshHome();
   }
 }, 250);
+
+// ==================================================================== tips
+//
+// How to use it, told to a first-time user a few words at a time, next to
+// the thing itself and the first time it is on screen: a tour up front is
+// skipped and forgotten, a tip beside the button is not. The highlighted
+// thing keeps working: a tap on it does what it does and moves the tips on,
+// so each one is learnt by doing. Each group is shown once; Settings brings
+// them back. Only inside the app: on a real iPhone nothing can be drawn over
+// the lock screen or the island, so the banner is explained in the guide.
+
+const TOURS = {
+  home: {
+    when: () => !state.locked && !!state.prefs && !state.sheet && currentScreen().name === 'home',
+    steps: [
+      { target: '#app .dock-mic', text: 'Pasakyk, kur ir kada nori būti, pvz.: „ISM universitete 14:20“.', round: true },
+      { target: '#app .ptile:not(.add)', text: 'Tavo vietos. Paspausk ir iškart matysi, kada išeiti.' },
+      { target: '#app .bar-buttons [data-action="map"]', text: 'Žemėlapis: stotelės ir autobusai realiu laiku.', round: true },
+    ],
+  },
+  results: {
+    when: () => !state.locked && !state.sheet && currentScreen().name === 'results' && !!coachFind('#app .cta'),
+    steps: [
+      { target: '#app .segmented', text: 'Reikia būti iki tam tikro laiko? Rinkis „Atvykti iki“ ir pasuk ratukus.' },
+      { target: '#app .cta', text: 'Spausk ir vesiu iki pat vietos, net kai telefonas užrakintas.' },
+    ],
+  },
+};
+
+let coach = null;           // the tour on screen: { name, steps, i, missing }
+const coachWait = {};       // since when each tour's moment has lasted
+
+/* The live element, not a copy fading out during a page turn. */
+function coachFind(selector) {
+  return [...document.querySelectorAll(selector)].find((el) => !el.closest('.act-ghost, .leaving') && el.getClientRects().length) || null;
+}
+
+function coachTick() {
+  if (coach) return;
+  const done = store.get('tips', {});
+  for (const [name, tour] of Object.entries(TOURS)) {
+    if (done[name] || !tour.when()) { delete coachWait[name]; continue; }
+    coachWait[name] = coachWait[name] || Date.now();
+    // Let the screen settle, and its entrance play, before pointing at it.
+    if (Date.now() - coachWait[name] >= 900) { startTour(name); return; }
+  }
+}
+
+function startTour(name) {
+  const steps = TOURS[name].steps.filter((step) => coachFind(step.target));
+  if (!steps.length) return;
+  let layer = $('#coachmark');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'coachmark';
+    layer.className = 'coachmark';
+    layer.innerHTML = `${'<i class="cm-block"></i>'.repeat(5)}<div class="cm-spot"></div>
+      <div class="cm-bubble" role="dialog" aria-label="Patarimas">
+        <p class="cm-text" aria-live="polite"></p>
+        <div class="cm-foot"><span class="cm-count"></span><button class="cm-skip" data-cm="skip">Praleisti</button><button class="cm-next" data-cm="next"></button></div>
+        <i class="cm-arrow" aria-hidden="true"></i>
+      </div>`;
+    $('#screen').appendChild(layer);
+  }
+  layer.hidden = false;
+  coach = { name, steps, i: 0, missing: 0 };
+  showStep(true);
+  play(layer, [{ opacity: 0 }, { opacity: 1 }], 'fade');
+  requestAnimationFrame(coachFrame);
+}
+
+function showStep(first = false) {
+  const layer = $('#coachmark');
+  const step = coach.steps[coach.i];
+  const last = coach.i === coach.steps.length - 1;
+  $('.cm-text', layer).textContent = step.text;
+  $('.cm-count', layer).textContent = coach.steps.length > 1 ? `${coach.i + 1} iš ${coach.steps.length}` : '';
+  $('.cm-next', layer).textContent = last ? 'Supratau' : 'Toliau';
+  $('.cm-skip', layer).hidden = last;
+  placeCoach();
+  const bubble = $('.cm-bubble', layer);
+  if (!first) play(bubble, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'content');
+  $('.cm-next', layer).focus({ preventScroll: true });
+}
+
+function nextStep() {
+  if (!coach) return;
+  // The next tip whose thing is on screen; the ones gone with it are skipped.
+  let i = coach.i + 1;
+  while (i < coach.steps.length && !coachFind(coach.steps[i].target)) i++;
+  if (i >= coach.steps.length) { endTour(); return; }
+  coach.i = i; coach.missing = 0;
+  showStep();
+}
+
+function endTour() {
+  if (!coach) return;
+  const done = store.get('tips', {});
+  done[coach.name] = true;
+  store.set('tips', done);
+  coach = null;
+  const layer = $('#coachmark');
+  afterPlay(play(layer, [{ opacity: 1 }, { opacity: 0 }], 'exit', { fill: 'forwards' }), () => {
+    if (!coach) { layer.hidden = true; layer.getAnimations().forEach((a) => a.cancel()); }
+  });
+}
+
+/* Follows its thing as the screen moves under it; a thing that has gone
+   (the phone unlocked, the page turned) moves the tips on. */
+function coachFrame() {
+  if (!coach) return;
+  const step = coach.steps[coach.i];
+  if (coachFind(step.target)) { coach.missing = 0; placeCoach(); }
+  else if (++coach.missing > 30) nextStep();
+  requestAnimationFrame(coachFrame);
+}
+
+function placeCoach() {
+  const step = coach.steps[coach.i];
+  const el = coachFind(step.target);
+  const layer = $('#coachmark');
+  if (!el || !layer) return;
+  const screen = $('#screen');
+  const box = screen.getBoundingClientRect();
+  const k = box.width / screen.offsetWidth || 1;
+  const r = el.getBoundingClientRect();
+  const W = screen.offsetWidth, H = screen.offsetHeight;
+  const pad = step.pad ?? 6;
+  let x = (r.left - box.left) / k - pad, y = (r.top - box.top) / k - pad;
+  let w = r.width / k + pad * 2, h = r.height / k + pad * 2;
+  let radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 12;
+  if (step.round) {
+    const d = Math.max(w, h);
+    x -= (d - w) / 2; y -= (d - h) / 2; w = h = d; radius = d / 2;
+  } else {
+    radius = Math.min(radius + pad, h / 2);
+  }
+  const put = (node, left, top, width, height) => Object.assign(node.style, {
+    left: `${left}px`, top: `${top}px`, width: `${Math.max(0, width)}px`, height: `${Math.max(0, height)}px` });
+  const [top, bottom, left, right, hole] = layer.querySelectorAll('.cm-block');
+  put(top, 0, 0, W, y);
+  put(bottom, 0, y + h, W, H - y - h);
+  put(left, 0, y, x, h);
+  put(right, x + w, y, W - x - w, h);
+  put(hole, x, y, w, h);
+  hole.hidden = !step.look;
+  const spot = $('.cm-spot', layer);
+  put(spot, x, y, w, h);
+  spot.style.borderRadius = `${radius}px`;
+
+  // The words go where there is room: below a thing in the top half, above
+  // one lower down, with the arrow pointing at its middle. A thing inside
+  // the banner has them outside it, so they cover nothing it says.
+  const bubble = $('.cm-bubble', layer);
+  const bw = bubble.offsetWidth, bh = bubble.offsetHeight, gap = 14;
+  const around = step.anchor && coachFind(step.anchor);
+  let ay = y, ah = h;
+  if (around) {
+    const a = around.getBoundingClientRect();
+    ay = Math.min(y, (a.top - box.top) / k - 4);
+    ah = Math.max(y + h, (a.bottom - box.top) / k + 4) - ay;
+  }
+  const roomBelow = H - (ay + ah) - gap - 30, roomAbove = ay - gap - 54;
+  const below = (ay + ah / 2 < H * 0.5 && roomBelow >= bh) || roomAbove < bh;
+  const cx = x + w / 2;
+  const bx = Math.min(Math.max(cx - bw / 2, 16), W - 16 - bw);
+  bubble.style.left = `${bx}px`;
+  bubble.style.top = `${below ? ay + ah + gap : ay - gap - bh}px`;
+  bubble.classList.toggle('below', below);
+  $('.cm-arrow', layer).style.left = `${Math.min(Math.max(cx - bx - 7, 20), bw - 34)}px`;
+}
+
+// The tips' own buttons; and a tap on the highlighted thing moves them on
+// after the thing has done what it does.
+document.addEventListener('click', (event) => {
+  if (!coach) return;
+  const button = event.target.closest('[data-cm]');
+  if (button) {
+    event.stopPropagation();
+    if (button.dataset.cm === 'skip') endTour(); else nextStep();
+    return;
+  }
+  const el = coachFind(coach.steps[coach.i].target);
+  if (el && el.contains(event.target)) setTimeout(nextStep, 0);
+}, true);
+document.addEventListener('keydown', (event) => { if (coach && event.key === 'Escape') endTour(); });
 
 // =================================================================== voice
 
@@ -3183,6 +3655,20 @@ const actions = {
     pop();
   },
   settings: () => push({ name: 'settings' }),
+  guide: () => { state.guidePage = 0; push({ name: 'guide' }); },
+  'guide-next': () => {
+    const page = state.guidePage || 0;
+    if (page < GUIDE.length - 1) guideTo(page + 1); else actions['guide-done']();
+  },
+  'guide-done': () => {
+    store.set('guideSeen', true);
+    if (currentScreen().name === 'guide') pop();
+  },
+  'tips-reset': () => {
+    store.set('tips', {});
+    Object.keys(coachWait).forEach((name) => delete coachWait[name]);
+    toast('Patarimai bus rodomi iš naujo');
+  },
   map: () => { state.mapSel = null; push({ name: 'map' }); },
   'map-me': () => { const me = mePoint(); if (bigmap && me) bigmap.flyTo([me.lat, me.lon], 17, { duration: 0.6 }); },
   // The banner's minimap opens the big one, with the trip on it.
@@ -3218,9 +3704,9 @@ const actions = {
     if (state.draft.step < 1) { state.draft.step += 1; renderApp(); return; }
     state.prefs = { priority: state.draft.priority, walk: state.draft.walk };
     state.draft = null; save();
-    state.stack = [HOME()];
-    // Straight to the lock screen: the banner is the product.
-    state.locked = true;
+    // Then what the banner does, before the first trip needs it.
+    state.guidePage = 0;
+    state.stack = [HOME(), { name: 'guide', id: uid() }];
     renderAll();
   },
   pref: (el) => { state.prefs[el.dataset.pref] = el.dataset.value; save(); renderApp(); },

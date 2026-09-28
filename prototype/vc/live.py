@@ -20,6 +20,20 @@ of 99 (the rest were going to or from the depot).
 A delay seen now is assumed to hold for the rest of the trip. Buses do make
 up time, which is why the app never moves "leave now" later by the whole
 delay (see withLive in web/app.js).
+
+How fresh, measured 2026-09-27 on Vilnius (every bus, once a second, for
+200 s): gps_full.txt is rewritten every ~5.3 s and a position in it is a
+median 7.8 s old when fetched. The app used to show a bus a median 16.7 s
+behind, 110 m from where it really was when moving (p90 207 m): the server
+fetched only when asked, answered with the snapshot of the ask before, and
+the app asked every 5 s. Now a background poll asks every POLL_S while
+anyone is looking (an unchanged file answers 304, no body), each change is
+pushed to the app at once (/api/stream), and every position carries when it
+was measured and the bus's speed, so the app moves it on along its heading
+for the time since (web/app.js, ahead()). On the same recording: 20 m median
+(p90 53 m) for moving buses.
+
+The GTFS-Realtime feeds (vc/gtfsrt.py) give the trips that will not run.
 """
 
 from __future__ import annotations
@@ -28,10 +42,13 @@ import csv
 import io
 import threading
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 
+from . import gtfsrt, shapes
 from .data import USER_AGENT, Timetable
 
 FEEDS = {
@@ -39,15 +56,25 @@ FEEDS = {
     "Kaunas": "https://www.stops.lt/kaunas/gps_full.txt",
     "Klaipėda": "https://www.stops.lt/klaipeda/gps_full.txt",
 }
+# The trips that will not run: GTFS-Realtime trip updates marked CANCELED.
+RT_FEEDS = {
+    "Vilnius": "https://www.stops.lt/vilnius/gtfs_realtime.pb",
+    "Kaunas": "https://www.stops.lt/kaunas/gtfs_realtime.pb",
+    "Klaipėda": "https://www.stops.lt/klaipeda/trip_updates.pb",
+}
 # Trip ids in the database are namespaced by feed ('vilnius:A1-01-...').
 SLUGS = {"Vilnius": "vilnius", "Kaunas": "kaunas", "Klaipėda": "klaipeda"}
 
-# stops.lt rewrites a city's file about every 6 s (measured 2026-09-27: the
-# positions changed on every other poll 3 s apart); each vehicle reports
-# every ~9 s (median age of a position). Asking every 5 s misses nothing.
-REFRESH_S = 5       # a city is fetched at most this often, and only on demand
+POLL_S = 2          # while anyone looks, each city's file is asked for this often
+ACTIVE_S = 90       # a city nobody has asked about for this long is not polled
+CANCEL_POLL_S = 30  # cancellations change seldom
 STALE_S = 120       # older than this, a snapshot is not "live" any more
 LOST_S = 300        # a vehicle silent for five minutes is not on the road
+# Kaunas and Klaipėda do not say when each position was measured. Measured
+# for Klaipėda 2026-09-27 against its GTFS-RT, which times the same fixes: a
+# position is a median 4 s old when the file carrying it is written (p10 3 s,
+# p90 7 s). Kaunas, the same system, is assumed alike (not measured).
+FILE_AGE_S = 4
 TROLLEYBUS = "Troleibusai"
 
 
@@ -63,6 +90,9 @@ class Vehicle:
     trip: tuple[int, int] | None    # (pattern, index into pattern_trips)
     headsign: str
     number: str
+    measured: float | None = None   # when the position was taken, epoch seconds
+    speed: float | None = None      # m/s, as the vehicle reported it
+    along: float | None = None      # metres along its line's street; None off it
 
 
 def _int(value) -> int | None:
@@ -88,11 +118,14 @@ def parse_full(text: str, clock_s: int) -> list[dict]:
         measured = _int(row.get("MatavimoLaikas"))
         if measured is not None and (clock_s - measured) % 86_400 > LOST_S:
             continue
+        kmh = _int(row.get("Greitis"))
         out.append({
             "route": route,
             "trolleybus": (row.get("Transportas") or "").strip() == TROLLEYBUS,
             "lat": lat / 1e6, "lon": lon / 1e6,
             "bearing": _int(row.get("Azimutas")),
+            "speed": kmh / 3.6 if kmh is not None and 0 <= kmh < 150 else None,
+            "measured": measured,
             "delay": _int(row.get("NuokrypisSekundemis")),
             "start": _int(row.get("ReisoPradziaMinutemis")),
             "gtfs_trip": (row.get("ReisoIdGTFS") or "").strip(),
@@ -157,41 +190,96 @@ class Matcher:
         return abs(self.t.stop_lat[stop] - v["lat"]) + abs(self.t.stop_lon[stop] - v["lon"])
 
 
-def _fetch(url: str) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=6) as response:
-        return response.read().decode("utf-8", "replace")
+def _fetch(url: str, etag: str | None = None) -> tuple[bytes | None, str | None, float | None]:
+    """(body, etag, Last-Modified as epoch seconds); body None when the file
+    has not changed since `etag` (stops.lt answers 304 then, no body)."""
+    headers = {"User-Agent": USER_AGENT}
+    if etag:
+        headers["If-None-Match"] = etag
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=6) as response:
+            modified = response.headers.get("Last-Modified")
+            return (response.read(), response.headers.get("ETag"),
+                    parsedate_to_datetime(modified).timestamp() if modified else None)
+    except urllib.error.HTTPError as error:
+        if error.code == 304:
+            return None, etag, None
+        raise
 
 
 class Live:
-    """Live vehicles per city, fetched on demand and at most every REFRESH_S.
+    """Live vehicles per city.
 
     The first request for a city waits for the feed (up to the fetch
-    timeout); later ones get the last snapshot at once while a background
-    thread refreshes it. A failed fetch keeps the old snapshot until it is
-    STALE_S old, after which the city simply has no live data.
+    timeout). After start(), a background thread keeps every city asked
+    about in the last ACTIVE_S fresh, every POLL_S, and wakes whoever waits
+    in wait_for_change(); without it (tests), a city is refetched on demand.
+    A failed fetch keeps the old snapshot until it is STALE_S old, after
+    which the city simply has no live data. `fetch(url)` may be given in
+    place of stops.lt: it returns the feed's body, or (body, etag,
+    Last-Modified) as _fetch does.
     """
 
-    def __init__(self, t: Timetable, fetch=_fetch, clock=datetime.now):
+    def __init__(self, t: Timetable, fetch=None, clock=datetime.now):
         self.t = t
-        self.fetch = fetch
+        self.get = _fetch if fetch is None else (
+            lambda url, etag=None: (lambda got: got if isinstance(got, tuple) else (got, None, None))(fetch(url)))
         self.clock = clock
         self.matcher: Matcher | None = None
         self.lock = threading.Lock()
-        self.snapshots: dict[str, tuple[float, list[Vehicle], dict]] = {}
+        # city -> {"checked": monotonic, "vehicles": [...], "by_trip": {...}}
+        self.snapshots: dict[str, dict] = {}
         self.pending: set[str] = set()
+        self.etags: dict[str, str | None] = {}
+        self.wanted: dict[str, float] = {}
+        self.cancelled: dict[str, tuple[float, set[tuple[int, int]]]] = {}
+        self.version = 0
+        self.changed = threading.Condition()
+        self.polling = False
+
+    def start(self) -> None:
+        """Polls the cities being looked at, in the background."""
+        if not self.polling:
+            self.polling = True
+            threading.Thread(target=self._poll, daemon=True).start()
+
+    def _poll(self) -> None:
+        asked_cancelled: dict[str, float] = {}
+        while True:
+            started = time.monotonic()
+            with self.lock:
+                active = [city for city, at in self.wanted.items() if started - at <= ACTIVE_S]
+            for city in active:
+                self._refresh(city)
+                if started - asked_cancelled.get(city, -1e9) >= CANCEL_POLL_S:
+                    asked_cancelled[city] = started
+                    self._refresh_cancelled(city)
+            time.sleep(max(0.2, POLL_S - (time.monotonic() - started)))
+
+    def wait_for_change(self, seen: int, timeout: float) -> int:
+        """The snapshots' version, once it is not `seen` (or after `timeout`)."""
+        with self.changed:
+            if self.version == seen:
+                self.changed.wait(timeout)
+            return self.version
+
+    def _changed(self) -> None:
+        with self.changed:
+            self.version += 1
+            self.changed.notify_all()
 
     def has_feed(self, city: str | None) -> bool:
         return city in FEEDS
 
     def vehicles(self, city: str) -> list[Vehicle] | None:
         snapshot = self._snapshot(city)
-        return snapshot[1] if snapshot else None
+        return snapshot["vehicles"] if snapshot else None
 
     def in_box(self, south: float, west: float, north: float, east: float) -> list[dict]:
-        """The vehicles in service inside a map view, in their route's colour.
-        Ones not matched to a trip (to or from the depot) are left out: a bus
-        that takes nobody anywhere is noise on the map."""
+        """The vehicles in service inside a map view, in their route's colour,
+        with when each position was taken and the speed then, for the app to
+        move it on. Ones not matched to a trip (to or from the depot) are
+        left out: a bus that takes nobody anywhere is noise on the map."""
         out = []
         for city in FEEDS:
             for vehicle in self.vehicles(city) or []:
@@ -204,6 +292,7 @@ class Live:
                     "route": route.short_name, "color": route.color, "text_color": route.text_color,
                     "headsign": self.t.pattern_headsign[pattern] or "",
                     "lat": vehicle.lat, "lon": vehicle.lon, "bearing": vehicle.bearing, "delay_s": vehicle.delay,
+                    **_motion(vehicle),
                 })
         return out
 
@@ -211,31 +300,43 @@ class Live:
         stops = self.t.pattern_stops[pattern]
         city = self.t.stop_city[stops[0]] if stops and self.t.stop_city else "Vilnius"
         snapshot = self._snapshot(city)
-        return snapshot[2].get((pattern, trip)) if snapshot else None
+        return snapshot["by_trip"].get((pattern, trip)) if snapshot else None
 
     def _snapshot(self, city: str):
         if city not in FEEDS:
             return None
+        now = time.monotonic()
         with self.lock:
+            self.wanted[city] = now
             snapshot = self.snapshots.get(city)
-            due = snapshot is None or time.monotonic() - snapshot[0] >= REFRESH_S
-            start = due and city not in self.pending
-            if start:
+            idle = city not in self.pending
+            first = snapshot is None and idle
+            due = not self.polling and snapshot is not None and now - snapshot["checked"] >= POLL_S and idle
+            if first or due:
                 self.pending.add(city)
-        if start:
-            if snapshot is None:
-                self._refresh(city)
-            else:
-                threading.Thread(target=self._refresh, args=(city,), daemon=True).start()
+        if first:
+            self._refresh(city)
+            if not self.polling:
+                self._refresh_cancelled(city)
+        elif due:
+            threading.Thread(target=self._refresh, args=(city,), daemon=True).start()
         with self.lock:
             snapshot = self.snapshots.get(city)
-        if snapshot is None or time.monotonic() - snapshot[0] > STALE_S:
+        if snapshot is None or time.monotonic() - snapshot["checked"] > STALE_S:
             return None
         return snapshot
 
     def _refresh(self, city: str) -> None:
+        url = FEEDS[city]
         try:
-            text = self.fetch(FEEDS[city])
+            body, etag, modified = self.get(url, self.etags.get(url))
+            checked = time.monotonic()
+            if body is None:                 # unchanged since the last ask
+                with self.lock:
+                    if city in self.snapshots:
+                        self.snapshots[city]["checked"] = checked
+                return
+            text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
             now = self.clock()
             clock_s = clock_seconds(now)
             rows = parse_full(text, clock_s)
@@ -244,30 +345,85 @@ class Live:
             today = (now.year * 10_000 + now.month * 100 + now.day, now.weekday())
             before = now - timedelta(days=1)
             yesterday = (before.year * 10_000 + before.month * 100 + before.day, before.weekday())
+            midnight = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            streets = shapes.of(self.t)
             vehicles, by_trip = [], {}
             for row in rows:
                 trip = self.matcher.match(city, row, today, yesterday, clock_s)
+                if row["measured"] is not None:
+                    # Seconds of the day: a fix from before midnight is yesterday's.
+                    measured = midnight + row["measured"]
+                    if measured > now.timestamp() + 600:
+                        measured -= 86_400
+                else:
+                    measured = modified - FILE_AGE_S if modified is not None else None
                 vehicle = Vehicle(city=city, route=row["route"], trolleybus=row["trolleybus"],
                                   lat=row["lat"], lon=row["lon"], bearing=row["bearing"],
                                   delay=row["delay"] if trip else None, trip=trip,
-                                  headsign=row["headsign"], number=row["number"])
+                                  headsign=row["headsign"], number=row["number"],
+                                  measured=measured, speed=row["speed"])
+                if trip:
+                    # On its street, near where the timetable and its delay
+                    # say it is: GPS puts a bus 5-20 m off the road at times.
+                    departures = self.t.pattern_trips[trip[0]][trip[1]][2]
+                    left = sum(1 for d in departures if d + (vehicle.delay or 0) <= clock_s) - 1
+                    vehicle.along = streets.place(trip[0], vehicle.lat, vehicle.lon, max(0, left))
                 vehicles.append(vehicle)
                 if trip:
                     by_trip[trip] = vehicle
             with self.lock:
-                self.snapshots[city] = (time.monotonic(), vehicles, by_trip)
+                self.etags[url] = etag
+                self.snapshots[city] = {"checked": checked, "vehicles": vehicles, "by_trip": by_trip}
+            self._changed()
         except Exception:  # noqa: BLE001 - no live data is a normal state
             pass
         finally:
             with self.lock:
                 self.pending.discard(city)
 
+    def _refresh_cancelled(self, city: str) -> None:
+        """The trips of today the city's GTFS-Realtime feed calls off."""
+        url = RT_FEEDS.get(city)
+        if url is None:
+            return
+        try:
+            body, etag, _modified = self.get(url, self.etags.get(url))
+            if body is None:
+                with self.lock:
+                    if city in self.cancelled:
+                        self.cancelled[city] = (time.monotonic(), self.cancelled[city][1])
+                return
+            feed = gtfsrt.parse(body if isinstance(body, bytes) else body.encode("utf-8"))
+            if self.matcher is None:
+                self.matcher = Matcher(self.t)
+            slug = SLUGS.get(city, city.lower())
+            trips = {self.matcher.by_gtfs[key] for key in (f"{slug}:{trip_id}" for trip_id in gtfsrt.cancelled(feed))
+                     if key in self.matcher.by_gtfs}
+            with self.lock:
+                self.etags[url] = etag
+                changed = self.cancelled.get(city, (0, None))[1] != trips
+                self.cancelled[city] = (time.monotonic(), trips)
+            if changed:
+                self._changed()
+        except Exception:  # noqa: BLE001 - without the feed nothing is known to be cancelled
+            pass
+
+    def cancelled_trips(self) -> set[tuple[int, int]]:
+        """(pattern, trip) of every trip called off today, as last heard (and
+        not longer ago than STALE_S: an old "cancelled" is not news)."""
+        now = time.monotonic()
+        with self.lock:
+            return {trip for at, trips in self.cancelled.values() if now - at <= STALE_S for trip in trips}
+
     # -- what the app shows ---------------------------------------------------
 
     def leg_state(self, pattern: int, trip: int, shift: int, board: int, alight: int,
                   midnight: datetime, now: datetime) -> dict | None:
         """The live state of one ride: its vehicle, delay and expected times,
-        in the frame of the plan's `midnight`. None when nothing is known."""
+        in the frame of the plan's `midnight`. None when nothing is known;
+        {"cancelled": True} for today's trip the operator has called off."""
+        if shift == 0 and midnight.date() == now.date() and (pattern, trip) in self.cancelled_trips():
+            return {"cancelled": True}
         vehicle = self.vehicle_on(pattern, trip)
         if vehicle is None or vehicle.delay is None:
             return None
@@ -290,6 +446,7 @@ class Live:
             "lon": vehicle.lon,
             "bearing": vehicle.bearing,
             "vehicle": vehicle.number,
+            **_motion(vehicle),
         }
 
     def ride_state(self, ref: list, now: datetime) -> dict | None:
@@ -313,6 +470,16 @@ class Live:
                     state = self.ride_state(leg["trip"], now)
                     if state:
                         leg["live"] = state
+
+
+def _motion(vehicle: Vehicle) -> dict:
+    """When the position was taken (epoch ms), how fast the vehicle went, and
+    how far along its line's street it was, for the app to move it on along
+    the street to where it is by now."""
+    return {"measured_ms": round(vehicle.measured * 1000) if vehicle.measured is not None else None,
+            "speed": round(vehicle.speed, 1) if vehicle.speed is not None else None,
+            "pattern": vehicle.trip[0] if vehicle.trip else None,
+            "along": round(vehicle.along, 1) if vehicle.along is not None else None}
 
 
 def _clock(midnight: datetime, seconds: int) -> dict:

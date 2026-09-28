@@ -1,9 +1,12 @@
 """The endpoints over HTTP: search offline (recorded Photon, sampled stops),
 planning on the real timetable when it has been downloaded."""
 
+import gzip
 import json
 import threading
+import time
 import unittest
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
@@ -50,6 +53,31 @@ class Endpoints(unittest.TestCase):
     def get(self, path, **params):
         with urllib.request.urlopen(f"{self.base}{path}?{urllib.parse.urlencode(params)}", timeout=5) as response:
             return json.loads(response.read())
+
+    def test_text_goes_gzipped_and_is_not_sent_twice(self):
+        request = urllib.request.Request(f"{self.base}/app.js", headers={"Accept-Encoding": "gzip"})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body, tag = response.read(), response.headers["ETag"]
+            self.assertEqual(response.headers["Content-Encoding"], "gzip")
+        self.assertEqual(gzip.decompress(body), (server.WEB / "app.js").read_bytes())
+        again = urllib.request.Request(f"{self.base}/app.js", headers={"If-None-Match": tag})
+        with self.assertRaises(urllib.error.HTTPError) as answer:
+            urllib.request.urlopen(again, timeout=5)
+        answer.exception.close()
+        self.assertEqual(answer.exception.code, 304)
+
+    def test_the_stream_says_when_buses_have_moved(self):
+        class News:
+            def wait_for_change(self, seen, timeout):
+                if seen != 7:
+                    return 7
+                time.sleep(min(timeout, 0.2))
+                return 7
+        self.addCleanup(setattr, server.State, "live", server.State.live)
+        server.State.live = News()
+        with urllib.request.urlopen(f"{self.base}/api/stream", timeout=5) as response:
+            self.assertEqual(response.headers["Content-Type"], "text/event-stream; charset=utf-8")
+            self.assertEqual((response.readline(), response.readline()), (b"event: live\n", b"data: 7\n"))
 
     def test_search_passes_position_through(self):
         body = self.get("/api/search", q="Akropolis", lat=KAUNAS[0], lon=KAUNAS[1])

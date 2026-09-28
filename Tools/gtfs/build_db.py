@@ -35,6 +35,13 @@ assumed (see docs/data-formats.md):
    of them), so those are namespaced as `<city>:<id>`. Route ids already carry
    the city (`kaunas_bus_3`) and are kept verbatim.
 
+Every feed also ships shapes.txt, the streets its vehicles drive (checked
+2026-09-28: Vilnius 142 214 points, Kaunas 89 436, Klaipėda 38 371). Each
+pattern keeps the shape most of its trips use, thinned to within
+SHAPE_TOLERANCE_M of the original and written as an encoded polyline: the
+app draws rides along the street with it instead of straight from stop to
+stop through the buildings, and moves live buses along it.
+
 Usage:
     build_db.py --feed vilnius=v.zip --feed kaunas=k.zip ... <out.sqlite>
     build_db.py <gtfs.zip | extracted-dir> <out.sqlite>    # Vilnius only
@@ -162,6 +169,14 @@ CREATE TABLE trip_time (
     PRIMARY KEY (trip_id, seq)
 ) WITHOUT ROWID;
 
+-- The street a pattern's vehicles drive: the feed's shape most of its trips
+-- use, as an encoded polyline (Google's algorithm, 1e-5 degrees). A pattern
+-- whose trips name no shape has no row.
+CREATE TABLE pattern_shape (
+    pattern_id INTEGER PRIMARY KEY REFERENCES pattern(id),
+    polyline   TEXT NOT NULL
+);
+
 -- Derived here: no feed ships a transfers.txt.
 CREATE TABLE transfer (
     from_stop INTEGER NOT NULL REFERENCES stop(id),
@@ -182,6 +197,55 @@ CREATE INDEX idx_stop_name ON stop(name);
 """
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+# A shape is thinned (Douglas-Peucker) to within this of the feed's own line.
+SHAPE_TOLERANCE_M = 1.0
+
+
+def encode_polyline(points: list[tuple[float, float]]) -> str:
+    """Google's encoded polyline, 1e-5 degrees: about 1 m, 4-6 bytes a point."""
+    out, last = [], (0, 0)
+    for lat, lon in points:
+        here = (round(lat * 1e5), round(lon * 1e5))
+        for value in (here[0] - last[0], here[1] - last[1]):
+            value = ~(value << 1) if value < 0 else value << 1
+            while value >= 0x20:
+                out.append(chr((0x20 | (value & 0x1F)) + 63))
+                value >>= 5
+            out.append(chr(value + 63))
+        last = here
+    return "".join(out)
+
+
+def thin(points: list[tuple[float, float]], tolerance_m: float = SHAPE_TOLERANCE_M) -> list[tuple[float, float]]:
+    """Douglas-Peucker, iterative (a long shape would overflow recursion), in
+    a flat local projection, which is exact enough across one city."""
+    if len(points) < 3:
+        return points
+    lat0 = math.radians(points[0][0])
+    xy = [(lon * 111_320 * math.cos(lat0), lat * 110_540) for lat, lon in points]
+    keep = [False] * len(points)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(points) - 1)]
+    while stack:
+        a, b = stack.pop()
+        (ax, ay), (bx, by) = xy[a], xy[b]
+        dx, dy = bx - ax, by - ay
+        length2 = dx * dx + dy * dy
+        worst, worst_i = -1.0, -1
+        for i in range(a + 1, b):
+            px, py = xy[i]
+            if length2 == 0:
+                d = math.hypot(px - ax, py - ay)
+            else:
+                f = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length2))
+                d = math.hypot(px - (ax + f * dx), py - (ay + f * dy))
+            if d > worst:
+                worst, worst_i = d, i
+        if worst > tolerance_m:
+            keep[worst_i] = True
+            stack.extend(((a, worst_i), (worst_i, b)))
+    return [p for p, k in zip(points, keep) if k]
 
 
 def parse_time(value: str) -> int:
@@ -283,6 +347,7 @@ class Builder:
         self.trip_rows: list[tuple] = []
         self.trip_time_rows: list[tuple] = []
         self.pattern_index: dict[tuple, int] = {}
+        self.pattern_shape_rows: list[tuple[int, str]] = []
         self.cities: list[dict] = []
 
     def add(self, feed: Feed) -> None:
@@ -375,6 +440,7 @@ class Builder:
         # --- trips and their stop sequences --------------------------------
         # (read above, excluded lines already filtered out)
         # Group trips into patterns by their ordered stop list.
+        shapes_used: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         for trip_id in sorted(sequences):            # sorted for reproducible ids
             stops = sorted(sequences[trip_id])
             meta = trip_meta.get(trip_id)
@@ -398,11 +464,35 @@ class Builder:
                     self.pattern_stop_rows.append((pid, seq, stop))
 
             pid = self.pattern_index[key]
+            if (meta.get("shape_id") or "").strip():
+                shapes_used[pid][meta["shape_id"].strip()] += 1
             tid = len(self.trip_rows)
             self.trip_rows.append((tid, pid, service_index[meta["service_id"]],
                                    ns + trip_id, stops[0][3]))
             for seq, (_, _, arrival, departure) in enumerate(stops):
                 self.trip_time_rows.append((tid, seq, arrival, departure))
+
+        # --- the streets: each new pattern's most used shape -----------------
+        shapes_written = 0
+        if feed.has("shapes.txt") and shapes_used:
+            wanted = {max(used.items(), key=lambda kv: (kv[1], kv[0]))[0] for used in shapes_used.values()}
+            points: dict[str, list[tuple[int, float, float]]] = defaultdict(list)
+            for row in feed.rows("shapes.txt"):
+                if row["shape_id"] in wanted:
+                    points[row["shape_id"]].append((int(row["shape_pt_sequence"]),
+                                                    float(row["shape_pt_lat"]), float(row["shape_pt_lon"])))
+            encoded: dict[str, str] = {}
+            for shape_id, rows in points.items():
+                line = [(lat, lon) for _, lat, lon in sorted(rows)]
+                if len(line) >= 2:
+                    encoded[shape_id] = encode_polyline(thin(line))
+            for pid in sorted(shapes_used):
+                if pid < before[2]:
+                    continue                    # a pattern of an earlier feed
+                shape_id = max(shapes_used[pid].items(), key=lambda kv: (kv[1], kv[0]))[0]
+                if shape_id in encoded:
+                    self.pattern_shape_rows.append((pid, encoded[shape_id]))
+                    shapes_written += 1
 
         self.cities.append({
             "slug": feed.slug,
@@ -412,6 +502,7 @@ class Builder:
             "routes": len(self.route_rows) - before[1],
             "patterns": len(self.pattern_rows) - before[2],
             "trips": len(self.trip_rows) - before[3],
+            "shapes": shapes_written,
         })
 
     def transfers(self, max_transfer_m: int) -> list[tuple[int, int, int]]:
@@ -468,6 +559,7 @@ def build(feeds: list[Feed], db: sqlite3.Connection, max_transfer_m: int) -> dic
     db.executemany("INSERT INTO pattern_stop VALUES (?,?,?)", builder.pattern_stop_rows)
     db.executemany("INSERT INTO trip VALUES (?,?,?,?,?)", builder.trip_rows)
     db.executemany("INSERT INTO trip_time VALUES (?,?,?,?)", builder.trip_time_rows)
+    db.executemany("INSERT INTO pattern_shape VALUES (?,?)", builder.pattern_shape_rows)
 
     transfers = builder.transfers(max_transfer_m)
     db.executemany("INSERT OR REPLACE INTO transfer VALUES (?,?,?)", transfers)
@@ -481,6 +573,7 @@ def build(feeds: list[Feed], db: sqlite3.Connection, max_transfer_m: int) -> dic
         "patterns": len(builder.pattern_rows),
         "trips": len(builder.trip_rows),
         "stop_times": len(builder.trip_time_rows),
+        "pattern_shapes": len(builder.pattern_shape_rows),
         "transfers": len(transfers),
         "cross_city_transfers": sum(1 for a, b, _ in transfers if city_of[a] != city_of[b]),
         "max_departure_s": max((t[3] for t in builder.trip_time_rows), default=0),
@@ -555,7 +648,7 @@ def main() -> None:
     size = output.stat().st_size
     print(f"wrote {output} ({size/1e6:.1f} MB)")
     for key in ("stops", "routes", "services", "service_exceptions", "patterns", "trips",
-                "stop_times", "transfers", "cross_city_transfers", "max_departure_s"):
+                "stop_times", "pattern_shapes", "transfers", "cross_city_transfers", "max_departure_s"):
         print(f"  {key:20} {stats[key]:>10,}")
     for city in stats["cities"]:
         print(f"  {city['name']:10} stops {city['stops']:>6,}  routes {city['routes']:>4}"

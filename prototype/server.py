@@ -10,10 +10,13 @@ the internet.
 
 from __future__ import annotations
 
+import gzip
 import json
 import mimetypes
+import socket
 import sys
 import threading
+import time
 import traceback
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,7 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vc import crossings, data, departures, live, planner, search, speech_lt, walking  # noqa: E402
+from vc import crossings, data, departures, live, planner, search, shapes, speech_lt, walking  # noqa: E402
 
 PORT = 8765
 WEB = Path(__file__).resolve().parent / "web"
@@ -45,6 +48,7 @@ def load_in_background() -> None:
         State.index = search.StopIndex(State.timetable)
         State.cities = planner.city_summaries(State.timetable)
         State.live = live.Live(State.timetable)
+        State.live.start()
         State.crossings = crossings.load()
         print(f"Ready: {len(State.timetable.stop_names)} stops. Open http://localhost:{PORT}")
     except Exception as error:  # noqa: BLE001
@@ -98,20 +102,44 @@ def minutes_of(now: str | None) -> int | None:
     return int(hours) * 60 + int(mins)
 
 
+# Measured 2026-09-27 in the browser: every request spent ~300 ms opening a
+# connection (the browser tries "localhost" as ::1 first, where nothing
+# listened, then falls back to 127.0.0.1), against 2-15 ms answering it.
+# Now the server listens on both loopbacks and keeps connections open
+# (HTTP/1.1), and text goes gzipped: app.js is 193 KB as written.
+GZIP_MIN = 1024
+_gzipped: dict[tuple, bytes] = {}
+
+
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    timeout = 60  # an idle kept-alive connection is closed after a minute
 
     def log_message(self, fmt, *args):  # quieter console
         if "/api/" in self.path:
             sys.stderr.write("%s %s\n" % (self.command, self.path.split("?")[0]))
 
-    def send_json(self, payload, status=200):
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    def send_body(self, body: bytes, kind: str, status=200, headers=(), cache_key=None):
+        """One response with its length, gzipped when the browser takes it."""
+        if len(body) >= GZIP_MIN and "gzip" in self.headers.get("Accept-Encoding", ""):
+            packed = _gzipped.get(cache_key) if cache_key else None
+            if packed is None:
+                packed = gzip.compress(body, compresslevel=6)
+                if cache_key:
+                    _gzipped[cache_key] = packed
+            body = packed
+            headers = (*headers, ("Content-Encoding", "gzip"), ("Vary", "Accept-Encoding"))
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Type", kind)
+        for name, value in headers:
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def send_json(self, payload, status=200):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_body(body, "application/json; charset=utf-8", status, (("Cache-Control", "no-store"),))
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -141,6 +169,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = {k: v for k, v in found.items() if k != "nodes"}
                 body["crossings"] = crossings.on_route(found, found.get("nodes", []), State.crossings)
                 return self.send_json(body)
+            if url.path == "/api/stream":
+                return self.stream()
             if url.path.startswith("/api/") and State.timetable is None:
                 return self.send_json({"error": State.error or "Tvarkaraščiai dar kraunami…"}, 503)
             if url.path == "/api/search":
@@ -158,7 +188,9 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/plan":
                 # "now" (optional, like "at"): with mode=arrive, trips that
                 # should already have started are dropped, and when none is
-                # left the answer says "late" and by how many minutes.
+                # left the answer says "late" and by how many minutes. Live,
+                # today's called-off trips are not offered at all.
+                real = live_now(query) if query.get("now") else None
                 result = planner.plan(
                     State.timetable,
                     point(query["from"], query.get("from_name", "Tavo vieta")),
@@ -168,8 +200,8 @@ class Handler(BaseHTTPRequestHandler):
                     query.get("priority", "fastest"),
                     query.get("walk", "normal"),
                     now=local_time(query["now"]) if query.get("now") else None,
+                    skip=State.live.cancelled_trips() if real is not None else None,
                 )
-                real = live_now(query) if query.get("now") else None
                 if real is not None:
                     State.live.annotate(result["options"], real)
                 result["live_available"] = real is not None
@@ -192,6 +224,17 @@ class Handler(BaseHTTPRequestHandler):
                 real = live_now(query)
                 return self.send_json(departures.at_stop(State.timetable, int(query["id"]), when,
                                                          State.live if real is not None else None))
+            if url.path == "/api/shape":
+                # One line's street, for the app to move its buses along:
+                # the points, metres along at each, and where its stops are.
+                shape = shapes.of(State.timetable).get(int(query["pattern"]))
+                if shape is None:
+                    return self.send_json({"error": "Šis maršrutas neturi kelio linijos."}, 404)
+                return self.send_json({
+                    "coords": [[round(a, 5), round(b, 5)] for a, b in zip(shape.lat, shape.lon)],
+                    "along": [round(m, 1) for m in shape.along],
+                    "stops": [round(m, 1) for m in shape.stop_m],
+                })
             if url.path == "/api/vehicles":
                 # The buses in service inside the map's view, live.
                 south, west, north, east = (float(x) for x in query["bbox"].split(","))
@@ -220,26 +263,72 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             return self.send_json({"error": str(error)}, 500)
 
+    def stream(self):
+        """Server-sent events: "live" the moment new positions (or called-off
+        trips) have come in, for the app to ask for what it shows; a comment
+        every 15 s keeps the line open. Ends when the app goes away."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.close_connection = True
+        seen = -1
+        try:
+            while True:
+                if State.live is None:
+                    time.sleep(1)
+                    self.wfile.write(b": loading\n\n")
+                else:
+                    version = State.live.wait_for_change(seen, 15)
+                    if version != seen:
+                        seen = version
+                        self.wfile.write(f"event: live\ndata: {version}\n\n".encode())
+                    else:
+                        self.wfile.write(b": still here\n\n")
+                self.wfile.flush()
+        except OSError:
+            return
+
     def serve_static(self, path: str):
         target = (WEB / (path.lstrip("/") or "index.html")).resolve()
         if WEB not in target.parents and target != WEB / "index.html" or not target.is_file():
             target = WEB / "index.html"
+        stat = target.stat()
+        # Asked again on every load (an edit shows at once), but answered
+        # "not modified" without the body when the browser already has it.
+        tag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+        if self.headers.get("If-None-Match") == tag:
+            self.send_response(304)
+            self.send_header("ETag", tag)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         body = target.read_bytes()
         kind = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         if kind.startswith("text/") or kind in ("application/javascript", "text/javascript"):
             kind += "; charset=utf-8"
-        self.send_response(200)
-        self.send_header("Content-Type", kind)
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self.send_body(body, kind, headers=(("Cache-Control", "no-cache"), ("ETag", tag)),
+                       cache_key=(str(target), tag))
+
+
+class ServerV6(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
 
 
 def main():
     mimetypes.add_type("application/javascript", ".js")
     threading.Thread(target=load_in_background, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server.daemon_threads = True
+    # "localhost" is ::1 first in the browser: answer there too, so it does
+    # not wait for the fallback to 127.0.0.1. Still only this computer.
+    try:
+        v6 = ServerV6(("::1", PORT), Handler)
+        v6.daemon_threads = True
+        threading.Thread(target=v6.serve_forever, daemon=True).start()
+    except OSError:
+        pass
     print(f"Vilnius Commute prototype on http://localhost:{PORT}")
     try:
         server.serve_forever()

@@ -119,8 +119,10 @@ class Router:
         departing_at: int,
         today: tuple[int, int],
         yesterday: tuple[int, int],
+        skip: set[tuple[int, int]] | None = None,
     ) -> list[Journey]:
-        """One journey per number of rides that improves on fewer rides."""
+        """One journey per number of rides that improves on fewer rides.
+        `skip`: (pattern, trip) of today's trips that will not run."""
         t, p = self.t, self.p
         stop_count = len(t.stop_names)
         best = [INF] * stop_count
@@ -137,7 +139,18 @@ class Router:
                 how[access.stop] = ("access", access.metres, departing_at)
                 marked.add(access.stop)
 
-        days = ((-DAY, self._running(*yesterday)), (0, self._running(*today)))
+        running_today = self._running(*today)
+        if skip:
+            # Called-off trips are left out of today only; the cached lists
+            # of other patterns are shared, not copied.
+            gone: dict[int, set[int]] = {}
+            for pattern, slot in skip:
+                gone.setdefault(pattern, set()).add(slot)
+            running_today = list(running_today)
+            for pattern, slots in gone.items():
+                if 0 <= pattern < len(running_today):
+                    running_today[pattern] = [s for s in running_today[pattern] if s not in slots]
+        days = ((-DAY, self._running(*yesterday)), (0, running_today))
         results: list[Journey] = []
         best_arrival = INF
 

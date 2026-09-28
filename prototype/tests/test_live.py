@@ -3,6 +3,7 @@ the app is told (delay, expected times, how many stops away). No network: a
 four-stop line and hand-written feed rows."""
 
 import sys
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from vc import departures, live  # noqa: E402
 from vc.data import Route, Timetable  # noqa: E402
+from vc.router import Access, Router  # noqa: E402
+from tests.test_gtfsrt import message, number, text  # noqa: E402
 
 MIN = 60
 
@@ -151,6 +154,91 @@ class Board(unittest.TestCase):
         board = departures.nearby(t, 54.7100, 25.2950, AT, None)      # at Žirmūnai, the last stop
         zirmunai = next(s for s in board["stops"] if s["name"] == "Žirmūnai")
         self.assertEqual(zirmunai["lines"], [])
+
+
+def cancelled_feed(*trip_ids: str) -> bytes:
+    """A GTFS-Realtime feed calling these trips off."""
+    return b"".join([message(1, text(1, "2.0"), number(3, 0))] + [
+        message(2, text(1, f"trip_update_{trip}"), message(3, message(1, text(1, trip), number(4, 3))))
+        for trip in trip_ids])
+
+
+class Motion(unittest.TestCase):
+    """What the app needs to move a bus on to where it is by now."""
+
+    def test_a_position_says_when_it_was_taken_and_how_fast(self):
+        feeds = live.Live(line_10(), fetch=lambda url: vilnius_feed(), clock=lambda: AT)
+        state = feeds.ride_state([0, 0, 0, 2, 3, "2026-09-28"], AT)
+        self.assertEqual(state["measured_ms"], round(datetime(2026, 9, 28, 8, 4).timestamp() * 1000))
+        self.assertEqual((state["speed"], state["pattern"]), (5.6, 0))     # 20 km/h, line 10
+
+    def test_on_the_map_too(self):
+        feeds = live.Live(line_10(), fetch=lambda url: vilnius_feed(), clock=lambda: AT)
+        [bus] = feeds.in_box(54.6, 25.2, 54.8, 25.4)
+        self.assertEqual((bus["route"], bus["speed"], bus["pattern"]), ("10", 5.6, 0))
+        self.assertIsNotNone(bus["measured_ms"])
+
+    def test_without_a_time_per_position_the_file_dates_it(self):
+        written = datetime(2026, 9, 28, 8, 4, 10).timestamp()
+        kaunas = KAUNAS_HEADER + "\nAutobusai,10,10-01,573,25284000,54678000,36,10,480,0,2,29000,Žirmūnai,\n"
+        feeds = live.Live(line_10(), fetch=lambda url: (kaunas, '"e1"', written), clock=lambda: AT)
+        [bus] = feeds.vehicles("Kaunas")
+        self.assertEqual((bus.measured, bus.speed), (written - live.FILE_AGE_S, 10.0))
+
+    def test_an_unchanged_file_keeps_what_was_there(self):
+        asked = []
+
+        def fetch(url):
+            if url.endswith(".pb"):
+                return b""
+            asked.append(url)
+            return (vilnius_feed(), '"e1"', None) if len(asked) == 1 else (None, '"e1"', None)
+        feeds = live.Live(line_10(), fetch=fetch, clock=lambda: AT)
+        self.assertEqual(len(feeds.vehicles("Vilnius")), 1)
+        version = feeds.version
+        feeds._refresh("Vilnius")                  # 304 Not Modified
+        self.assertEqual((feeds.version, len(feeds.vehicles("Vilnius"))), (version, 1))
+
+    def test_a_stream_waits_for_news(self):
+        feeds = live.Live(line_10(), fetch=lambda url: vilnius_feed(), clock=lambda: AT)
+        feeds.vehicles("Vilnius")
+        seen = feeds.version
+        self.assertGreater(seen, 0)
+        started = time.monotonic()
+        self.assertEqual(feeds.wait_for_change(seen, 0.05), seen)          # nothing new: after the wait
+        self.assertGreaterEqual(time.monotonic() - started, 0.04)
+        self.assertEqual(feeds.wait_for_change(seen - 1, 5), seen)         # already newer: at once
+
+
+class Cancelled(unittest.TestCase):
+    """The 08:00 called off in the realtime feed."""
+
+    def setUp(self):
+        self.t = line_10()
+        self.feeds = live.Live(self.t, clock=lambda: AT,
+                               fetch=lambda url: cancelled_feed("T0800") if url.endswith(".pb") else vilnius_feed())
+        self.feeds.vehicles("Vilnius")                     # the first ask reads both feeds
+
+    def test_the_trip_is_known_to_be_off(self):
+        self.assertEqual(self.feeds.cancelled_trips(), {(0, 0)})
+
+    def test_a_rider_on_it_is_told(self):
+        self.assertEqual(self.feeds.ride_state([0, 0, 0, 2, 3, "2026-09-28"], AT), {"cancelled": True})
+        self.assertIsNone(self.feeds.ride_state([0, 1, 0, 2, 3, "2026-09-28"], AT))   # the 08:30 runs
+
+    def test_the_board_keeps_it_marked(self):
+        board = departures.at_stop(self.t, 2, AT, self.feeds)              # Katedra: 08:06, 08:36
+        times = board["lines"][0]["departures"]
+        self.assertEqual([(d["hm"], d["cancelled"], d["live"]) for d in times],
+                         [("08:06", True, False), ("08:36", False, False)])
+
+    def test_the_router_leaves_it_out(self):
+        def first_ride(skip):
+            found = Router(self.t).journeys([Access(0, 0)], [Access(3, 0)], 7 * 3600 + 55 * 60,
+                                            (20260928, 0), (20260927, 6), skip)
+            return next(leg for leg in found[0].legs if leg.kind == "ride").departure
+        self.assertEqual(first_ride(None), 8 * 3600)
+        self.assertEqual(first_ride(self.feeds.cancelled_trips()), 8 * 3600 + 30 * 60)
 
 
 if __name__ == "__main__":

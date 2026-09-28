@@ -70,8 +70,11 @@ def nearby(t: Timetable, lat: float, lon: float, when: datetime, live=None,
 
 
 def _lines_at(t: Timetable, platforms: list[int], midnight: datetime, now_s: int, days, live) -> list[dict]:
-    """The lines leaving these platforms in the next hour, soonest first."""
+    """The lines leaving these platforms in the next hour, soonest first. A
+    trip called off today stays on the board, marked: the bus someone waits
+    for is still there, saying it will not come."""
     lines: dict[tuple[int, str], dict] = {}
+    cancelled = live.cancelled_trips() if live is not None else set()
     for stop in platforms:
         for pattern, index in t.patterns_at_stop[stop]:
             stops = t.pattern_stops[pattern]
@@ -85,7 +88,8 @@ def _lines_at(t: Timetable, platforms: list[int], midnight: datetime, now_s: int
                         continue
                     if not t.runs(service, date, weekday):
                         continue
-                    vehicle = live.vehicle_on(pattern, trip) if live is not None else None
+                    off = shift == 0 and (pattern, trip) in cancelled
+                    vehicle = live.vehicle_on(pattern, trip) if live is not None and not off else None
                     delay = vehicle.delay if vehicle is not None else None
                     expected = scheduled + (delay or 0)
                     if expected < now_s - 30 or expected > now_s + HORIZON_S:
@@ -98,10 +102,19 @@ def _lines_at(t: Timetable, platforms: list[int], midnight: datetime, now_s: int
                         "scheduled": _clock(midnight, scheduled)["hm"],
                         "delay_s": delay,
                         "live": delay is not None,
+                        "cancelled": off,
                     })
     for line in lines.values():
         line["departures"].sort(key=lambda d: d["iso"])
-        line["departures"] = line["departures"][:PER_LINE]
+        kept, running = [], 0
+        for departure in line["departures"]:
+            if running == PER_LINE:
+                break
+            kept.append(departure)
+            running += not departure["cancelled"]
+        line["departures"] = kept
+    # In the order of their next time, called off or not: a line whose next
+    # bus will not come is news, not something to push down the board.
     return sorted(lines.values(), key=lambda l: l["departures"][0]["iso"])
 
 

@@ -103,6 +103,9 @@ class Timetable:
     # Per pattern, the GTFS id of each trip in pattern_trips ('<city>:<trip_id>'),
     # so a live vehicle that names its trip can be found.
     pattern_trip_ids: list[list[str]] = field(default_factory=list)
+    # Per pattern, the street its vehicles drive as an encoded polyline, or
+    # None (vc/shapes.py decodes it when first needed).
+    pattern_polyline: list[str | None] = field(default_factory=list)
     patterns_at_stop: list[list[tuple[int, int]]] = field(default_factory=list)
     transfers: list[list[tuple[int, int]]] = field(default_factory=list)
     services: list[tuple[int, int, int]] = field(default_factory=list)  # weekdays, start, end
@@ -175,6 +178,13 @@ def load_timetable(path: Path = DB_PATH) -> Timetable:
             if len(arrivals) == len(t.pattern_stops[pid]):
                 t.pattern_trips[pid].append((service_id, arrivals, departures))
                 t.pattern_trip_ids[pid].append(gtfs_id)
+
+        # Databases built before shapes were added have no such table.
+        t.pattern_polyline = [None] * pattern_count
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pattern_shape'").fetchone():
+            for pid, polyline in db.execute("SELECT pattern_id, polyline FROM pattern_shape"):
+                if 0 <= pid < pattern_count:
+                    t.pattern_polyline[pid] = polyline
 
         t.patterns_at_stop = [[] for _ in range(stop_count)]
         for pid, stops in enumerate(t.pattern_stops):

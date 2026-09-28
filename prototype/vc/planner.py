@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from . import shapes
 from .data import Timetable
 from .router import DESTINATION, ORIGIN, Access, Journey, Preferences, Router
 
@@ -125,8 +126,12 @@ def plan(
     priority: str = "fastest",
     walk: str = "normal",
     now: datetime | None = None,
+    skip: set[tuple[int, int]] | None = None,
 ) -> dict:
     """Plan a trip. `when` and `now` are Vilnius wall-clock times, naive.
+
+    `skip`: (pattern, trip) of the trips called off today, as the live feed
+    says (vc.live); only a search on today's service leaves them out.
 
     With `now`, "be there by" never offers a trip that should already have
     started. When none is left, the answer is the fastest way from now,
@@ -134,7 +139,9 @@ def plan(
     them arrives, and each option that arrives after `when` has "late" set.
     """
     prefs = Preferences(max_walk_metres=WALK_LIMITS.get(walk, 800))
-    options, counts = _options(t, origin, destination, when, arrive_by, prefs)
+    today = (now or datetime.now()).date()
+    off = lambda moment: skip if skip and moment.date() == today else None  # noqa: E731
+    options, counts = _options(t, origin, destination, when, arrive_by, prefs, off(when))
     late_by_min = None
 
     if arrive_by and now is not None:
@@ -147,7 +154,7 @@ def plan(
             # next morning, up to the day that was asked about.
             start = now
             for _ in range(3):
-                options, counts = _options(t, origin, destination, start, False, prefs)
+                options, counts = _options(t, origin, destination, start, False, prefs, off(start))
                 if options or start.date() >= when.date():
                     break
                 start = start.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
@@ -237,6 +244,7 @@ def _options(
     when: datetime,
     arrive_by: bool,
     prefs: Preferences,
+    skip: set[tuple[int, int]] | None = None,
 ) -> tuple[list[dict], dict]:
     """Trip options, not yet ranked or tagged, and how many stops each end has."""
     router = Router(t, prefs)
@@ -259,7 +267,7 @@ def _options(
     def search(at: int) -> list[Journey]:
         if not origins or not destinations:
             return []
-        return [j for j in router.journeys(origins, destinations, at, today, yesterday) if j.rides > 0]
+        return [j for j in router.journeys(origins, destinations, at, today, yesterday, skip) if j.rides > 0]
 
     def add(found: list[Journey]) -> None:
         for journey in found:
@@ -462,6 +470,11 @@ def option_json(t: Timetable, journey: Journey, midnight: datetime, origin: Poin
             item["trip"] = [leg.pattern, leg.trip, leg.shift, leg.board_index, leg.alight_index,
                             midnight.strftime("%Y-%m-%d")]
             item["stop_count"] = leg.alight_index - leg.board_index
+            # The street it drives, where the feed has it: drawn instead of
+            # straight lines from stop to stop.
+            street = shapes.of(t).ride(leg.pattern, leg.board_index, leg.alight_index)
+            if street:
+                item["shape"], item["shape_m"] = street["coords"], street["stops"]
             item["stops"] = [
                 {
                     "name": t.stop_names[stops[i]],

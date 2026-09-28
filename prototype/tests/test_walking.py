@@ -47,6 +47,20 @@ class Turns(unittest.TestCase):
         self.assertAlmostEqual(on[0]["at"], found["along"][4], delta=0.2)
         self.assertEqual(crossings.on_route(found, found["nodes"], {}), [])
 
+    def test_the_path_starts_at_the_door(self):
+        # The router began on the pavement 23 m from ISM's door; the path is
+        # joined on to where the walk really starts, and everything along it
+        # moves up by as much. The stop end was 0.6 m off: left as it is.
+        plain = walking.parse(json.loads(json.dumps(RECORDED)))
+        found = walking.route(54.68688, 25.2827, 54.6871995, 25.2796912, fetch=lambda *a: json.loads(json.dumps(RECORDED)))
+        self.assertEqual(found["coords"][0], [54.68688, 25.2827])
+        shift = found["along"][1]
+        self.assertAlmostEqual(shift, 22.9, delta=1)
+        self.assertEqual(len(found["coords"]), len(plain["coords"]) + 1)
+        self.assertEqual(len(found["nodes"]), len(found["coords"]))
+        self.assertAlmostEqual(found["turns"][0]["at"], plain["turns"][0]["at"] + shift, delta=0.2)
+        self.assertEqual(found["coords"][-1], plain["coords"][-1])
+
     def test_no_route(self):
         self.assertIsNone(walking.parse({"code": "NoRoute", "routes": []}))
 

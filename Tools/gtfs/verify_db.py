@@ -20,6 +20,7 @@ Exits non-zero, listing every failure, if anything is wrong.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import sys
 from pathlib import Path
@@ -50,6 +51,42 @@ CITIES = {
     "klaipeda": ("Klaipėda", 550, 40, 4_200),
 }
 
+# Every feed ships shapes.txt (1 184 of 1 184 patterns had a street on
+# 2026-09-28). Fewer than this share means the shapes were lost, and the app
+# would draw rides through buildings again.
+MIN_SHAPED = 0.9
+# A pattern's first and last stops lie on its street. A shape given to the
+# wrong pattern would be far from them. (A short working may use its line's
+# full street, which begins further back: that is fine, the stops are still
+# on it.)
+SHAPE_REACH_M = 300
+
+
+def decode(polyline: str) -> list[tuple[float, float]]:
+    """A Google encoded polyline's points."""
+    values, index = [], 0
+    while index < len(polyline):
+        shift = result = 0
+        while True:
+            byte = ord(polyline[index]) - 63
+            index += 1
+            result |= (byte & 0x1F) << shift
+            shift += 5
+            if byte < 0x20:
+                break
+        values.append(~(result >> 1) if result & 1 else result >> 1)
+    points, lat, lon = [], 0, 0
+    for dlat, dlon in zip(values[0::2], values[1::2]):
+        lat, lon = lat + dlat, lon + dlon
+        points.append((lat / 1e5, lon / 1e5))
+    return points
+
+
+def nearest_m(points: list[tuple[float, float]], lat: float, lon: float) -> float:
+    k = math.cos(math.radians(lat))
+    return min(math.hypot((a - lat) * 110_540, (b - lon) * 111_320 * k) for a, b in points)
+
+
 # The city a route belongs to, from its id: `kaunas_bus_3` -> `kaunas`.
 ROUTE_CITY = "substr(r.gtfs_id, 1, instr(r.gtfs_id, '_') - 1)"
 
@@ -74,6 +111,26 @@ def check(db: sqlite3.Connection) -> list[str]:
 
     if one("SELECT count(*) FROM meta WHERE key='schema_version'") != 1:
         problems.append("meta.schema_version is missing")
+
+    # --- the streets --------------------------------------------------------
+    if "pattern_shape" not in tables:
+        problems.append("missing table: pattern_shape")
+    else:
+        patterns = one("SELECT count(*) FROM pattern")
+        rows = q("SELECT ps.polyline, a.lat, a.lon, b.lat, b.lon FROM pattern_shape ps"
+                 " JOIN pattern p ON p.id = ps.pattern_id"
+                 " JOIN pattern_stop sa ON sa.pattern_id = p.id AND sa.seq = 0"
+                 " JOIN pattern_stop sb ON sb.pattern_id = p.id AND sb.seq = p.num_stops - 1"
+                 " JOIN stop a ON a.id = sa.stop_id JOIN stop b ON b.id = sb.stop_id")
+        if len(rows) < MIN_SHAPED * patterns:
+            problems.append(f"pattern_shape: only {len(rows):,} of {patterns:,} patterns have a street")
+        astray = 0
+        for polyline, alat, alon, blat, blon in rows:
+            points = decode(polyline)
+            astray += max(nearest_m(points, alat, alon), nearest_m(points, blat, blon)) > SHAPE_REACH_M
+        if rows and astray > 0.02 * len(rows):
+            problems.append(f"pattern_shape: {astray} of {len(rows)} streets pass over {SHAPE_REACH_M} m"
+                            " from their pattern's first or last stop")
 
     # --- the night network --------------------------------------------------
     # GTFS expresses after-midnight service as hours >= 24. The Vilnius feed

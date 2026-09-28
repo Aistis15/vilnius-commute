@@ -393,8 +393,6 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .lock .clock { font: 700 96px/1 var(--font-display); letter-spacing: -2px; font-variant-numeric: tabular-nums; margin-top: 2px; }
 /* Live Activities sit low on the lock screen, where the thumb is. */
 .lock .stack { position: absolute; left: 12px; right: 12px; bottom: 112px; display: flex; flex-direction: column; gap: 8px; }
-.lock .coach { position: absolute; left: 20px; right: 20px; bottom: 112px; font-size: 15px; color: rgba(235,235,245,.72); line-height: 1.35; text-align: center; }
-.lock .coach b { color: #fff; font-weight: 600; }
 .lock .controls { position: absolute; bottom: 44px; left: 46px; right: 46px; display: flex; justify-content: space-between; }
 .lock .control {
   width: 50px; height: 50px; border-radius: 25px; background: rgba(255,255,255,0.16); backdrop-filter: blur(20px);
@@ -458,7 +456,7 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
 .stage-sub { font-size: 13px; line-height: 16px; color: rgba(235,235,245,0.62); font-variant-numeric: tabular-nums; }
 .clip { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The last line: distance, direction or progress, beside the page button. */
-.stage-foot { display: flex; align-items: center; height: 30px; margin-top: auto; padding-right: 44px; font-size: 15px; color: rgba(235,235,245,0.8); font-variant-numeric: tabular-nums; min-width: 0; }
+.stage-foot { display: flex; align-items: center; height: 30px; margin-top: auto; padding-right: 52px; font-size: 15px; color: rgba(235,235,245,0.8); font-variant-numeric: tabular-nums; min-width: 0; }
 .stage-foot .progress { flex: 1; margin: 0; }
 
 /* Pages of the trip banner, flipped by tapping one button: a real Live
@@ -699,6 +697,9 @@ svg.icon { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: none
    above it is short: that is where the thumb is. */
 .content.has-cta { display: flex; flex-direction: column; }
 .content.has-cta > .sticky-bottom { margin-top: auto; }
+/* In that column nothing gives up its height to fit the screen: the page
+   scrolls instead. (The trip's map had been squeezed to a 20 px strip.) */
+.content.has-cta > * { flex-shrink: 0; }
 
 /* ---- Kryptis: the next turn at its real angle, and a map that turns ---- */
 svg.turn { flex: none; width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.2em; }
@@ -842,3 +843,159 @@ svg.icon.cross-ic { margin-right: 5px; font-size: 1em; }
 
 /* The crossing glyph: road edges and the stripes between them. */
 svg.turn path[stroke-width], svg.icon path[stroke-width] { stroke-linecap: butt; }
+
+/* ---- the page button: a quarter circle in the banner's corner -------------
+   The banner's own corner, cut off by an arc, filled with the banner's accent
+   (white on the island, which is always black), the dots inside. Its whole
+   64 pt square is the target. The foot of every page stops short of it. */
+.act-pager, .island .act-pager { right: 0; bottom: 0; }
+.island .act-pager { right: -22px; bottom: -12px; }
+.pager-dots { display: block; width: var(--corner, 56px); height: var(--corner, 56px); padding: 0; border-radius: 100% 0 0 0;
+  background: var(--act-accent, #fff); color: var(--act-on-accent, #000); transform-origin: 100% 100%;
+  transition: filter var(--t-quick) var(--ease-out), transform var(--t-release) var(--ease-spring); }
+.pager-dots::after { inset: -8px 0 0 -8px; border-radius: 100% 0 0 0; }
+/* The dots sit in the middle of what shows of the quarter circle, which the
+   banner's own rounded corner trims (24 pt on the lock screen, 44 on the
+   island). */
+.pager-dots .pdots { position: absolute; right: 9px; bottom: 20px; margin: 0; gap: 5px; }
+.island .pager-dots { --corner: 52px; }
+.island .pager-dots .pdots { right: 11px; bottom: 22px; }
+.pager-dots .pdots i { background: currentColor; opacity: .34; transition: opacity var(--t-content) var(--ease-out), transform var(--t-release) var(--ease-spring); }
+.pager-dots .pdots i.on { background: currentColor; opacity: 1; }
+.pager-dots:active { filter: brightness(.86); transform: scale(.96); }
+.pager-dots:active .pdots { opacity: 1; }
+
+/* ---- tips for a first-time user ------------------------------------------ */
+.coachmark { position: absolute; inset: 0; z-index: 70; pointer-events: none; }
+.coachmark[hidden] { display: none; }
+.cm-block { position: absolute; pointer-events: auto; }
+.cm-block[hidden] { display: none; }
+.cm-spot { position: absolute; pointer-events: none; border-radius: 20px; box-shadow: 0 0 0 200vmax rgba(0, 0, 0, 0.56);
+  transition: left var(--t-content) var(--ease-out), top var(--t-content) var(--ease-out), width var(--t-content) var(--ease-out),
+    height var(--t-content) var(--ease-out), border-radius var(--t-content) var(--ease-out); }
+.cm-spot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92);
+  animation: cm-ring 1.6s var(--ease-out) 0.3s 2 backwards; }
+@keyframes cm-ring { from { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 2px rgba(255, 255, 255, 0.5); }
+  to { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 14px rgba(255, 255, 255, 0); } }
+.cm-bubble { position: absolute; width: min(300px, calc(100% - 32px)); padding: 14px 16px 10px; border-radius: 18px;
+  background: var(--card); color: var(--label); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32); pointer-events: auto;
+  transition: left var(--t-content) var(--ease-out), top var(--t-content) var(--ease-out); }
+.cm-text { margin: 0; font: 400 16px/1.35 var(--font); text-wrap: pretty; }
+.cm-foot { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
+.cm-count { flex: 1; font-size: 13px; color: var(--label2); font-variant-numeric: tabular-nums; }
+.cm-skip, .cm-next { position: relative; height: 36px; font: 600 15px var(--font); }
+.cm-skip { padding: 0 10px; color: var(--label2); font-weight: 500; }
+.cm-next { padding: 0 16px; border-radius: 18px; background: var(--prominent); color: var(--on-prominent); }
+.cm-skip::after, .cm-next::after { content: ""; position: absolute; inset: -4px -2px; }
+.cm-next:active, .cm-skip:active { opacity: .7; }
+.cm-arrow { position: absolute; bottom: -6px; width: 14px; height: 14px; border-radius: 3px; background: var(--card); transform: rotate(45deg); }
+.cm-bubble.below .cm-arrow { bottom: auto; top: -6px; }
+@media (prefers-reduced-motion: reduce) {
+  .cm-spot, .cm-bubble { transition: none; }
+  .cm-spot::after { animation: none; }
+}
+
+/* ---- the guide: swiped pages inside the app ------------------------------ */
+.guide { position: absolute; inset: 96px 0 0 0; display: flex; flex-direction: column; }
+.guide-track { flex: 1; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; outline: none; cursor: grab; }
+.guide-track::-webkit-scrollbar { display: none; }
+.guide-track:active { cursor: grabbing; }
+.guide-page { flex: 0 0 100%; scroll-snap-align: center; scroll-snap-stop: always; padding: 8px 28px 0; display: flex; flex-direction: column; user-select: none; }
+.guide-art { height: 330px; display: grid; place-items: center; margin-bottom: 18px; }
+.guide-title { font: 700 28px/1.15 var(--font-display); margin: 0 0 10px; text-wrap: balance; }
+.guide-text { font-size: 17px; line-height: 1.4; color: var(--label2); margin: 0; text-wrap: pretty; }
+.guide-foot { padding: 12px 20px 34px; display: flex; flex-direction: column; gap: 18px; align-items: center; }
+.guide-dots { display: flex; gap: 8px; }
+.guide-dots i { width: 7px; height: 7px; border-radius: 4px; background: var(--fill2); transition: background-color var(--t-content) var(--ease-out), width var(--t-content) var(--ease-out); }
+.guide-dots i.on { width: 20px; background: var(--label); }
+.guide-skip { min-width: 80px; text-align: right; font-size: 17px; color: var(--label); }
+
+/* The drawn banner: the chosen colourway, the real proportions. */
+.g-banner { position: relative; width: 318px; height: 132px; border-radius: 24px; overflow: hidden; color: var(--act-ink, #fff);
+  background: var(--act-solid, #1C1C1E); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22); text-align: left; }
+.g-banner.mini { width: 250px; height: 104px; border-radius: 20px; }
+.g-slide { position: absolute; inset: 0; padding: 14px 16px; display: flex; flex-direction: column; }
+.g-row { display: flex; align-items: center; gap: 11px; }
+.g-map { flex: none; width: 60px; height: 60px; border-radius: 50%; overflow: hidden; background: #E9E5DC; box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+.g-banner.mini .g-map { width: 46px; height: 46px; }
+.g-map svg { width: 100%; height: 100%; display: block; }
+.g-street { stroke: #fff; stroke-width: 5; fill: none; }
+.g-route { stroke: #1C1C1E; stroke-width: 3.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.g-stop { fill: #fff; stroke: #0073AC; stroke-width: 3; }
+.g-me { fill: #1C1C1E; }
+.g-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.g-title { font: 600 18px/1.2 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-banner.mini .g-title { font-size: 15px; }
+.g-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--act-ink2, rgba(235,235,245,.8)); white-space: nowrap; overflow: hidden; }
+.g-meta > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.g-banner.mini .g-meta { font-size: 11px; }
+.g-hero { flex: none; text-align: right; }
+.g-cap { font-size: 12px; color: var(--act-ink3, rgba(235,235,245,.62)); }
+.g-big { font: 600 28px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.g-big small { font-size: 16px; margin-left: 2px; }
+.g-banner.mini .g-big { font-size: 22px; }
+.g-foot { margin-top: auto; font-size: 13px; color: var(--act-ink2, rgba(235,235,245,.8)); padding-right: 56px; }
+.g-legs { display: flex; flex-direction: column; gap: 7px; font-size: 13px; color: var(--act-ink2, rgba(235,235,245,.8)); }
+.g-legs div { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.g-legs b { width: 38px; color: var(--act-ink, #fff); font-weight: 600; font-variant-numeric: tabular-nums; }
+.g-walk { width: 26px; text-align: center; }
+.g-corner { position: absolute; right: 0; bottom: 0; width: 50px; height: 50px; border-radius: 100% 0 0 0;
+  background: var(--act-accent, #fff); color: var(--act-on-accent, #000); }
+.g-banner.mini .g-corner { width: 40px; height: 40px; }
+.g-dots { position: absolute; right: 8px; bottom: 17px; display: flex; gap: 4px; }
+.g-banner.mini .g-dots { right: 6px; bottom: 13px; gap: 3px; }
+.g-dots i { width: 5px; height: 5px; border-radius: 3px; background: currentColor; opacity: .34; }
+.g-dots i:first-child { opacity: 1; }
+.g-banner.mini .g-dots i { width: 4px; height: 4px; }
+
+/* A finger's tap: a ring that grows and fades over the thing tapped. */
+.g-ring, .g-corner.ringed::after { position: absolute; pointer-events: none; border-radius: 50%; border: 2px solid var(--act-ink, #fff);
+  animation: g-tap 2.4s var(--ease-out) infinite; }
+.g-corner.ringed::after { content: ""; left: 4px; top: 4px; width: 38px; height: 38px; border-color: var(--act-on-accent, #000); }
+.g-ring-map { left: 10px; top: 30px; width: 72px; height: 72px; }
+@keyframes g-tap { 0%, 50% { opacity: 0; transform: scale(.5); } 58% { opacity: .95; transform: scale(.8); } 100% { opacity: 0; transform: scale(1.35); } }
+
+/* The corner page turns through the banner's three pages. */
+.g-banner.cycle .g-slide { opacity: 0; animation: g-page 7.2s infinite; }
+.g-banner.cycle .g-slide:nth-child(2) { animation-delay: 2.4s; }
+.g-banner.cycle .g-slide:nth-child(3) { animation-delay: 4.8s; }
+@keyframes g-page { 0% { opacity: 0; transform: translateX(10px); } 4%, 30% { opacity: 1; transform: none; } 34%, 100% { opacity: 0; transform: translateX(-10px); } }
+.g-banner.cycle .g-dots i { animation: g-dot 7.2s infinite; opacity: .34; }
+.g-banner.cycle .g-dots i:nth-child(2) { animation-delay: 2.4s; }
+.g-banner.cycle .g-dots i:nth-child(3) { animation-delay: 4.8s; }
+@keyframes g-dot { 0%, 32% { opacity: 1; } 34%, 100% { opacity: .34; } }
+
+/* The lock screen, drawn. */
+.g-phone { position: relative; width: 272px; height: 320px; border-radius: 36px; padding-top: 22px; display: flex; flex-direction: column; align-items: center;
+  background: var(--lock-bg, #1C1C1E); color: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 14px 34px rgba(0,0,0,.2); }
+.g-phone.short { height: 230px; justify-content: space-between; padding-bottom: 26px; }
+.g-date { font-size: 12px; color: rgba(235,235,245,.7); }
+.g-clock { font: 700 64px/1.05 var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+.g-clock.small { font-size: 56px; }
+.g-phone .g-banner { margin-top: auto; margin-bottom: 12px; }
+.g-controls { width: 100%; display: flex; justify-content: space-between; padding: 0 34px 16px; }
+.g-phone.short .g-controls { padding-bottom: 0; }
+.g-controls > span { position: relative; width: 44px; height: 44px; border-radius: 22px; display: grid; place-items: center; font-size: 20px; background: rgba(255,255,255,.16); }
+.g-controls > span.ours { background: #fff; color: #000; }
+.g-ring-control { left: -6px; top: -6px; width: 56px; height: 56px; border-color: #fff; }
+
+/* The island: small, then held and open, then small again. */
+.g-island { position: relative; width: 150px; height: 38px; border-radius: 19px; background: #000; color: #fff; overflow: hidden;
+  animation: g-hold 6s var(--ease-spring) infinite; }
+.g-isl-compact { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 14px 0 10px; font-size: 14px;
+  animation: g-show-compact 6s infinite; }
+.g-isl-open { position: absolute; left: 18px; right: 18px; top: 16px; display: flex; gap: 10px; align-items: center; opacity: 0; animation: g-show-open 6s infinite; }
+.g-isl-open .g-meta { color: rgba(235,235,245,.8); }
+.g-ring-island { left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; animation: g-tap-once 6s var(--ease-out) infinite; }
+@keyframes g-hold { 0%, 30% { width: 150px; height: 38px; border-radius: 19px; } 40%, 85% { width: 300px; height: 98px; border-radius: 34px; } 95%, 100% { width: 150px; height: 38px; border-radius: 19px; } }
+@keyframes g-show-compact { 0%, 30% { opacity: 1; } 34%, 90% { opacity: 0; } 96%, 100% { opacity: 1; } }
+@keyframes g-show-open { 0%, 40% { opacity: 0; } 46%, 84% { opacity: 1; } 88%, 100% { opacity: 0; } }
+@keyframes g-tap-once { 0%, 12% { opacity: 0; transform: scale(.5); } 18%, 32% { opacity: .95; transform: scale(.8); } 38%, 100% { opacity: 0; transform: scale(1.2); } }
+@media (prefers-reduced-motion: reduce) {
+  .guide-art *, .guide-art *::after { animation: none !important; }
+  .g-banner.cycle .g-slide:first-child { opacity: 1; }
+}
+
+/* ---- a departure called off: struck through, and said ------------------- */
+.dep-times s.off { color: var(--label3, rgba(60, 60, 67, 0.3)); text-decoration-thickness: 1.5px; }
+.dep-off { display: block; font-size: 13px; color: var(--red); margin-top: 1px; }

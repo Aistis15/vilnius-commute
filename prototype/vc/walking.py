@@ -83,6 +83,31 @@ def _fetch(lat1: float, lon1: float, lat2: float, lon2: float) -> dict:
         return json.loads(response.read())
 
 
+# The router starts and ends a path on the nearest footway or street. A stop
+# a few metres off it (the kerb, the shelter) is joined on with a straight
+# step, so the path ends where the stop is; one further than this is not
+# joined: a straight line that far could cut through a building.
+JOIN_M = 30
+
+
+def _join_ends(found: dict, lat1: float, lon1: float, lat2: float, lon2: float) -> dict:
+    coords, along, nodes = found["coords"], found["along"], found.get("nodes", [])
+    start = _metres((lat1, lon1), tuple(coords[0]))
+    if 2 < start <= JOIN_M:
+        coords.insert(0, [lat1, lon1])
+        along[:] = [0.0] + [round(x + start, 1) for x in along]
+        nodes.insert(0, 0)
+        for turn in found["turns"]:
+            turn["at"] = round(turn["at"] + start, 1)
+    end = _metres(tuple(coords[-1]), (lat2, lon2))
+    if 2 < end <= JOIN_M:
+        coords.append([lat2, lon2])
+        along.append(round(along[-1] + end, 1))
+        nodes.append(0)
+    found["metres"] = along[-1]
+    return found
+
+
 def route(lat1: float, lon1: float, lat2: float, lon2: float, fetch=_fetch) -> dict | None:
     """The walking path between two points, or None (offline, no path)."""
     key = (round(lat1, 5), round(lon1, 5), round(lat2, 5), round(lon2, 5))
@@ -91,6 +116,8 @@ def route(lat1: float, lon1: float, lat2: float, lon2: float, fetch=_fetch) -> d
             return _cache[key]
     try:
         found = parse(fetch(lat1, lon1, lat2, lon2))
+        if found is not None:
+            found = _join_ends(found, lat1, lon1, lat2, lon2)
     except Exception:  # noqa: BLE001 - no directions is a normal state
         return None
     with _lock:

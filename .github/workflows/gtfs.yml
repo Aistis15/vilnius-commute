@@ -77,7 +77,10 @@ jobs:
                         | grep -oE 'feed_digest: [0-9a-f]+' | cut -d' ' -f2 || true)
           echo "published digest: ${published:-<none>}"
           echo "current digest:   ${FEED_SHA}"
-          if [ "${published}" = "${FEED_SHA}" ] && [ "${{ inputs.force }}" != "true" ]; then
+          # Unchanged feeds skip the build, except when the build itself
+          # changed (a push): the new database has to reach the app.
+          if [ "${published}" = "${FEED_SHA}" ] && [ "${{ inputs.force }}" != "true" ] \
+             && [ "${{ github.event_name }}" != "push" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Unchanged — nothing to publish."
           else
