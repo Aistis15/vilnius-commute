@@ -54,6 +54,7 @@ const ICONS = {
   // A toothed wheel, not rays: rays read as brightness.
   gear: '<circle cx="12" cy="12" r="3"/><path d="M10.06 5.07L10.15 5.04L10.30 2.65L13.70 2.65L13.85 5.04L13.94 5.07L15.53 5.73L15.61 5.77L17.41 4.19L19.81 6.59L18.23 8.39L18.27 8.47L18.93 10.06L18.96 10.15L21.35 10.30L21.35 13.70L18.96 13.85L18.93 13.94L18.27 15.53L18.23 15.61L19.81 17.41L17.41 19.81L15.61 18.23L15.53 18.27L13.94 18.93L13.85 18.96L13.70 21.35L10.30 21.35L10.15 18.96L10.06 18.93L8.47 18.27L8.39 18.23L6.59 19.81L4.19 17.41L5.77 15.61L5.73 15.53L5.07 13.94L5.04 13.85L2.65 13.70L2.65 10.30L5.04 10.15L5.07 10.06L5.73 8.47L5.77 8.39L4.19 6.59L6.59 4.19L8.39 5.77L8.47 5.73z"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+  ticket: '<path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5V10a2 2 0 0 0 0 4v2.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5V14a2 2 0 0 0 0-4z"/><path d="M14.5 6.5v11" stroke-dasharray="1.6 2"/>',
   location: '<path d="M3 11 21 3l-8 18-2-8-8-2z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -1624,6 +1625,58 @@ function openDestination(place) {
   runPlan();
 }
 
+// ---- which ticket
+
+/* Which ticket the trip needs, by each city's own rules. The app sells none
+   (no operator offers a public way to), but "which one, and where" is half
+   of what Trafi's reviews complain about. Checked 2026-09-28 on the
+   operators' own pages:
+   - Vilnius (judu.lt): 30 min 1,00 €, 60 min 1,25 €, changes free within
+     them; sold in the JUDU and m.Ticket apps and on the Vilniečio card.
+   - Kaunas (kvt.lt): the Žiogas e-ticket, 0,70 €, with one change within
+     30 min; 1,50 € from the driver, one ride.
+   - Klaipėda (klaipeda.lt): 1,50 € from the driver, a ticket a ride; less
+     with an e-ticket or a bank card at the reader. How much less is not
+     said: two sources disagree (1,00 € from 2024, 0,70 € elsewhere). */
+const euro = (x) => `${x.toFixed(2).replace('.', ',')} €`;
+function ticketFor(o) {
+  if (!o || o.walk_only) return null;
+  const rides = o.legs.filter((l) => l.kind === 'ride');
+  if (!rides.length) return null;
+  const start = t(rides[0].departure);
+  const minutes = Math.ceil((t(rides[rides.length - 1].arrival) - start) / 60_000);
+  if (o.city === 'Vilnius') {
+    // A few minutes to spare: a late bus should not outlast the ticket.
+    if (minutes <= 25) return { what: `Važiuosi ${minutes} min: užteks 30 min bilieto`, price: euro(1), where: 'JUDU ar m.Ticket programėlėje, Vilniečio kortele' };
+    if (minutes <= 55) return { what: `Važiuosi ${minutes} min: reikės 60 min bilieto`, price: euro(1.25), where: 'JUDU ar m.Ticket programėlėje, Vilniečio kortele' };
+    return { what: `Važiuosi ${minutes} min: vieno bilieto neužteks`, price: '', where: '60 min bilietas baigsis pakeliui' };
+  }
+  if (o.city === 'Kaunas') {
+    // One e-ticket covers a ride and one change within 30 minutes.
+    let tickets = 0, from = -Infinity, changes = 0;
+    for (const ride of rides) {
+      const at = t(ride.departure);
+      if (at - from <= 30 * MINUTE && changes < 1) { changes++; continue; }
+      tickets++; from = at; changes = 0;
+    }
+    const n = tickets === 1 ? 'vieno Žiogo el. bilieto' : `${tickets} Žiogo el. bilietų`;
+    return { what: `${tickets === 1 ? 'Užteks' : 'Reikės'} ${n}`, price: euro(0.7 * tickets),
+      where: `Žiogo programėlėje ar kortele; pas vairuotoją ${euro(1.5)} už kiekvieną važiavimą` };
+  }
+  if (o.city === 'Klaipėda') {
+    const n = rides.length;
+    return { what: n === 1 ? 'Reikės vieno bilieto' : `Reikės ${n} bilietų, po vieną kiekvienam važiavimui`, price: '',
+      where: `Pas vairuotoją ${euro(1.5)}; pigiau el. bilietu ar banko kortele prie skaitytuvo` };
+  }
+  return null;
+}
+function ticketHtml(o) {
+  const ticket = ticketFor(o);
+  if (!ticket) return '';
+  return `<div class="ticket-row">${icon('ticket')}<span><span class="ticket-what">${esc(ticket.what)}${ticket.price ? ` · ${esc(ticket.price)}` : ''}</span>
+      <span class="ticket-where">${esc(ticket.where)}</span></span></div>`;
+}
+
 // ---- detail
 
 function detailView() {
@@ -1680,6 +1733,7 @@ function detailView() {
         <div class="right"><div class="dur">${o.duration_min} min</div><div class="cap${o.late ? ' late' : ''}">atvyksi ${esc(o.arrive.hm)}</div></div>
       </div>
       <div class="summary-meta">${metresText(o.walk_m)} pėsčiomis · ${transfersText(o.transfers)}</div>
+      ${ticketHtml(o)}
       <div class="timeline">${steps}</div>
       <div class="sticky-bottom">${running
         ? '<div class="trip-running"><button class="secondary" data-action="end-trip" style="height:52px;flex:1">Baigti kelionę</button><button class="prominent" data-action="lock">Rodyti banerį</button></div>'

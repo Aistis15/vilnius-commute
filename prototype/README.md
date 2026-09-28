@@ -116,6 +116,11 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
   - It keeps connections open (HTTP/1.1).
   - It gzips text, and answers static files with 304 when unchanged.
   - Result: page ready in 41 ms (was 657 ms), requests in 2-17 ms.
+- **Which ticket, said in the trip** ("Važiuosi 17 min: užteks 30 min
+  bilieto · 1,00 €", where to buy it), by each city's rules as the
+  operators publish them: Vilnius's time tickets, Kaunas's Žiogas e-ticket
+  with one change in 30 min, Klaipėda's ticket a ride. A price is shown
+  only where the operator's own page confirms it.
 - **The page button is the banner's corner**: a quarter circle in the
   accent colour with the dots inside, 56 pt. A Live Activity takes taps on
   buttons, not swipes.

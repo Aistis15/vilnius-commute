@@ -999,3 +999,10 @@ svg.turn path[stroke-width], svg.icon path[stroke-width] { stroke-linecap: butt;
 /* ---- a departure called off: struck through, and said ------------------- */
 .dep-times s.off { color: var(--label3, rgba(60, 60, 67, 0.3)); text-decoration-thickness: 1.5px; }
 .dep-off { display: block; font-size: 13px; color: var(--red); margin-top: 1px; }
+
+/* ---- which ticket: one quiet row under the trip's summary ---------------- */
+.ticket-row { display: flex; gap: 10px; align-items: flex-start; margin: 12px 4px 0; padding: 11px 14px; border-radius: 14px; background: var(--card); }
+.ticket-row .icon { flex: none; font-size: 20px; margin-top: 1px; color: var(--label2); }
+.ticket-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ticket-what { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ticket-where { font-size: 13px; color: var(--label2); line-height: 1.35; }

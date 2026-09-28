@@ -487,6 +487,7 @@ def option_json(t: Timetable, journey: Journey, midnight: datetime, origin: Poin
         legs.append(item)
 
     rides = [l for l in legs if l["kind"] == "ride"]
+    rides_legs = [l for l in journey.legs if l.kind == "ride"]
     return {
         "id": "-".join(f"{l.pattern}.{l.trip}.{l.shift}" for l in journey.legs if l.kind == "ride"),
         "leave": clock(midnight, journey.departure),
@@ -499,6 +500,8 @@ def option_json(t: Timetable, journey: Journey, midnight: datetime, origin: Poin
         "walk_only": False,
         "late": False,
         "routes": [l["route"] for l in rides],
+        # Whose tickets: the city of the first line taken.
+        "city": t.stop_city[t.pattern_stops[rides_legs[0].pattern][0]] if rides_legs else None,
         "first_departure": rides[0]["departure"] if rides else None,
         "first_stop": rides[0]["from"]["name"] if rides else None,
         "legs": legs,

@@ -45,7 +45,7 @@ assumed; where a number comes from a sample, the sample is named.
 | Wrong city on start | There is no city to switch: the city comes from where you are, and the home screen shows the stops around you. | — |
 | Route flip-flopping, odd suggestions | The router offers one option per number of rides, and an extra ride has to save 3 min. Your preferences (fastest, one bus, fewest changes; walking limit) are asked once. | Existing planner tests. |
 | Holiday timetables | The timetables are rebuilt from the feeds every day at 03:20 UTC, calendar exceptions included. | `.github/workflows/gtfs.yml` |
-| Tickets and payments | **Not solved**: there is no public API for selling tickets. The plan is to say which ticket the trip needs and open the official app (JUDU in Vilnius). | To do; the fares need verifying first. |
+| Tickets and payments | No public API sells tickets, so the app does not sell them. **It says which ticket the trip needs and where to buy it**, by each city's own rules. | Checked on the operators' pages, 2026-09-28. [Vilnius (JUDU)](https://judu.lt/viesojo-transporto-keleiviams/bilietu-rusys-ir-kainos/): 30 min 1,00 €, 60 min 1,25 €, changes free. [Kaunas (KVT)](https://www.kvt.lt/en/tickets/ticket-fares/): Žiogas e-ticket 0,70 € with one change within 30 min; 1,50 € from the driver. [Klaipėda](https://www.klaipeda.lt/lt/naujienos/7654/patvirtintos-naujos-viesojo-transporto-bilietu-kainos:4885): 1,50 € from the driver. Its e-ticket price is not shown: the sources disagree (1,00 € / 0,70 €). |
 | Login, lost passes | No account, no login: saved places stay on the phone. | — |
 | Daily routes | Unlimited named places, each showing "when to leave" on the home screen. Places visited twice are offered for saving. | — |
 | VoiceOver / blind riders | Controls carry spoken labels; the banner is text first, and a picture is never the only way to know. | Not yet tried with VoiceOver: a pass on the phone is due. |
@@ -71,14 +71,17 @@ In order of use to a rider, with what each needs:
    - Your live walking position and pace, against the bus's live arrival at the stop: "Spėsi ramiai" / "Paspartink: 6 km/h" / "Nespėsi, kitas po 8 min".
    - Needs: done pieces (GPS snapping, live ETA). Build it next.
 2. **Ghost-trip guard.**
-   - A trip that should already be on the road but has no vehicle is marked "nematomas", and the planner prefers a confirmed one.
-   - Vilnius has trip ids in its feed, so this is reliable there.
-   - Needs: a count of how often it happens (to measure first).
+   - A trip that should already be on the road but has no vehicle would be marked "nematomas".
+   - Measured 2026-09-28 at 17:00, trips that had been on the road for over 3 minutes with no vehicle seen:
+     - Vilnius: 6 of 419 (1%).
+     - Klaipėda: 2 of 105 (2%).
+     - Kaunas: 16 of 200 (8%). Kaunas's feed carries no trip ids, so part of that is likely matching, not missing buses.
+   - Not built: a warning that is wrong one time in twelve in Kaunas would mislead. The ghost buses riders meet are mostly called-off trips (now shown) and timetable times shown as if live (the app marks live times apart).
 3. **Weather-aware walking.**
    - Open-Meteo (no key): in rain or ice, less walking and a slower pace.
    - Citymapper has rain routes; nobody here does.
 4. **Your own walking pace, learned** from the GPS on real walks (stored on the phone), instead of a fixed 1.35 m/s.
-5. **Which ticket.** "30 min bilieto užteks", and one tap to the official ticket app. Needs: fares verified per city.
+5. **Which ticket.** Done: "Važiuosi 17 min: užteks 30 min bilieto · 1,00 €", with where to buy it. Next: open the official app from that line on the iPhone.
 6. **Holiday notice.** "Šiandien sekmadienio tvarkaraštis", from the feed's calendar exceptions.
 7. **Wheelchair and pram.** The Vilnius GTFS-RT flags each vehicle `WHEELCHAIR_ACCESSIBLE`, so a departure can say whether the vehicle coming is low-floor.
 8. **Share arrival.** "Būsiu 14:17" with the live delay, through the share sheet.
