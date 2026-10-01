@@ -19,8 +19,11 @@
       if (!root.style.getPropertyValue('--shell-bottom')) root.style.setProperty('--shell-bottom', insets.bottom + 'px');
     })();
   </script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <!-- The map's libraries load after home is on screen (loadMapLibs in
+       app.js); these only open the connections early. -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+  <link rel="dns-prefetch" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -89,11 +92,6 @@
     <div class="status" id="server-status">Jungiamasi…</div>
   </aside>
 
-  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- The map's own look (the design's quiet grey ground) is drawn from
-       OpenFreeMap's vector tiles by MapLibre, inside Leaflet. -->
-  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1396,3 +1396,10 @@ button.ts-step { width: calc(100% + 16px); }
 .g-row .g-legs { flex: 1; min-width: 0; }
 .g-ring-map { left: 9px; top: 9px; }
 .g-map { background: #EEEEF0; }
+
+/* ---- gestures */
+.page.dragged { box-shadow: -10px 0 30px rgba(0, 0, 0, 0.16); }
+.trip-sheet { height: var(--sheet-max, 46%); max-height: none; }
+.trip-sheet .grabber { cursor: grab; padding: 6px 0; margin-top: 2px; box-sizing: content-box; background-clip: content-box; touch-action: none; }
+.trip-sheet .ts-head { touch-action: none; }
+.map-locate { bottom: calc(var(--sheet-max, 46%) + 14px); transition: bottom var(--t-sheet) var(--ease-move); }

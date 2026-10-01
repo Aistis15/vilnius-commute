@@ -889,13 +889,14 @@ let pageEl = null;
 let pageScreen = null;
 let pageDepth = 0;
 
+const viewOf = (screen) => ({
+  onboarding: onboardingView, home: homeView, results: resultsView, detail: detailView,
+  settings: settingsView, places: placesView, pick: pickView, map: mapView, guide: guideView, prefs: tripPrefsView,
+}[screen.name] || homeView);
+
 function renderApp() {
   const screen = state.prefs ? currentScreen() : onboardingScreen();
-  const view = {
-    onboarding: onboardingView, home: homeView, results: resultsView, detail: detailView,
-    settings: settingsView, places: placesView, pick: pickView, map: mapView, guide: guideView, prefs: tripPrefsView,
-  }[screen.name] || homeView;
-  const html = view(screen);
+  const html = viewOf(screen)(screen);
 
   if (pageEl && pageScreen && pageScreen.id === screen.id && pageEl.isConnected) {
     staggerIn(morph(pageEl, html));
@@ -934,6 +935,7 @@ function transitionPages(from, to, kind) {
   if (!from) return;
   from.classList.add('leaving');
   from.inert = true;
+  pagesMoveUntil = performance.now() + (kind === 'push' || kind === 'pop' ? 460 : 320);
   const done = () => from.remove();
   const behind = [{ transform: 'none', filter: 'brightness(1)' }, { transform: 'translateX(-30%)', filter: 'brightness(0.92)' }];
   if (kind === 'push') {
@@ -1720,6 +1722,7 @@ async function runPlan() {
     state.planError = e.message;
   }
   state.planning = false;
+  // At once, even mid-slide: on a phone it costs a frame, and the answer is what was asked for.
   if (currentScreen().name === 'results') renderApp();
 }
 
@@ -1840,7 +1843,7 @@ function detailView() {
   }).join('') + `<div class="ts-step end${current >= o.legs.length ? ' now' : ''}"><span class="t">${esc(o.arrive.hm)}</span><span class="glyph">${icon('pin')}</span><span class="text"><b>${esc(state.destination ? state.destination.name : '')}</b></span></div>`;
 
   const ticket = ticketFor(o);
-  return `<div class="trip-screen">
+  return `<div class="trip-screen" style="--sheet-max:${Math.round((state.sheetSnap || SHEET_SNAPS[1]) * 100)}%">
       <div id="map" class="trip-map" data-morph="keep"></div>
       <div class="float-bar"><button class="glass-circle" data-action="back" aria-label="Atgal">${icon('back')}</button><span></span></div>
       <button class="glass-circle map-locate" data-action="trip-fit" aria-label="Rodyti visą kelionę">${icon('location')}</button>
@@ -1856,6 +1859,10 @@ function detailView() {
       </div>
     </div>`;
 }
+
+/* The trip sheet rests at one of three heights, like Maps': its top only,
+   half the screen (the default), or nearly all of it. Dragged by its top. */
+const SHEET_SNAPS = [0.27, 0.46, 0.9];
 
 /* The sheet's top during a trip: the banner's page, in the app's colours. */
 function sheetHead(page) {
@@ -2042,6 +2049,40 @@ function restyleMaps() {
   }
 }
 
+/* The map libraries (Leaflet, MapLibre and the bridge between them: ~400 KB)
+   are not needed to show home, so they load after it is on screen, in idle
+   time, or at once when a map is opened first. */
+const MAP_LIBS = {
+  css: ['https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css', 'https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css'],
+  js: ['https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js', 'https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js'],
+  bridge: 'https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js',
+};
+let mapLibs = null;
+function loadMapLibs() {
+  if (window.L && window.maplibregl && window.L.maplibreGL) return Promise.resolve();
+  if (mapLibs) return mapLibs;
+  const css = (href) => new Promise((done) => {
+    const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href });
+    link.onload = link.onerror = done;
+    document.head.appendChild(link);
+  });
+  const js = (src) => new Promise((done, fail) => {
+    const script = Object.assign(document.createElement('script'), { src, async: false });
+    script.onload = done; script.onerror = fail;
+    document.head.appendChild(script);
+  });
+  // Without MapLibre (or WebGL) the map still works, on greyed OSM tiles.
+  mapLibs = Promise.all([...MAP_LIBS.css.map(css), js(MAP_LIBS.js[0]), js(MAP_LIBS.js[1]).catch(() => {})])
+    .then(() => (window.maplibregl ? js(MAP_LIBS.bridge).catch(() => {}) : null));
+  return mapLibs;
+}
+setTimeout(() => (window.requestIdleCallback || ((fn) => setTimeout(fn, 1)))(() => loadMapLibs(), { timeout: 4000 }), 1200);
+
+/* A map is made once the screen has slid into place: making it during the
+   slide (a WebGL context, the style, the first tiles) drops frames. */
+let pagesMoveUntil = 0;
+function afterSettle(fn) { setTimeout(fn, Math.max(0, pagesMoveUntil - performance.now())); }
+
 let map, mapFor;
 function fitTrip(animate = false) {
   if (!map || !map.vcBounds) return;
@@ -2049,30 +2090,50 @@ function fitTrip(animate = false) {
   const below = sheet ? sheet.offsetHeight : 0;
   map.fitBounds(map.vcBounds, { paddingTopLeft: [28, 110], paddingBottomRight: [28, below + 28], animate, maxZoom: 17 });
 }
+/* The trip's map is made once and kept: a new trip moves the same living
+   map (its WebGL ground already drawn) into the new screen and redraws
+   only the marks. */
 function drawMap() {
   const o = state.selected;
   const el = inPage('#map');
-  if (!o || !el || !window.L) return;
-  if (map && map.getContainer() === el && mapFor === o && map.vcWalks === walksLoaded) return;
-  if (map && map.getContainer() === el && mapFor === o) {
-    // A walk's path has come: redraw the marks, keep the view.
+  if (!o || !el) return;
+  if (!window.L) { loadMapLibs().then(() => { if (currentScreen().name === 'detail') drawMap(); }); return; }
+  const marks = () => {
     map.vcMarks.clearLayers();
     map.vcBounds = drawTripMarks(map.vcMarks, o);
     map.vcWalks = walksLoaded;
+  };
+  if (map && map.getContainer() === el) {
+    if (mapFor === o && map.vcWalks === walksLoaded) return;
+    // A walk's path has come, or the trip changed: the marks, not the map.
+    if (mapFor !== o) { mapFor = o; resetVehicles(); marks(); fitTrip(); drawVehicles(); return; }
+    marks();
     return;
   }
-  if (map) { map.remove(); map = null; }
-  vehicleLayer = null;
-  map = L.map(el, { zoomControl: false, attributionControl: true });
-  mapFor = o;
-  addBase(map);
-  map.vcMarks = L.layerGroup().addTo(map);
-  map.vcBounds = drawTripMarks(map.vcMarks, o);
-  map.vcWalks = walksLoaded;
-  fitTrip();
-  // The page slides in; once it has, the map knows its size.
-  setTimeout(() => { if (map) { map.invalidateSize(); fitTrip(); } }, 480);
-  drawVehicles();
+  if (map) {
+    el.replaceWith(map.getContainer());
+    map.invalidateSize();
+    if (mapFor !== o) { mapFor = o; resetVehicles(); }
+    marks();
+    fitTrip();
+    afterSettle(() => { if (map) { map.invalidateSize(); fitTrip(); } });
+    drawVehicles();
+    return;
+  }
+  afterSettle(() => {
+    if (map || inPage('#map') !== el || state.selected !== o) { if (!map && inPage('#map')) drawMap(); return; }
+    map = L.map(el, { zoomControl: false, attributionControl: true, fadeAnimation: true });
+    mapFor = o;
+    addBase(map);
+    map.vcMarks = L.layerGroup().addTo(map);
+    marks();
+    fitTrip();
+    drawVehicles();
+  });
+}
+function resetVehicles() {
+  if (vehicleLayer) vehicleLayer.clearLayers();
+  Object.keys(vehicleMarkers).forEach((k) => delete vehicleMarkers[k]);
 }
 
 /* The trip's buses where they are now, as their own badge. Moved, not
@@ -2227,11 +2288,25 @@ function drawTripOnMap(fit = false) {
     bigmap.fitBounds(box.pad(0.45), { maxZoom: 17, animate: false });
   }
 }
+/* The city map is made once and kept, like the trip's: a tab switch moves it
+   into the new screen instead of building it again. */
 function drawBigMap() {
   const el = inPage('#bigmap');
-  if (!el || !window.L) return;
+  if (!el) return;
+  if (!window.L) { loadMapLibs().then(() => { if (currentScreen().name === 'map') drawBigMap(); }); return; }
   if (bigmap && bigmap.getContainer() === el) return;
-  if (bigmap) { bigmap.remove(); bigmap = null; }
+  if (bigmap) {
+    el.replaceWith(bigmap.getContainer());
+    bigmap.invalidateSize();
+    drawMe();
+    drawTripOnMap(true);
+    loadMapData();
+    afterSettle(() => { if (bigmap) bigmap.invalidateSize(); });
+    return;
+  }
+  afterSettle(() => { if (!bigmap && inPage('#bigmap') === el) makeBigMap(el); });
+}
+function makeBigMap(el) {
   const from = origin() || { lat: 54.6872, lon: 25.2797 };
   bigmap = L.map(el, { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([from.lat, from.lon], 16);
   addBase(bigmap);
@@ -2242,9 +2317,6 @@ function drawBigMap() {
   drawTripOnMap(true);
   bigmap.on('moveend', () => { clearTimeout(mapLoadTimer); mapLoadTimer = setTimeout(loadMapData, 250); });
   bigmap.on('click', (e) => { if (Date.now() - lastLayerClick > 350) dropPin(e.latlng.lat, e.latlng.lng); });
-  // The page slides in; once it has, the map knows its real size and asks
-  // for everything that size shows.
-  setTimeout(() => { if (bigmap) { bigmap.invalidateSize(); loadMapData(); } }, 480);
   loadMapData();
 }
 
@@ -3970,6 +4042,118 @@ document.addEventListener('click', (event) => {
 }, true);
 document.addEventListener('keydown', (event) => { if (coach && event.key === 'Escape') endTour(); });
 
+
+// ================================================================ gestures
+//
+// Two iOS gestures, followed by the finger: a swipe from the left edge goes
+// back (the screen underneath slides in from behind, as UINavigationController
+// does), and the trip sheet is dragged by its top between its three heights.
+
+let drag = null;
+const screenBox = () => $('#screen').getBoundingClientRect();
+document.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || state.locked || coach || state.sheet) return;
+  const box = screenBox();
+  const x = event.clientX - box.left;
+  const grab = event.target.closest && event.target.closest('.trip-sheet .grabber, .trip-sheet .ts-head');
+  if (grab && currentScreen().name === 'detail') {
+    const sheet = inPage('.trip-sheet');
+    drag = { kind: 'sheet', sheet, y0: event.clientY, h0: sheet.offsetHeight, full: inPage('.trip-screen').offsetHeight, moved: false, id: event.pointerId };
+    return;
+  }
+  if (x > 22 || x < 0 || state.stack.length < 2 || !state.prefs || !pageEl) return;
+  drag = { kind: 'back', x0: event.clientX, y0: event.clientY, t0: performance.now(), started: false, id: event.pointerId, width: box.width };
+});
+document.addEventListener('pointermove', (event) => {
+  if (!drag || event.pointerId !== drag.id) return;
+  if (drag.kind === 'sheet') {
+    const h = Math.max(drag.full * SHEET_SNAPS[0], Math.min(drag.full * SHEET_SNAPS[2], drag.h0 + (drag.y0 - event.clientY)));
+    if (Math.abs(drag.y0 - event.clientY) > 4) drag.moved = true;
+    drag.sheet.style.height = `${h}px`;
+    drag.last = h;
+    return;
+  }
+  const dx = event.clientX - drag.x0, dy = event.clientY - drag.y0;
+  if (!drag.started) {
+    if (Math.abs(dy) > 12 && Math.abs(dy) > dx) { drag = null; return; }
+    if (dx < 10) return;
+    drag.started = startBack();
+    if (!drag.started) { drag = null; return; }
+  }
+  moveBack(Math.max(0, dx) / drag.width);
+  drag.lastX = event.clientX; drag.lastT = performance.now();
+});
+const endDrag = (event) => {
+  if (!drag || event.pointerId !== drag.id) return;
+  const d = drag; drag = null;
+  if (d.kind === 'sheet') {
+    if (!d.moved) { d.sheet.style.height = ''; return; }
+    const f = (d.last || d.h0) / d.full;
+    const snap = SHEET_SNAPS.reduce((a, b) => (Math.abs(b - f) < Math.abs(a - f) ? b : a));
+    state.sheetSnap = snap;
+    const to = `${Math.round(snap * d.full)}px`;
+    afterPlay(play(d.sheet, [{ height: d.sheet.style.height }, { height: to }], 'sheet', { fill: 'forwards' }), () => {
+      d.sheet.style.height = ''; d.sheet.parentElement.style.setProperty('--sheet-max', `${Math.round(snap * 100)}%`);
+      d.sheet.getAnimations().forEach((a) => a.cancel());
+      fitTrip(true);
+    });
+    buzz('light');
+    return;
+  }
+  if (!d.started) return;
+  const f = Math.max(0, event.clientX - d.x0) / d.width;
+  const speed = d.lastT ? (event.clientX - (d.lastX || d.x0)) / Math.max(1, performance.now() - d.lastT) : 0;
+  finishBack(f > 0.4 || speed > 0.35, f);
+};
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', (event) => { if (drag && event.pointerId === drag.id && drag.kind === 'back' && drag.started) { drag = null; finishBack(false, 0); } else drag = null; });
+
+// The screen underneath, drawn behind the one leaving.
+let backUnder = null;
+function startBack() {
+  if (!pageEl || pageEl.classList.contains('leaving')) return false;
+  const prev = state.stack[state.stack.length - 2];
+  if (!prev || currentScreen().name === 'pick' && state.searchActive) return false;
+  const under = document.createElement('div');
+  under.className = 'page';
+  under.innerHTML = viewOf(prev)(prev);
+  under.inert = true;
+  pageEl.parentNode.insertBefore(under, pageEl);
+  const scroller = under.querySelector('.content');
+  if (scroller && prev.scroll) scroller.scrollTop = prev.scroll;
+  backUnder = { el: under, screen: prev };
+  pageEl.classList.add('dragged');
+  return true;
+}
+function moveBack(f) {
+  if (!backUnder) return;
+  pageEl.style.transform = `translateX(${(f * 100).toFixed(2)}%)`;
+  backUnder.el.style.transform = `translateX(${(-30 + f * 30).toFixed(2)}%)`;
+  backUnder.el.style.filter = `brightness(${(0.92 + f * 0.08).toFixed(3)})`;
+}
+function finishBack(go, f) {
+  if (!backUnder) return;
+  const { el: under, screen } = backUnder;
+  backUnder = null;
+  const top = pageEl;
+  const ms = Math.round(Math.max(120, (go ? 1 - f : f) * 420));
+  const timing = { duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ms, easing: 'cubic-bezier(.32, .72, 0, 1)', fill: 'forwards' };
+  const a = top.animate([{ transform: top.style.transform || 'none' }, { transform: go ? 'translateX(100%)' : 'none' }], timing);
+  under.animate([{ transform: under.style.transform, filter: under.style.filter }, { transform: go ? 'none' : 'translateX(-30%)', filter: go ? 'brightness(1)' : 'brightness(0.92)' }], timing);
+  a.onfinish = () => {
+    top.classList.remove('dragged');
+    if (!go) { under.remove(); top.style.transform = ''; top.getAnimations().forEach((x) => x.cancel()); return; }
+    // The screen underneath becomes the screen, as a pop would leave it.
+    if (pageScreen && pageScreen.name === 'pick') { state.query = ''; state.results = []; }
+    state.stack.pop();
+    top.remove();
+    under.inert = false; under.style.transform = ''; under.style.filter = '';
+    under.getAnimations().forEach((x) => x.cancel());
+    pageEl = under; pageScreen = screen; pageDepth = screen.depth || state.stack.length;
+    renderApp();
+  };
+}
+
 // =================================================================== voice
 
 let recognition = null;
@@ -4185,8 +4369,14 @@ document.addEventListener('click', (event) => {
   if (event.target.closest('[data-stop]') && target.dataset.action === 'close-sheet' && !event.target.closest('button')) return;
   const action = target.dataset.action;
   const handler = actions[action];
-  if (handler) { event.preventDefault(); handler(target, event); }
+  if (handler) { event.preventDefault(); if (HAPTICS[action]) buzz(HAPTICS[action]); handler(target, event); }
 });
+
+/* A short tap of the iPhone's haptics where iOS gives one: a choice made, a
+   switch flipped, a trip started or ended. Never on plain navigation. */
+const HAPTICS = { tab: 'light', palette: 'light', draft: 'light', 'draft-walk': 'light', pref: 'light', 'time-mode': 'light',
+  'go-option': 'success', 'start-trip': 'success', 'trip-done': 'success', 'toggle-board': 'light' };
+function buzz(kind) { if (SHELL && SHELL.kind === 'ios') shellPost({ type: 'haptic', kind }); }
 
 const actions = {
   back: () => {
