@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>Vilnius Commute</title>
+  <script>
+    /* Inside the Expo Go shell the page is the phone's whole screen, so the
+       drawn iPhone goes before the first paint. ?shell=expo tries it on a
+       desk with an iPhone 15's safe areas. See SHELL in app.js. */
+    (function () {
+      var root = document.documentElement, shell = window.VC_SHELL;
+      if (!shell && new URLSearchParams(location.search).get('shell') !== 'expo') return;
+      root.classList.add('in-shell');
+      var insets = (shell && shell.insets) || { top: 59, bottom: 34 };
+      if (!root.style.getPropertyValue('--shell-top')) root.style.setProperty('--shell-top', insets.top + 'px');
+      if (!root.style.getPropertyValue('--shell-bottom')) root.style.setProperty('--shell-bottom', insets.bottom + 'px');
+    })();
+  </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -22,7 +35,9 @@
     </div>
   </div>
 
-  <aside class="panel" aria-label="Bandymų pultas">
+  <aside class="panel" id="panel" aria-label="Bandymų pultas">
+    <!-- Only in the Expo Go shell, where the panel is a sheet inside the app. -->
+    <div class="panel-bar"><span></span><span class="panel-title">Bandymų pultas</span><button type="button" class="panel-done">Baigti</button></div>
     <h1>Vilnius Commute</h1>
     <p>Veikianti programėlės versija naršyklėje. Viskas telefono rėme veikia kaip iPhone: užrakto ekranas, baneris, Dynamic Island, balsas.</p>
 
@@ -40,7 +55,7 @@
       <div class="status">Pagreitink laiką, kad matytum, kaip baneris keičiasi kelionės metu.</div>
     </div>
 
-    <div class="box">
+    <div class="box" id="heading-box">
       <h2>Kur atsisukęs</h2>
       <input type="range" id="heading-offset" min="-180" max="180" step="5" value="0" aria-label="Kur atsisukęs">
       <div class="status" id="heading-value">žiūri, kur eini</div>

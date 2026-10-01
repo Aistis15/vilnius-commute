@@ -1,0 +1,25 @@
+{
+  "name": "vilnius-commute-shell",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~57.0.25",
+    "expo-constants": "~57.0.19",
+    "expo-location": "~57.0.20",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-webview": "13.16.1"
+  },
+  "scripts": {
+    "start": "expo start",
+    "tunnel": "expo start --tunnel",
+    "lan": "expo start --lan"
+  },
+  "private": true,
+  "devDependencies": {
+    "@expo/ngrok": "^4.1.3"
+  }
+}

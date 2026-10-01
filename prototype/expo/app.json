@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Vilnius Commute",
+    "slug": "vilnius-commute",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Vieta reikalinga, kad programėlė parodytų artimiausias stoteles ir vestų tave maršrutu."
+      }
+    }
+  }
+}

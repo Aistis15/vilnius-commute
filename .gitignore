@@ -40,3 +40,8 @@ __pycache__/
 # Prototype: downloaded timetable and Python caches
 prototype/.data/
 __pycache__/
+
+# Prototype: Expo Go shell (npm install and Metro output)
+prototype/expo/node_modules/
+prototype/expo/.expo/
+prototype/expo/dist/

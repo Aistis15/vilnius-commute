@@ -29,6 +29,21 @@ const store = {
   },
 };
 
+/* Inside the Expo Go shell (prototype/expo) this page is the phone's whole
+   screen: the shell hands it real safe areas, GPS and the compass, and iOS
+   draws the status bar and the island itself. ?shell=expo tries the same on
+   a desk with an iPhone 15's insets. index.html sets .in-shell before the
+   first paint; this is the same test. */
+const SHELL = window.VC_SHELL
+  || (new URLSearchParams(location.search).get('shell') === 'expo' ? { kind: 'expo', insets: { top: 59, right: 0, bottom: 34, left: 0 } } : null);
+if (SHELL) document.documentElement.classList.add('in-shell');
+// Words that differ on a phone: there is no "browser" in an app.
+const say = (inShell, onDesk) => (SHELL ? inShell : onDesk);
+const themeDark = () => {
+  const root = document.documentElement;
+  return root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+};
+
 // Lithuanian plurals: 1 stotelė, 2 stotelės, 10 stotelių.
 function plural(n, one, few, many) {
   const n10 = n % 10, n100 = n % 100;
@@ -341,8 +356,7 @@ function applyAppAccent() {
     root.style.removeProperty('--prominent'); root.style.removeProperty('--on-prominent');
     return;
   }
-  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-  const page = dark ? '#1C1C1E' : '#F2F2F7';
+  const page = themeDark() ? '#1C1C1E' : '#F2F2F7';
   const fill = contrastOf(p.base, page) >= contrastOf(p.ink, page) ? p.base : p.ink;
   root.style.setProperty('--prominent', fill);
   root.style.setProperty('--on-prominent', fill === p.base ? p.ink : p.base);
@@ -390,6 +404,8 @@ const state = {
   placeTimes: {},
   // The banner's colourway (see PALETTES).
   palette: store.get('palette', 'grafitas'),
+  // The phone's compass, from the Expo Go shell: { deg, at } (see facing).
+  compass: SHELL && SHELL.heading && Number.isFinite(SHELL.heading.deg) ? { deg: SHELL.heading.deg, at: SHELL.heading.at || Date.now() } : null,
 };
 
 const save = () => {
@@ -440,8 +456,8 @@ function near() {
 // ---------------------------------------------------------------- location
 
 const GPS_ERRORS = {
-  1: 'Naršyklė neleidžia šiai svetainei naudoti tavo vietos.',
-  2: 'Kompiuteris nepateikė vietos.',
+  1: say('Programėlei neleista naudoti tavo vietos.', 'Naršyklė neleidžia šiai svetainei naudoti tavo vietos.'),
+  2: say('Telefonas nepateikė vietos.', 'Kompiuteris nepateikė vietos.'),
   3: 'Vietos nepavyko gauti per 10 sekundžių.',
 };
 
@@ -474,8 +490,10 @@ function locate(userAsked = false) {
 
 // --------------------------------------------------------------------- api
 
+/* Paths are relative to the page ("api/plan", not "/api/plan"): in the Expo
+   shell the app is served under /vc/ by the dev server's proxy. */
 async function api(path, params) {
-  const url = path + (params ? '?' + new URLSearchParams(params) : '');
+  const url = path.replace(/^\//, '') + (params ? '?' + new URLSearchParams(params) : '');
   const response = await fetch(url);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Serverio klaida ${response.status}`);
@@ -496,7 +514,7 @@ function atFor(mode, time) {
 async function planTrip(place, mode, time, start = null) {
   const from = start || origin();
   if (!from) {
-    const error = new Error('Nežinau, iš kur keliauji. Leisk naršyklei nustatyti vietą arba pasirink ją.');
+    const error = new Error(`Nežinau, iš kur keliauji. Leisk ${say('programėlei', 'naršyklei')} nustatyti vietą arba pasirink ją.`);
     error.code = 'no-origin';
     throw error;
   }
@@ -733,7 +751,7 @@ function onLiveNews() {
 }
 function openLiveStream() {
   if (!window.EventSource || liveStream) return;
-  liveStream = new EventSource('/api/stream');
+  liveStream = new EventSource('api/stream');
   liveStream.addEventListener('live', onLiveNews);
 }
 const streaming = () => !!liveStream && liveStream.readyState === 1;
@@ -1293,9 +1311,11 @@ function locationNotice() {
   return `<div class="notice reveal" data-key="location-notice" role="status">
       <div class="notice-title"><span class="problem">${icon('location')}</span>Nežinau, kur tu esi</div>
       <p>${esc(state.gpsError)} Patikrink du dalykus:</p>
-      <ol>
+      <ol>${say(`
+        <li><b>Leidimas.</b> iPhone nustatymuose atidaryk Expo Go ir leisk naudoti vietą.</li>
+        <li><b>Telefonas.</b> Patikrink, ar įjungtas vietos nustatymas.</li>`, `
         <li><b>Naršyklė.</b> Paspausk ženkliuką adreso juostos kairėje ir leisk šiai svetainei naudoti vietą.</li>
-        <li><b>Windows.</b> Settings › Privacy &amp; security › Location: įjunk vietos paslaugas ir leisk jomis naudotis darbalaukio programoms.</li>
+        <li><b>Windows.</b> Settings › Privacy &amp; security › Location: įjunk vietos paslaugas ir leisk jomis naudotis darbalaukio programoms.</li>`)}
       </ol>
       <div class="notice-actions">
         <button class="secondary" data-action="locate">${state.locating ? 'Ieškau…' : 'Nustatyti mano vietą'}</button>
@@ -2069,6 +2089,12 @@ function settingsView() {
           <div class="sub">Užrakintas ekranas, kampo mygtukas, žemėlapis, salelė</div></span><span class="trail">${icon('chevron')}</span></button>
         <button class="row" data-action="tips-reset"><span class="main"><div class="title">Rodyti patarimus iš naujo</div>
           <div class="sub">Trumpi patarimai prie mygtukų programėlėje</div></span></button></div>
+      ${SHELL ? `<div class="section-title"><span>Prototipas</span></div>
+      <div class="group">
+        <button class="row" data-action="test-panel"><span class="main"><div class="title">Bandymų pultas</div>
+          <div class="sub">Laikas, užrakintas ekranas, tema, balsas raštu</div></span></button>
+        <button class="row" data-action="lock"><span class="main"><div class="title">Užrakinto ekrano peržiūra</div>
+          <div class="sub">Kaip baneris atrodo užrakintame ekrane</div></span></button></div>` : ''}
       <div class="section-title"><span>Duomenys</span></div>
       <div class="group"><div class="row plain"><span class="main"><div class="title">Vilniaus, Kauno ir Klaipėdos tvarkaraščiai</div><div class="sub" id="data-info">${esc(state.dataInfo || '')}</div></span></div></div>
       <div style="margin-top:24px"><button class="secondary" style="width:100%" data-action="reset">Pradėti iš naujo</button></div>
@@ -2105,9 +2131,9 @@ function pickView(screen) {
 
 function pickContent() {
   if (currentScreen().purpose !== 'origin') return '<p class="footnote">Surask vietą ir duok jai vardą.</p>';
-  let gpsSub = 'Paliesk, kad naršyklė nustatytų';
+  let gpsSub = `Paliesk, kad ${say('telefonas', 'naršyklė')} nustatytų`;
   if (state.locating) gpsSub = 'Ieškau…';
-  else if (state.gps) gpsSub = `Pagal naršyklę, tikslumas ±${Math.round(state.gps.accuracy)} m`;
+  else if (state.gps) gpsSub = `Pagal ${say('telefoną', 'naršyklę')}, tikslumas ±${Math.round(state.gps.accuracy)} m`;
   else if (state.gpsError) gpsSub = state.gpsError;
   return `${locationNotice()}
     <div class="group stagger" style="margin-top:14px">
@@ -2124,7 +2150,7 @@ function pickContent() {
         <span class="main"><div class="title">${esc(c.name)}</div><div class="sub">${esc(c.stop)} · ${c.stops} stotelės</div></span>
         <span class="trail check">${state.originChoice === `city:${c.name}` ? icon('check') : ''}</span></button>`).join('')}
     </div>` : ''}
-    <p class="footnote">Kompiuteryje naršyklės vieta gali būti netiksli. Tada geriau pasirinkti vietą iš sąrašo arba surasti ją paieškoje.</p>`;
+    <p class="footnote">${say('Patalpose', 'Kompiuteryje naršyklės')} vieta gali būti netiksli. Tada geriau pasirinkti vietą iš sąrašo arba surasti ją paieškoje.</p>`;
 }
 
 // ---- save suggestions: "you go there often, save it?"
@@ -2629,6 +2655,28 @@ function gpsFix() {
   const g = state.gps;
   return g && liveClock() && Date.now() - g.at < 20_000 && g.accuracy <= 50 ? g : null;
 }
+
+/* The phone's compass, pushed by the Expo Go shell as "vc-heading" events:
+   true north, 0–360. It counts only while it keeps arriving. */
+const compassDeg = () => (state.compass && Date.now() - state.compass.at < 3000 ? state.compass.deg : null);
+let compassPaint = 0, compassSoon = null;
+window.addEventListener('vc-heading', (event) => {
+  const deg = event.detail && Number(event.detail.deg);
+  if (!Number.isFinite(deg)) return;
+  state.compass = { deg: ((deg % 360) + 360) % 360, at: Date.now() };
+  // Only what draws the heading, and about five times a second: the
+  // sensor reports far more often than a turning map can use.
+  if (compassSoon || !state.trip) return;
+  compassSoon = setTimeout(() => { compassSoon = null; compassPaint = Date.now(); renderLock(); renderIsland(); },
+    Math.max(0, 200 - (Date.now() - compassPaint)));
+});
+/* The panel's heading slider only stands in for turning on a desk: it goes
+   while a real compass is talking. */
+function syncHeadingBox() {
+  const box = $('#heading-box');
+  const hide = compassDeg() != null;
+  if (box && box.hidden !== hide) box.hidden = hide;
+}
 /* The nearest point of a path to a position: how far along it, how far off. */
 function projectOnRoute(route, p) {
   let best = { d: 0, off: Infinity };
@@ -2652,9 +2700,10 @@ function guidance(trip, phase, at) {
   const legs = trip.option.legs;
   const leg = phase.kind === 'before' ? legs[0] : phase.leg;
   const lastLeg = legs.indexOf(leg) === legs.length - 1;
-  // Where the phone points, on the desk: the way the path runs, turned by
-  // the panel's "Kur atsisukęs" slider (a real phone has a compass).
-  const facing = (deg) => (deg + (state.headingOffset || 0) + 360) % 360;
+  // Where the phone points: its compass, in the Expo Go shell. On the desk,
+  // the way the path runs, turned by the panel's "Kur atsisukęs" slider.
+  const compass = compassDeg();
+  const facing = (deg) => (compass != null ? compass : (deg + (state.headingOffset || 0) + 360) % 360);
   if (leg.kind === 'walk') {
     const span = Math.max(1, t(leg.arrival) - t(leg.departure));
     const done = phase.kind === 'before' ? 0 : clamp01((at - t(leg.departure)) / span);
@@ -2679,7 +2728,9 @@ function guidance(trip, phase, at) {
       straight: straightMetres(here, leg.to),
       next: next && next.at - d < left - 10 ? { angle: next.angle, in: Math.round(next.at - d), name: next.name } : null,
       crossing: cross && cross.at - d < left - 3 ? { in: Math.max(0, Math.round(cross.at - d)), marked: cross.kind === 'marked', road: cross.road } : null,
-      snapped, gpsHeading: fix && fix.speed > 0.6 && fix.heading != null ? fix.heading : null,
+      // GPS knows which way the rider has been moving, the compass which way
+      // the phone points now: the minimap turns with the phone when it can.
+      snapped, gpsHeading: compass == null && fix && fix.speed > 0.6 && fix.heading != null ? fix.heading : null,
       target: leg.to.name, targetPoint: leg.to,
       toStop: !lastLeg && leg.to.stop != null,
     };
@@ -3142,12 +3193,27 @@ function renderActivity(host, where, { fresh = false } = {}) {
 
 let lockShown = false;
 
+/* The phone's real status bar, in the Expo Go shell: light over the
+   simulated lock screen or a dark theme, dark otherwise. Told only when
+   that changes. */
+let chromeDark = null;
+function syncChrome() {
+  if (!window.ReactNativeWebView) return;
+  const dark = (state.locked && !panelOpen()) || themeDark();
+  if (dark === chromeDark) return;
+  chromeDark = dark;
+  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chrome', dark }));
+}
+
 function renderLock() {
   const lock = $('#lock');
   $('#statusbar').classList.toggle('on-lock', state.locked);
+  syncChrome();
   if (state.locked && !lock.firstChild) {
+    // In the Expo Go shell this is drawn inside a real, unlocked iPhone: a
+    // label says so, under the phone's own status bar.
     lock.innerHTML = `
-      <div class="lock-top"><div class="date"></div><div class="clock"><span class="roll"></span></div></div>
+      <div class="lock-top">${SHELL ? '<div class="lock-preview">Užrakinto ekrano peržiūra</div>' : ''}<div class="date"></div><div class="clock"><span class="roll"></span></div></div>
       <div class="stack"></div>
       <div class="controls">
         <button class="control ours" data-action="lock-button" aria-label="Vilnius · Kur keliausime">${icon('bus')}</button>
@@ -3297,7 +3363,7 @@ function renderAll() {
 // Four times a second, but the DOM only changes where the content did.
 let lastMinute = '';
 setInterval(() => {
-  renderClock(); renderLock(); renderIsland(); coachTick();
+  renderClock(); renderLock(); renderIsland(); coachTick(); syncHeadingBox();
   const minute = hm(now());
   if (minute !== lastMinute) {
     lastMinute = minute;
@@ -3468,7 +3534,8 @@ function placeCoach() {
     ay = Math.min(y, (a.top - box.top) / k - 4);
     ah = Math.max(y + h, (a.bottom - box.top) / k + 4) - ay;
   }
-  const roomBelow = H - (ay + ah) - gap - 30, roomAbove = ay - gap - 54;
+  const safeTop = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 54;
+  const roomBelow = H - (ay + ah) - gap - 30, roomAbove = ay - gap - safeTop;
   const below = (ay + ah / 2 < H * 0.5 && roomBelow >= bh) || roomAbove < bh;
   const cx = x + w / 2;
   const bx = Math.min(Math.max(cx - bw / 2, 16), W - 16 - bw);
@@ -3510,7 +3577,7 @@ function listen(surface, onText) {
   // Inside the phone the words are the phone's: no "browser". The panel's
   // typed field is the desk's stand-in for a microphone.
   if (!Recognition) {
-    failVoice(surface, 'Balso atpažinimas nepasiekiamas.');
+    failVoice(surface, 'Balso atpažinimas nepasiekiamas.', true);
     return;
   }
   const r = new Recognition();
@@ -3542,23 +3609,33 @@ function listen(surface, onText) {
       'language-not-supported': 'Lietuvių kalbos atpažinimas nepasiekiamas.',
       network: 'Balso atpažinimui reikia interneto.',
     }[event.error] || 'Balso atpažinimas nepasiekiamas.';
-    failVoice(surface, message);
+    // Silence or a dropped line is worth another try; the rest (inside the
+    // Expo Go shell the web view may not be allowed to listen) is not.
+    failVoice(surface, message, !['no-speech', 'network'].includes(event.error));
   };
   r.onend = () => { if (!finished && !stale()) { state.listening = null; recognition = null; renderAll(); } };
   recognition = r;
   state.listening = surface;
   state.pendingVoice = onText;
-  try { r.start(); } catch { recognition = null; failVoice(surface, 'Balso atpažinimas nepasiekiamas.'); }
+  try { r.start(); } catch { recognition = null; failVoice(surface, 'Balso atpažinimas nepasiekiamas.', true); }
   renderAll();
 }
 
 /* On the lock screen the question stays up with the reason under it, and
-   the banner offers writing instead: see activityContent. */
-function failVoice(surface, message) {
+   the banner offers writing instead: see activityContent. In the app, when
+   there is no listening to be had, the search field opens for typing (still
+   inside the tap when recognition is missing, so a phone shows its keyboard). */
+function failVoice(surface, message, typeInstead = false) {
   if (surface === 'lock' && state.banner && ['ask', 'askTime'].includes(state.banner.stage)) {
     state.banner = { ...state.banner, problem: message };
   } else if (surface === 'lock') {
     state.banner = { stage: 'ask', problem: message };
+  } else if (typeInstead && currentScreen().name === 'home') {
+    toast(`${message} Parašyk, kur keliauji.`);
+    state.searchActive = true;
+    renderApp();
+    const field = inPage('#search');
+    if (field) field.focus({ preventScroll: true });
   } else {
     toast(message);
   }
@@ -3678,7 +3755,7 @@ async function planAndGo(place, mode, time, surface) {
     } catch (e) {
       // A banner has room for a sentence, not a paragraph.
       state.banner = e.code === 'no-origin'
-        ? { stage: 'error', message: 'Nežinau, iš kur keliauji.', detail: 'Pasirink vietą arba leisk naršyklei ją nustatyti.', code: e.code, retry: 'ask' }
+        ? { stage: 'error', message: 'Nežinau, iš kur keliauji.', detail: `Pasirink vietą arba leisk ${say('programėlei', 'naršyklei')} ją nustatyti.`, code: e.code, retry: 'ask' }
         : { stage: 'error', message: e.message, retry: 'ask' };
       renderAll();
     }
@@ -3709,6 +3786,7 @@ const actions = {
     pop();
   },
   settings: () => push({ name: 'settings' }),
+  'test-panel': () => openPanel(),
   guide: () => { state.guidePage = 0; push({ name: 'guide' }); },
   'guide-next': () => {
     const page = state.guidePage || 0;
@@ -3765,7 +3843,7 @@ const actions = {
   },
   pref: (el) => { state.prefs[el.dataset.pref] = el.dataset.value; save(); renderApp(); },
   reset: () => {
-    if (!confirm('Ištrinti nustatymus, vietas ir istoriją šioje naršyklėje?')) return;
+    if (!confirm(`Ištrinti nustatymus, vietas ir istoriją ${say('šiame telefone', 'šioje naršyklėje')}?`)) return;
     Object.assign(state, { prefs: null, places: [], visits: {}, dismissed: [], originChoice: 'gps', stack: [HOME()] });
     store.set('lockButtonUsed', false);
     save(); endTrip();
@@ -3888,7 +3966,9 @@ const actions = {
     if (field) { field.value = ''; field.blur(); }
     renderApp();
   },
-  'banner-open-search': () => { stopListening(); state.banner = null; state.locked = false; state.stack = [HOME()]; renderAll(); setTimeout(() => { const s = inPage('#search'); if (s) s.focus(); }, 50); },
+  // The search opens by itself too: a phone may not let a script focus the
+  // field outside the tap (no keyboard), and the field must still be there.
+  'banner-open-search': () => { stopListening(); state.banner = null; state.locked = false; state.stack = [HOME()]; state.searchActive = true; renderAll(); setTimeout(() => { const s = inPage('#search'); if (s) s.focus(); }, 50); },
   'banner-cancel': () => { stopListening(); state.banner = state.trip ? { stage: 'trip' } : null; renderAll(); },
   'banner-now': () => { const place = state.banner.place; stopListening(); planAndGo(place, 'now', null, 'lock'); },
   'banner-go-late': () => { const b = state.banner; if (b && b.option) startTrip(b.option, b.place); },
@@ -4012,7 +4092,7 @@ document.addEventListener('change', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { state.islandExpanded = false; state.sheet = null; renderAll(); }
+  if (event.key === 'Escape') { state.islandExpanded = false; state.sheet = null; if (SHELL) closePanel(); renderAll(); }
   if (event.key === 'Enter' && event.target.id === 'new-name') actions['confirm-name']();
   if (event.key === 'Enter' && event.target.id === 'time-value') event.target.blur();
   if (event.key === 'Enter' && event.target.id === 'search') {
@@ -4072,9 +4152,25 @@ const stacked = window.matchMedia('(max-width: 800px)');
 function showPhone() {
   const active = document.activeElement;
   if (active && active.closest && active.closest('.panel')) active.blur();
+  if (SHELL) closePanel();
   if (stacked.matches && window.scrollY > 0) window.scrollTo({ top: 0, behavior: reducedMotion.matches ? 'auto' : 'smooth' });
 }
+// Every button there, "Baigti" included, goes back to the phone.
 $('.panel').addEventListener('click', (event) => { if (event.target.closest('button')) showPhone(); });
+
+/* In the Expo Go shell there is no desk: the panel is a sheet over the app,
+   opened from Settings › Prototipas. */
+function panelOpen() { return document.documentElement.classList.contains('panel-open'); }
+function openPanel() {
+  $('#panel').scrollTop = 0;
+  document.documentElement.classList.add('panel-open');
+  syncChrome();
+}
+function closePanel() {
+  if (!panelOpen()) return;
+  document.documentElement.classList.remove('panel-open');
+  syncChrome();
+}
 
 $('#speed-buttons').addEventListener('click', (event) => {
   const button = event.target.closest('button');
@@ -4107,10 +4203,10 @@ $('#jump-stage').addEventListener('click', () => {
 $('#toggle-lock').addEventListener('click', () => (state.locked ? actions.unlock() : actions.lock()));
 $('#toggle-theme').addEventListener('click', () => {
   const root = document.documentElement;
-  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-  root.dataset.theme = dark ? 'light' : 'dark';
+  root.dataset.theme = themeDark() ? 'light' : 'dark';
   store.set('theme', root.dataset.theme);
   applyAppAccent();
+  syncChrome();
 });
 $('#typed-voice').addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') return;
@@ -4151,7 +4247,7 @@ $('#locate').addEventListener('click', () => locate(true));
 function fillOrigins() {
   if (state.serverReady) setTimeout(() => { refreshNearby(); refreshPlaceTimes(); }, 0);
   const select = $('#origin-select');
-  const options = [['gps', 'Tavo vieta (naršyklė)'],
+  const options = [['gps', `Tavo vieta (${say('telefonas', 'naršyklė')})`],
     ...(state.cities || []).map((c) => [`city:${c.name}`, `${c.name} · ${c.stop}`]),
     ...state.places.map((p) => [p.id, p.name]), ['__pick', 'Kita vieta…']];
   const cityButtons = $('#city-buttons');
@@ -4162,8 +4258,8 @@ function fillOrigins() {
   select.innerHTML = options.map(([value, label]) => `<option value="${esc(value)}"${value === state.originChoice ? ' selected' : ''}>${esc(label)}</option>`).join('');
   const from = origin();
   $('#origin-status').textContent = state.originChoice === 'gps'
-    ? (state.gps ? `Naršyklės vieta, tikslumas ±${Math.round(state.gps.accuracy)} m. Kompiuteryje ji gali būti netiksli.`
-      : state.locating ? 'Ieškau vietos…' : (state.gpsError ? `${state.gpsError} Pasirink vietą iš sąrašo.` : 'Laukiu naršyklės vietos…'))
+    ? (state.gps ? say(`Telefono vieta, tikslumas ±${Math.round(state.gps.accuracy)} m.`, `Naršyklės vieta, tikslumas ±${Math.round(state.gps.accuracy)} m. Kompiuteryje ji gali būti netiksli.`)
+      : state.locating ? 'Ieškau vietos…' : (state.gpsError ? `${state.gpsError} Pasirink vietą iš sąrašo.` : `Laukiu ${say('telefono', 'naršyklės')} vietos…`))
     : (from ? `${from.lat.toFixed(4)}, ${from.lon.toFixed(4)}` : '');
 }
 
@@ -4173,7 +4269,7 @@ function fillOrigins() {
   const theme = store.get('theme', null);
   if (theme) document.documentElement.dataset.theme = theme;
   applyPalette();
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyAppAccent);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyAppAccent(); syncChrome(); });
   // A trip survives a reload, like a Live Activity survives the app quitting.
   const trip = store.get('trip', null);
   if (trip && new Date(trip.option.arrive.iso).getTime() > Date.now() - 2 * 3600_000) {
@@ -4183,8 +4279,9 @@ function fillOrigins() {
     state.banner = { stage: 'trip' };
   }
   // Once set up, the phone starts locked: the banner is the product, and the
-  // app is one swipe away.
-  if (state.prefs) state.locked = true;
+  // app is one swipe away. Not in the Expo Go shell: there the person has
+  // just unlocked a real phone to open the app.
+  if (state.prefs && !SHELL) state.locked = true;
   fillOrigins();
   renderAll();
   locate(false);
