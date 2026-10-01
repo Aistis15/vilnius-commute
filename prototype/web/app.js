@@ -3489,11 +3489,13 @@ const countdown = (ms, at) => {
    the iPhone's Live Activity draw the same object. */
 
 const routeRef = (r) => ({ name: r.name, color: r.color, text: r.text_color });
-/* "12 min", or "1:20 val." once it is an hour or more. */
+/* "12 min", or "4 val. 5 min" once it is an hour or more: the hours are
+   the number, the rest rides beside it in the small size. */
 function minutesValue(m) {
   if (m <= 0) return { value: 'dabar', unit: '' };
   if (m < 60) return { value: String(m), unit: 'min' };
-  return { value: `${Math.floor(m / 60)}:${pad(m % 60)}`, unit: 'val.' };
+  const rest = m % 60;
+  return { value: String(Math.floor(m / 60)), unit: rest ? `val. ${rest} min` : 'val.' };
 }
 // Counts to the minute shown beside it: "išeik 08:01" never sits over
 // "2 min" at 08:00 because the plan said 08:01:40.
