@@ -160,7 +160,10 @@ final class ShellModel {
         view.scrollView.contentInsetAdjustmentBehavior = .never
         view.scrollView.bounces = false
         view.isOpaque = false
-        view.backgroundColor = .systemBackground
+        // The page's grey, not white: nothing flashes before the page draws.
+        let page = UIColor(named: "LaunchBackground") ?? .secondarySystemBackground
+        view.backgroundColor = page
+        view.underPageBackgroundColor = page
         webView = view
 
         if let server, let page = ShellAddress.page(for: server) {

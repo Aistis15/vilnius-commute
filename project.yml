@@ -129,8 +129,10 @@ targets:
         CFBundleLocalizations: [lt]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The page's own grey (F2F2F7, dark 1C1C1E) from the first frame, so
+        # opening the app never flashes white before the page draws.
         UILaunchScreen:
-          UIColorName: ""
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIApplicationSupportsIndirectInputEvents: true
