@@ -1403,3 +1403,48 @@ button.ts-step { width: calc(100% + 16px); }
 .trip-sheet .grabber { cursor: grab; padding: 6px 0; margin-top: 2px; box-sizing: content-box; background-clip: content-box; touch-action: none; }
 .trip-sheet .ts-head { touch-action: none; }
 .map-locate { bottom: calc(var(--sheet-max, 46%) + 14px); transition: bottom var(--t-sheet) var(--ease-move); }
+
+/* ==== motion polish (2026-10-02) ============================================ */
+/* The tab bar's pill slides between tabs (springs, like the island). */
+.tab-pill { position: absolute; left: 6px; top: 6px; bottom: 6px; width: calc((100% - 20px) / 3); border-radius: 24px; background: var(--fill);
+  transform: translateX(calc(var(--i, 0) * (100% + 4px))); pointer-events: none; }
+.tabbar { position: absolute; }
+.tab { position: relative; z-index: 1; }
+.tab.on { background: none; }
+/* The map's ground fades in once drawn. */
+.leaflet-gl-layer { transition: opacity .45s var(--ease-out); }
+.ground-loading .leaflet-gl-layer { opacity: 0; }
+/* The trip's marks settle in after its lines. */
+.dest-pill { animation: drop-in .5s var(--ease-spring) .55s backwards; }
+.dest-dot, .stop-pair, .line-badge .badge, .zebra { animation: pop-in .4s var(--ease-spring) .5s backwards; }
+@keyframes drop-in { from { opacity: 0; transform: translate(-50%, calc(-100% - 26px)); } }
+@keyframes pop-in { from { opacity: 0; transform: scale(.4); } }
+.zebra { animation-name: zebra-in; }
+@keyframes zebra-in { from { opacity: 0; } }
+/* Buses arrive on the map and leave it. */
+.bus-marker { animation: bus-in .32s var(--ease-spring) backwards; transition: opacity .25s var(--ease-in), transform .25s var(--ease-in); }
+.bus-marker.bus-out { opacity: 0; transform: scale(.6); }
+@keyframes bus-in { from { opacity: 0; transform: scale(.6); } }
+/* Where you are: the dot, and a halo that breathes out slowly. */
+.me-icon { background: none; border: 0; }
+.me-dot { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 9px; background: #1C1C1E; box-shadow: 0 0 0 3px #fff, 0 1px 6px rgba(0, 0, 0, 0.3); }
+.me-halo { position: absolute; inset: -3px; border-radius: 50%; background: rgba(28, 28, 30, 0.28); animation: halo 2.4s var(--ease-out) infinite; }
+@keyframes halo { from { transform: scale(1); opacity: .9; } to { transform: scale(3.2); opacity: 0; } }
+:root[data-theme="dark"] .me-dot { background: #fff; box-shadow: 0 0 0 3px #1C1C1E, 0 1px 6px rgba(0, 0, 0, 0.5); }
+:root[data-theme="dark"] .me-halo { background: rgba(255, 255, 255, 0.3); }
+/* A colourway eases over. */
+.palette-card, .palette-card .bn-cap, .palette-card .bn-title, .palette-card .bn-foot, .palette-card .pager-dots, .palette-card .pdots i,
+.palette-card .big, .palette-card .chev { transition: background-color .4s var(--ease-out), color .4s var(--ease-out); }
+/* A choice made: its ring draws in. */
+.choice, .opt, .swatch { transition: box-shadow .25s var(--ease-out), transform var(--t-release) var(--ease-out); }
+.opt:active, .ptile:active .ptile-disc, .stop-row:active { transition-duration: var(--t-press); }
+.stop-row { transition: background-color var(--t-release) var(--ease-out); }
+.stop-row:active { background: var(--fill); }
+/* Loading: a sheen that passes over the placeholders, not a blink. */
+.skel { background: linear-gradient(100deg, var(--card) 30%, var(--fill2) 50%, var(--card) 70%) var(--card); background-size: 250% 100%; animation: sheen 1.3s linear infinite; }
+@keyframes sheen { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+/* Light and dark: the whole screen cross-fades (View Transitions). */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .35s; animation-timing-function: var(--ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .me-halo, .skel, .bus-marker, .dest-pill, .dest-dot, .stop-pair, .line-badge .badge { animation: none !important; }
+}

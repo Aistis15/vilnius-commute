@@ -123,6 +123,8 @@ const ROLES = {
   push: ['--t-push', '--ease-move'],
   sheet: ['--t-sheet', '--ease-move'],
   rise: ['--t-sheet', '--ease-out'],
+  pill: ['--t-island', '--ease-spring'],
+  grow: ['--t-content', '--ease-move'],
 };
 let motionCache = null;
 if (reducedMotion.addEventListener) reducedMotion.addEventListener('change', () => { motionCache = null; });
@@ -259,6 +261,18 @@ function rollTo(el, text) {
     ghost.animate([{ transform: 'none', opacity: 1 }, { transform: `translateY(${down ? '0.4em' : '-0.4em'})`, opacity: 0 }],
       { duration: m.duration * 0.7, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' }).onfinish = () => ghost.remove();
   });
+}
+
+/* Change something inside `el` and let el's height follow over a moment
+   (a stop's board opening, the map card's content). */
+function growTo(el, mutate) {
+  if (!el) { mutate(); return; }
+  const from = el.offsetHeight;
+  mutate();
+  const to = el.offsetHeight;
+  if (Math.abs(from - to) < 2) return;
+  el.style.overflow = 'hidden';
+  afterPlay(play(el, [{ height: `${from}px` }, { height: `${to}px` }], 'grow'), () => { el.style.overflow = ''; });
 }
 
 /* A stage change in the banner: the old content lifts away, the new one
@@ -944,6 +958,21 @@ function transitionPages(from, to, kind) {
   } else if (kind === 'pop') {
     play(to, [...behind].reverse(), 'push');
     afterPlay(play(from, [{ transform: 'none' }, { transform: 'translateX(100%)' }], 'push', { fill: 'forwards' }), done);
+  } else if (from.querySelector('.tabbar') && to.querySelector('.tabbar')) {
+    // From tab to tab: the bar stays where it is and its pill slides over;
+    // only what is above it cross-fades, the new screen rising a little.
+    const oldBar = from.querySelector('.tabbar');
+    const pill = to.querySelector('.tab-pill');
+    const was = Number(oldBar.querySelector('.tab-pill').style.getPropertyValue('--i')) || 0;
+    const now = Number(pill.style.getPropertyValue('--i')) || 0;
+    oldBar.style.visibility = 'hidden';
+    if (was !== now) {
+      const step = pill.offsetWidth + 4;
+      play(pill, [{ transform: `translateX(${was * step}px)` }, { transform: `translateX(${now * step}px)` }], 'pill');
+    }
+    const above = (page) => [...page.children].filter((el) => !el.classList.contains('tabbar'));
+    above(to).forEach((el) => play(el, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'content'));
+    afterPlay(play(from, [{ opacity: 1 }, { opacity: 0 }], 'exit', { fill: 'forwards' }), done);
   } else {
     play(to, [{ opacity: 0 }, { opacity: 1 }], 'content');
     afterPlay(play(from, [{ opacity: 1 }, { opacity: 0 }], 'exit', { fill: 'forwards' }), done);
@@ -1227,7 +1256,8 @@ document.addEventListener('pointerup', (event) => {
    top hides it, as hidesBottomBarWhenPushed does on the iPhone. */
 const TABS = [['home', 'tabBus', 'Kelionė'], ['map', 'tabMap', 'Žemėlapis'], ['settings', 'sliders', 'Nustatymai']];
 function tabBar(active) {
-  return `<nav class="tabbar" aria-label="Skirtukai">${TABS.map(([name, glyph, label]) =>
+  const i = Math.max(0, TABS.findIndex(([name]) => name === active));
+  return `<nav class="tabbar" aria-label="Skirtukai"><i class="tab-pill" aria-hidden="true" style="--i:${i}"></i>${TABS.map(([name, glyph, label]) =>
     `<button class="tab${active === name ? ' on' : ''}" data-action="tab" data-tab="${name}"${active === name ? ' aria-current="page"' : ''}>${icon(glyph)}<span>${label}</span></button>`).join('')}</nav>`;
 }
 /* A tab's own screen is the only one in the stack. */
@@ -1910,8 +1940,9 @@ function twoColourRing(a, b, ground) {
       <circle cx="12" cy="12" r="2.6" fill="${b}"/>
     </svg>`;
 }
-function drawTripMarks(group, o, { label = true } = {}) {
+function drawTripMarks(group, o, { label = true, draw = false } = {}) {
   const bounds = [];
+  const drawn = [];
   const ink = themeDark() ? '#F2F2F7' : '#1C1C1E';
   const ground = themeDark() ? '#1C1C1E' : '#FFFFFF';
   o.legs.forEach((leg) => {
@@ -1920,8 +1951,8 @@ function drawTripMarks(group, o, { label = true } = {}) {
     bounds.push(...(points || [[leg.from.lat, leg.from.lon], [leg.to.lat, leg.to.lon]]));
     if (!points) return;
     if (leg.kind === 'ride') {
-      L.polyline(points, { color: ground, weight: 10, opacity: 1, interactive: false, lineJoin: 'round' }).addTo(group);
-      L.polyline(points, { color: `#${leg.route.color}`, weight: 6, opacity: 1, interactive: false, lineJoin: 'round' }).addTo(group);
+      drawn.push(L.polyline(points, { color: ground, weight: 10, opacity: 1, interactive: false, lineJoin: 'round' }).addTo(group));
+      drawn.push(L.polyline(points, { color: `#${leg.route.color}`, weight: 6, opacity: 1, interactive: false, lineJoin: 'round' }).addTo(group));
     } else {
       L.polyline(points, { color: ink, weight: 4, opacity: 0.9, dashArray: '0.1 8', lineCap: 'round', interactive: false }).addTo(group);
       // Each street the walk crosses, where it crosses it: a zebra where
@@ -1969,7 +2000,24 @@ function drawTripMarks(group, o, { label = true } = {}) {
     L.marker([last.lat, last.lon], { interactive: false, keyboard: false, zIndexOffset: 600, icon: L.divIcon({ className: 'dest-icon', iconSize: null,
       html: `<span class="dest-pill">${esc(name)} · ${esc(o.arrive.hm)}</span><span class="dest-dot"></span>` }) }).addTo(group);
   }
+  if (draw) drawLinesIn(drawn);
   return bounds;
+}
+/* Each ride's line draws itself from where you board, the first one first,
+   once the map is in view: the way reads as a way, not a shape. */
+function drawLinesIn(lines) {
+  const m = motion('sheet');
+  if (!m.duration) return;
+  lines.forEach((line, i) => {
+    const path = line.getElement && line.getElement();
+    if (!path || !path.getTotalLength) return;
+    const length = path.getTotalLength();
+    if (!length) return;
+    path.style.strokeDasharray = `${length} ${length}`;
+    path.animate([{ strokeDashoffset: length }, { strokeDashoffset: 0 }],
+      { duration: Math.min(900, 380 + length / 3), delay: 120 + Math.floor(i / 2) * 260, easing: 'cubic-bezier(.33, 0, .2, 1)', fill: 'backwards' })
+      .onfinish = () => { path.style.strokeDasharray = ''; };
+  });
 }
 
 // ---- the map's look: a quiet ground, so the only colour is the route's
@@ -2051,6 +2099,11 @@ function addBase(leafletMap) {
   if (window.maplibregl && L.maplibreGL && hasWebGL()) {
     const layer = L.maplibreGL({ style: mapStyle(themeDark()), attribution: ATTRIBUTION, interactive: false });
     layer.addTo(leafletMap);
+    // The ground appears once it is drawn, not tile by tile.
+    const box = leafletMap.getContainer();
+    box.classList.add('ground-loading');
+    try { layer.getMaplibreMap().once('idle', () => box.classList.remove('ground-loading')); } catch { box.classList.remove('ground-loading'); }
+    setTimeout(() => box.classList.remove('ground-loading'), 2500);
     layer.vcDark = themeDark();
     baseLayers.add(layer);
     leafletMap.on('unload', () => baseLayers.delete(layer));
@@ -2093,7 +2146,48 @@ function loadMapLibs() {
     .then(() => (window.maplibregl ? js(MAP_LIBS.bridge).catch(() => {}) : null));
   return mapLibs;
 }
-setTimeout(() => (window.requestIdleCallback || ((fn) => setTimeout(fn, 1)))(() => loadMapLibs(), { timeout: 4000 }), 1200);
+/* Work that can wait runs only once the rider has left the screen alone for
+   QUIET_MS and the browser is idle: it never lands in the middle of a tap,
+   a scroll or a slide. */
+const QUIET_MS = 2500;
+let lastInput = performance.now();
+for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) addEventListener(type, () => { lastInput = performance.now(); }, { passive: true, capture: true });
+function whenQuiet(fn) {
+  const wait = Math.max(QUIET_MS - (performance.now() - lastInput), pagesMoveUntil - performance.now(), 0);
+  if (wait > 0) { setTimeout(() => whenQuiet(fn), wait + 50); return; }
+  (window.requestIdleCallback || ((f) => setTimeout(f, 1)))((deadline) => {
+    if (performance.now() - lastInput < QUIET_MS || (deadline && deadline.timeRemaining && deadline.timeRemaining() < 10)) { whenQuiet(fn); return; }
+    fn();
+  }, { timeout: 8000 });
+}
+// One step at a time: the libraries, then the city map, then the trip map.
+setTimeout(() => whenQuiet(() => loadMapLibs().then(() => whenQuiet(() => { prewarmMaps('city'); whenQuiet(() => prewarmMaps('trip')); }))), 2000);
+
+/* Both maps are made ahead, out of sight, in idle time once the libraries
+   are in: the first open is then as quick as every later one, its ground
+   and the tiles around you already drawn. */
+function offstage(id, className) {
+  const el = Object.assign(document.createElement('div'), { id, className });
+  el.dataset.morph = 'keep';
+  el.style.cssText = 'position:fixed;left:-10000px;top:0;width:390px;height:844px;';
+  document.body.appendChild(el);
+  return el;
+}
+function onstage(container, placeholder) {
+  container.style.cssText = '';
+  placeholder.replaceWith(container);
+}
+function prewarmMaps(which) {
+  if (!window.L || !state.prefs) return;
+  if (which === 'city' && !bigmap && currentScreen().name !== 'map') makeBigMap(offstage('bigmap', 'bigmap'));
+  if (which === 'trip' && !map && currentScreen().name !== 'detail') {
+    const from = origin() || { lat: 54.6872, lon: 25.2797 };
+    map = L.map(offstage('map', 'trip-map'), { zoomControl: false, attributionControl: true }).setView([from.lat, from.lon], 15);
+    addBase(map);
+    map.vcMarks = L.layerGroup().addTo(map);
+    mapFor = null;
+  }
+}
 
 /* A map is made once the screen has slid into place: making it during the
    slide (a WebGL context, the style, the first tiles) drops frames. */
@@ -2115,23 +2209,24 @@ function drawMap() {
   const el = inPage('#map');
   if (!o || !el) return;
   if (!window.L) { loadMapLibs().then(() => { if (currentScreen().name === 'detail') drawMap(); }); return; }
-  const marks = () => {
+  const marks = (draw = false) => {
     map.vcMarks.clearLayers();
-    map.vcBounds = drawTripMarks(map.vcMarks, o);
+    map.vcBounds = drawTripMarks(map.vcMarks, o, { draw });
     map.vcWalks = walksLoaded;
   };
   if (map && map.getContainer() === el) {
     if (mapFor === o && map.vcWalks === walksLoaded) return;
     // A walk's path has come, or the trip changed: the marks, not the map.
-    if (mapFor !== o) { mapFor = o; resetVehicles(); marks(); fitTrip(); drawVehicles(); return; }
+    if (mapFor !== o) { mapFor = o; resetVehicles(); marks(true); fitTrip(); drawVehicles(); return; }
     marks();
     return;
   }
   if (map) {
-    el.replaceWith(map.getContainer());
+    onstage(map.getContainer(), el);
     map.invalidateSize();
-    if (mapFor !== o) { mapFor = o; resetVehicles(); }
-    marks();
+    const fresh = mapFor !== o;
+    if (fresh) { mapFor = o; resetVehicles(); }
+    marks(true);
     fitTrip();
     afterSettle(() => { if (map) { map.invalidateSize(); fitTrip(); } });
     drawVehicles();
@@ -2143,7 +2238,7 @@ function drawMap() {
     mapFor = o;
     addBase(map);
     map.vcMarks = L.layerGroup().addTo(map);
-    marks();
+    marks(true);
     fitTrip();
     drawVehicles();
   });
@@ -2240,7 +2335,7 @@ function mapCard() {
 
 function refreshMapCard() {
   const card = inPage('#map-card');
-  if (card && currentScreen().name === 'map') morph(card, mapCard());
+  if (card && currentScreen().name === 'map') growTo(card, () => morph(card, mapCard()));
 }
 
 let bigmap = null, bigLayers = null, busMarkers = {}, mapLoadTimer = null, lastLayerClick = 0;
@@ -2265,7 +2360,8 @@ function drawMe() {
   if (!me) return;
   if (!meMarker) {
     meRing = L.circle([me.lat, me.lon], { radius: me.accuracy || 1, stroke: false, fillColor: '#1C1C1E', fillOpacity: 0.12, interactive: false }).addTo(bigLayers.me);
-    meMarker = L.circleMarker([me.lat, me.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1C1C1E', fillOpacity: 1, interactive: false }).addTo(bigLayers.me);
+    meMarker = L.marker([me.lat, me.lon], { interactive: false, keyboard: false, zIndexOffset: 1000,
+      icon: L.divIcon({ className: 'me-icon', iconSize: null, html: '<span class="me-dot"><i class="me-halo"></i></span>' }) }).addTo(bigLayers.me);
     return;
   }
   glideTo(meMarker, me.lat, me.lon, 900);
@@ -2313,7 +2409,7 @@ function drawBigMap() {
   if (!window.L) { loadMapLibs().then(() => { if (currentScreen().name === 'map') drawBigMap(); }); return; }
   if (bigmap && bigmap.getContainer() === el) return;
   if (bigmap) {
-    el.replaceWith(bigmap.getContainer());
+    onstage(bigmap.getContainer(), el);
     bigmap.invalidateSize();
     drawMe();
     drawTripOnMap(true);
@@ -2376,7 +2472,14 @@ function drawBuses(list) {
     follow(busMarkers[v.key], v);
   }
   for (const key of Object.keys(busMarkers)) {
-    if (!seen.has(key)) { bigLayers.buses.removeLayer(busMarkers[key]); delete busMarkers[key]; }
+    if (seen.has(key)) continue;
+    const gone = busMarkers[key];
+    delete busMarkers[key];
+    const el = gone.getElement && gone.getElement();
+    if (el && el.firstElementChild) {
+      el.firstElementChild.classList.add('bus-out');
+      setTimeout(() => bigLayers && bigLayers.buses.removeLayer(gone), 260);
+    } else bigLayers.buses.removeLayer(gone);
   }
 }
 
@@ -2418,7 +2521,7 @@ function paletteSection() {
   };
   const dots = '<span class="pager-dots static" aria-hidden="true"><span class="pdots"><i class="on"></i><i></i><i></i></span></span>';
   return `<div class="section-label">Banerio spalva</div>
-    <div class="palette-stage" data-key="palette-${chosen.id}">
+    <div class="palette-stage" data-key="palette-stage">
       <div class="activity trip palette-card" style="${varsStyle(paletteVars(chosen))}${chosen.id === 'grafitas' ? ';--act-bg:#1C1C1E' : ''}">
         <div class="act-body">${bannerHtml(sample)}</div><div class="act-pager">${dots}</div></div>
     </div>
@@ -4498,7 +4601,7 @@ const actions = {
   'toggle-board': (el) => {
     state.openBoards = state.openBoards || {};
     state.openBoards[el.dataset.board] = !state.openBoards[el.dataset.board];
-    refreshHome();
+    growTo(el.closest('.stop-row-wrap'), () => refreshHome());
   },
   'open-trip': () => {
     if (!state.trip) return;
@@ -4924,7 +5027,8 @@ $('#jump-stage').addEventListener('click', () => {
 $('#toggle-lock').addEventListener('click', () => (state.locked ? actions.unlock() : actions.lock()));
 $('#toggle-theme').addEventListener('click', () => {
   const root = document.documentElement;
-  root.dataset.theme = themeDark() ? 'light' : 'dark';
+  const flip = () => { root.dataset.theme = themeDark() ? 'light' : 'dark'; };
+  if (document.startViewTransition && !reducedMotion.matches) document.startViewTransition(flip); else flip();
   store.set('theme', root.dataset.theme);
   restyleMaps();
   applyAppAccent();
