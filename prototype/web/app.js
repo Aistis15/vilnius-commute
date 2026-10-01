@@ -1559,7 +1559,7 @@ function resultsView() {
     if (state.timeMode === 'now' && shown.some((o) => !isLate(o))) shown = shown.filter((o) => !isLate(o));
     const best = shown.find((o) => !isLate(o) && !o.missed) || shown[0];
     const rest = shown.filter((o) => o !== best).sort((a, b) => Number(!!a.missed) - Number(!!b.missed));
-    body = `${lateNotice(plan)}<div class="option-list stagger">${chosenCard(best, shown)}${rest.map((o) => optionCard(o, shown)).join('')}</div>`;
+    body = `${lateNotice(plan)}<div class="option-list stagger">${chosenCard(best, shown)}${rest.map((o) => optionCard(o, shown, best)).join('')}</div>`;
     // Going is one tap, at the bottom where the thumb is. It starts the
     // ringed way; any card opens its own steps and map.
     if (!isLate(best) && !best.missed) {
@@ -1589,10 +1589,20 @@ function routeRow(o) {
   });
   return parts.join(`<span class="sep">${icon('chevron')}</span>`);
 }
-const optionChip = (o, all) => {
+/* Every card says what it is for, as the design's do: the server's own tag
+   when only this way has it, else what it gives over the recommended one. */
+function optionChip(o, all, best = null) {
   const tags = o.missed ? [] : distinctTags(o, all);
-  return tags.length ? `<span class="opt-chip">${esc(tags[0])}</span>` : '<span></span>';
-};
+  let label = tags[0] || '';
+  if (!label && best && best !== o && !o.walk_only) {
+    if (o.transfers < best.transfers) label = o.transfers === 0 ? 'Be persėdimų' : 'Mažiau persėdimų';
+    else if (o.walk_m < best.walk_m - 100) label = 'Mažiau pėsčiomis';
+    else if (t(o.leave) > t(best.leave) + 60_000) label = 'Išeik vėliau';
+    else if (t(o.leave) < t(best.leave) - 60_000) label = 'Ankstesnis';
+  }
+  if (!label && o.walk_only) label = 'Pėsčiomis';
+  return label ? `<span class="opt-chip">${esc(label)}</span>` : '<span></span>';
+}
 function optionProblem(o) {
   if (o.legs.some((l) => l.cancelled)) return '<div class="opt-line problem-text">Reisas atšauktas</div>';
   if (o.missed) return '<div class="opt-line problem-text">Persėdimas gali nepavykti: autobusas vėluoja</div>';
@@ -1618,13 +1628,13 @@ function chosenCard(o, all) {
     </button>`;
 }
 
-function optionCard(o, all) {
+function optionCard(o, all, best) {
   const rides = o.legs.filter((l) => l.kind === 'ride');
   const what = o.walk_only ? 'Pėsčiomis'
     : rides.length === 1 ? { trolleybus: 'Vienas troleibusas', ferry: 'Vienas keltas' }[rides[0].route.category] || 'Vienas autobusas'
       : capital(transfersText(o.transfers));
   return `<button class="opt" data-action="open-option" data-index="${o.index}" data-key="${esc(o.id)}">
-      <div class="opt-head">${optionChip(o, all)}<span class="opt-dur">${o.duration_min} min</span></div>
+      <div class="opt-head">${optionChip(o, all, best)}<span class="opt-dur">${o.duration_min} min</span></div>
       <div class="opt-row"><span class="opt-clock small${isLate(o) ? ' problem-text' : ''}">${esc(o.leave.hm)} <span class="arrow">→</span> ${esc(o.arrive.hm)}</span>
         <span class="opt-badges">${o.walk_only ? icon('walk') : rides.map((l) => badge(l.route)).join('')}</span></div>
       <div class="opt-line">${what} · ${metresText(o.walk_m)} pėsčiomis</div>
@@ -1860,10 +1870,23 @@ function sheetHead(page) {
     </div>`;
 }
 
-/* The trip's marks, as the design's map spec draws them: each ride in its
-   route's colour on a white casing, walks as dots on the pavement, the stop
-   to board on a ring of the route's colour, a change on a black ring, the
-   stops between as small rings, and the destination named in a black pill. */
+/* The trip's marks, as the design's map spec draws them, every one in the
+   colour of the vehicle it belongs to: each ride in its route's colour on a
+   white casing with its number on the line, the stop to board and the stop
+   to get off on rings of that colour, the stops between as small rings of
+   it, walks as dots on the pavement, and the destination named in a black
+   pill. Where one vehicle is left for another at the same stop, the ring is
+   both: the half you arrive on in the first one's colour, the other half in
+   the next one's. */
+const STOP_SHARED_M = 60;
+function twoColourRing(a, b, ground) {
+  return `<svg class="stop-pair" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" fill="${ground}"/>
+      <path d="M12 4a8 8 0 0 0 0 16" fill="none" stroke="${a}" stroke-width="3.6"/>
+      <path d="M12 4a8 8 0 0 1 0 16" fill="none" stroke="${b}" stroke-width="3.6"/>
+      <circle cx="12" cy="12" r="2.6" fill="${b}"/>
+    </svg>`;
+}
 function drawTripMarks(group, o, { label = true } = {}) {
   const bounds = [];
   const ink = themeDark() ? '#F2F2F7' : '#1C1C1E';
@@ -1881,21 +1904,38 @@ function drawTripMarks(group, o, { label = true } = {}) {
     }
   });
   const rides = o.legs.filter((l) => l.kind === 'ride');
+  const ring = (p, colour, radius = 7) => {
+    L.circleMarker([p.lat, p.lon], { radius, color: colour, weight: 3.5, fillColor: ground, fillOpacity: 1, interactive: false }).addTo(group);
+    L.circleMarker([p.lat, p.lon], { radius: 2.5, stroke: false, fillColor: colour, fillOpacity: 1, interactive: false }).addTo(group);
+  };
   rides.forEach((leg, n) => {
     const colour = `#${leg.route.color}`;
     leg.stops.slice(1, -1).forEach((s) => L.circleMarker([s.lat, s.lon], { radius: 3.5, color: colour, weight: 2, fillColor: ground, fillOpacity: 1, interactive: false }).addTo(group));
-    const board = (n === 0)
-      ? L.circleMarker([leg.from.lat, leg.from.lon], { radius: 7, color: colour, weight: 3.5, fillColor: ground, fillOpacity: 1, interactive: false })
-      : L.circleMarker([leg.from.lat, leg.from.lon], { radius: 8, color: ink, weight: 3.5, fillColor: ground, fillOpacity: 1, interactive: false });
-    board.addTo(group);
-    if (n === 0) L.circleMarker([leg.from.lat, leg.from.lon], { radius: 2.5, stroke: false, fillColor: colour, fillOpacity: 1, interactive: false }).addTo(group);
-    if (n === rides.length - 1) L.circleMarker([leg.to.lat, leg.to.lon], { radius: 6, color: colour, weight: 3, fillColor: ground, fillOpacity: 1, interactive: false }).addTo(group);
+    // Boarding: unless the last vehicle left you right here (then the
+    // shared ring below says both).
+    const before = rides[n - 1];
+    if (!before || straightMetres(before.to, leg.from) > STOP_SHARED_M) ring(leg.from, colour);
+    const after = rides[n + 1];
+    if (after && straightMetres(leg.to, after.from) <= STOP_SHARED_M) {
+      L.marker([leg.to.lat, leg.to.lon], { interactive: false, keyboard: false, zIndexOffset: 500,
+        icon: L.divIcon({ className: 'pair-icon', iconSize: [24, 24], iconAnchor: [12, 12], html: twoColourRing(colour, `#${after.route.color}`, ground) }) }).addTo(group);
+    } else {
+      ring(leg.to, colour, 6);
+    }
+    // The number on its own line, halfway along, as the route board draws it.
+    const route = rideRoute(leg);
+    // A short hop has no room for it: the rings say enough there.
+    if (route.coords && route.coords.length > 1 && route.metres > 600) {
+      const mid = pointAlong(route, route.metres / 2);
+      L.marker([mid.lat, mid.lon], { interactive: false, keyboard: false, zIndexOffset: 400,
+        icon: L.divIcon({ className: 'line-badge-icon', iconSize: null, html: `<span class="line-badge">${badge(leg.route, true)}</span>` }) }).addTo(group);
+    }
   });
   const first = o.legs[0].from, last = o.legs[o.legs.length - 1].to;
   L.circleMarker([first.lat, first.lon], { radius: 6, color: ground, weight: 3, fillColor: ink, fillOpacity: 1, interactive: false }).addTo(group);
   if (label) {
     const name = state.destination ? state.destination.name : last.name;
-    L.marker([last.lat, last.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: 'dest-icon', iconSize: null,
+    L.marker([last.lat, last.lon], { interactive: false, keyboard: false, zIndexOffset: 600, icon: L.divIcon({ className: 'dest-icon', iconSize: null,
       html: `<span class="dest-pill">${esc(name)} · ${esc(o.arrive.hm)}</span><span class="dest-dot"></span>` }) }).addTo(group);
   }
   return bounds;
@@ -2045,7 +2085,7 @@ function drawVehicles() {
     seen.add(ref);
     const known = vehicleMarkers[ref];
     if (known) { follow(known, live); return; }
-    const html = `<span class="bus-marker" style="background:#${esc(leg.route.color)};color:#${esc(leg.route.text_color)}">${esc(leg.route.name)}</span>`;
+    const html = busMarkerHtml(leg.route.name, leg.route.color, leg.route.text_color, live.bearing);
     const at = ahead(live);
     vehicleMarkers[ref] = L.marker([at.lat, at.lon], {
       icon: L.divIcon({ className: 'bus-icon', html, iconSize: null }), keyboard: false, interactive: false,
@@ -2232,7 +2272,7 @@ function drawBuses(list) {
     seen.add(v.key);
     const known = busMarkers[v.key];
     if (known) { follow(known, v); continue; }
-    const html = `<span class="bus-marker" style="background:#${esc(v.color)};color:#${esc(v.text_color)}">${esc(v.route)}</span>`;
+    const html = busMarkerHtml(v.route, v.color, v.text_color, v.bearing);
     const at = ahead(v);
     busMarkers[v.key] = L.marker([at.lat, at.lon], {
       icon: L.divIcon({ className: 'bus-icon', html, iconSize: null }), keyboard: false, interactive: false,
@@ -2804,7 +2844,16 @@ function motionAt(m, ts = performance.now()) {
 }
 const movers = new Map();
 let moving = false, lastMove = 0;
+/* A bus on the map: its badge, with a small point on the side it is
+   heading (the map spec's "bus" mark). */
+function busMarkerHtml(name, color, text, bearing) {
+  const dir = Number.isFinite(bearing) ? `<i class="bus-dir" style="transform:rotate(${Math.round(bearing)}deg)"></i>` : '';
+  return `<span class="bus-marker" style="background:#${esc(color)};color:#${esc(text)};--bus:#${esc(color)}">${esc(name)}${dir}</span>`;
+}
 function follow(marker, fix) {
+  const el = marker.getElement && marker.getElement();
+  const dir = el && el.querySelector('.bus-dir');
+  if (dir && Number.isFinite(fix.bearing)) dir.style.transform = `rotate(${Math.round(fix.bearing)}deg)`;
   const was = movers.get(marker);
   if (was && was.fix.measured_ms === fix.measured_ms && was.fix.lat === fix.lat && was.fix.lon === fix.lon) return;
   const shown = marker.getLatLng();
@@ -3120,6 +3169,10 @@ function tripContent(at, actions, where) {
   const phase = phaseOf(trip, at);
 
   if (phase.kind === 'arrived') return bannerHtml(bannerArrived(trip, at));
+  // The island has its own shape (the design's "Expanded · trip"): always
+  // black, the next clock time and the arrival, the trip's progress, its
+  // vehicles and how long is left. Its pages turn on the lock screen.
+  if (where === 'island') return islandTripHtml(trip, phase, at);
   const page = pageOf(trip, phase);
   if (page === 1) return bannerHtml(bannerDirection(trip, phase, at, where));
   if (page === 2) return bannerHtml(bannerRoute(trip, phase, at));
@@ -3371,6 +3424,31 @@ function bannerHtml(p) {
         ${right}
       </div>
       ${buttons || `<div class="bn-foot">${footHtml(p.foot)}</div>`}
+    </div>`;
+}
+
+function islandTripHtml(trip, phase, at) {
+  const o = trip.option;
+  const legs = o.legs;
+  let left = { caption: 'Išeik', clock: o.leave.hm };
+  if (phase.kind === 'ride') left = { caption: `Išlipk: ${phase.leg.to.name}`, clock: phase.leg.arrival.hm };
+  else if (phase.kind === 'wait') left = { caption: `${phase.leg.route.name} išvyks`, clock: phase.leg.departure.hm };
+  else if (phase.kind === 'walk') {
+    const ride = nextRide(legs, phase.i + 1);
+    left = ride ? { caption: `${ride.route.name} išvyks`, clock: ride.departure.hm } : { caption: 'Eik pėsčiomis', clock: '' };
+  }
+  const span = Math.max(1, t(o.arrive) - t(o.leave));
+  const done = clamp01((at - t(o.leave)) / span);
+  const right = rightOf(trip, phase, at);
+  const rides = legs.filter((l) => l.kind === 'ride').map((l) => routeRef(l.route));
+  return `<div class="isl-trip">
+      <div class="isl-top">
+        <div><div class="bn-cap">${esc(left.caption)}</div><div class="isl-clock">${esc(left.clock)}</div></div>
+        <div class="isl-end"><div class="bn-cap">${esc(trip.place.name)}</div><div class="isl-clock">${esc(o.arrive.hm)}</div></div>
+      </div>
+      ${progressHtml(done)}
+      <div class="isl-foot"><span class="bn-routes">${footRoutes(rides)}</span>
+        <span class="isl-left">${esc(right.caption)} ${roll(right.value)}${right.unit ? ` ${esc(right.unit)}` : ''}</span></div>
     </div>`;
 }
 
