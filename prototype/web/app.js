@@ -34,8 +34,18 @@ const store = {
    draws the status bar and the island itself. ?shell=expo tries the same on
    a desk with an iPhone 15's insets. index.html sets .in-shell before the
    first paint; this is the same test. */
+/* The iPhone app (App/Sources/Shell) is the same kind of shell, with
+   window.webkit.messageHandlers.vc instead (docs/ios-shell.md). */
 const SHELL = window.VC_SHELL
-  || (new URLSearchParams(location.search).get('shell') === 'expo' ? { kind: 'expo', insets: { top: 59, right: 0, bottom: 34, left: 0 } } : null);
+  || (['expo', 'ios'].includes(new URLSearchParams(location.search).get('shell'))
+    ? { kind: new URLSearchParams(location.search).get('shell'), insets: { top: 59, right: 0, bottom: 34, left: 0 } } : null);
+/* A message to whichever shell holds the page; nothing on a desk. */
+function shellPost(message) {
+  try {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.vc) window.webkit.messageHandlers.vc.postMessage(JSON.stringify(message));
+    else if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(message));
+  } catch { /* no shell */ }
+}
 if (SHELL) document.documentElement.classList.add('in-shell');
 // Words that differ on a phone: there is no "browser" in an app.
 const say = (inShell, onDesk) => (SHELL ? inShell : onDesk);
@@ -2879,6 +2889,7 @@ function onFixError(err) {
 /* A fix recent and sharp enough to steer by, and only when the prototype's
    clock is the real one (a GPS fix at "+5 min" describes another moment). */
 function gpsFix() {
+  if (aheadOnly) return null;
   const g = state.gps;
   return g && liveClock() && Date.now() - g.at < 20_000 && g.accuracy <= 50 ? g : null;
 }
@@ -3451,11 +3462,70 @@ let lockShown = false;
    that changes. */
 let chromeDark = null;
 function syncChrome() {
-  if (!window.ReactNativeWebView) return;
+  if (!SHELL) return;
   const dark = (state.locked && !panelOpen()) || themeDark();
   if (dark === chromeDark) return;
   chromeDark = dark;
-  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chrome', dark }));
+  shellPost({ type: 'chrome', dark });
+}
+
+/* ---- the iPhone's real banner (docs/ios-shell.md, "The banner as data")
+   The page sends what the banner says now and at every change still ahead
+   (leave, board, get off, arrive), because its scripts stop soon after the
+   phone is locked. The iPhone app turns those into a Live Activity on the
+   lock screen and the Dynamic Island, and moves from one to the next. */
+let aheadOnly = false;               // planning ahead: the phone's fix is now, not then
+const nativeBanner = () => !!(SHELL && SHELL.kind === 'ios' && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.vc);
+const plainPage = (page) => {
+  const out = { ...page };
+  delete out.map;
+  if (out.foot) { out.foot = { ...out.foot }; delete out.foot.html; }
+  return out;
+};
+function tripMoments(trip, at) {
+  const marks = new Set([at]);
+  for (const leg of trip.option.legs) {
+    for (const ms of [t(leg.departure), t(leg.arrival)]) if (ms > at) marks.add(ms + 1000);
+  }
+  marks.add(t(trip.option.arrive) + 60_000);
+  return [...marks].sort((a, b) => a - b).slice(0, 24).map((ms, i) => {
+    aheadOnly = i > 0;
+    try { return { at: ms, pages: bannerPages(trip, ms, 'data').map(plainPage) }; } finally { aheadOnly = false; }
+  });
+}
+let nativeSent = '', nativeAt = 0, nativeRunning = false;
+function syncNativeBanner() {
+  if (!nativeBanner()) return;
+  const trip = state.trip;
+  if (!trip) {
+    if (nativeRunning) { shellPost({ type: 'activity', op: 'end' }); nativeRunning = false; nativeSent = ''; }
+    return;
+  }
+  if (Date.now() - nativeAt < 4000) return;
+  const at = now().getTime();
+  const phase = phaseOf(trip, at);
+  const p = paletteOf(state.palette);
+  const message = {
+    type: 'activity', op: nativeRunning ? 'update' : 'start', destination: trip.place.name,
+    palette: { base: p.base, ink: p.ink, accent: p.accent, red: p.red },
+    moments: tripMoments(trip, at), page: phase.kind === 'arrived' ? 0 : pageOf(trip, phase),
+  };
+  const key = JSON.stringify({ ...message, op: '' });
+  if (key === nativeSent) return;
+  nativeSent = key; nativeAt = Date.now(); nativeRunning = true;
+  shellPost(message);
+}
+/* What was tapped on the iPhone's banner, or opened by its links. */
+function shellAction(name) {
+  if (name === 'trip') { state.locked = false; if (state.trip) actions['open-trip'](); return; }
+  if (name === 'replan') { state.locked = false; if (state.trip) replanTrip(); return; }
+  if (name.startsWith('page:') && state.trip) { state.trip.page = Number(name.slice(5)) || 0; renderAll(); return; }
+  if (actions[name]) { actions[name]({ dataset: {} }, { target: document.body }); renderAll(); }
+}
+if (SHELL) {
+  window.__vcShell = window.__vcShell || {};
+  window.__vcShell.action = shellAction;
+  window.addEventListener('vc-action', (event) => shellAction(String(event.detail || '')));
 }
 
 function renderLock() {
@@ -3609,14 +3679,14 @@ function renderClock() {
 }
 
 function renderAll() {
-  renderApp(); renderLock(); renderIsland(); renderOverlay(); renderClock();
+  renderApp(); renderLock(); renderIsland(); renderOverlay(); renderClock(); syncNativeBanner();
   $('#toggle-lock').textContent = state.locked ? 'Atrakinti' : 'Užrakinti';
 }
 
 // Four times a second, but the DOM only changes where the content did.
 let lastMinute = '';
 setInterval(() => {
-  renderClock(); renderLock(); renderIsland(); coachTick(); syncHeadingBox();
+  renderClock(); renderLock(); renderIsland(); coachTick(); syncHeadingBox(); syncNativeBanner();
   const minute = hm(now());
   if (minute !== lastMinute) {
     lastMinute = minute;
@@ -4069,7 +4139,7 @@ const actions = {
   },
   'trip-fit': () => fitTrip(true),
   'draft-walk': () => { state.draft.walk = state.draft.walk === 'long' ? 'normal' : 'long'; renderApp(); },
-  'native-diagnostics': () => { try { window.webkit.messageHandlers.vc.postMessage(JSON.stringify({ type: 'native', screen: 'diagnostics' })); } catch { /* not in the iPhone app */ } },
+  'native-diagnostics': () => shellPost({ type: 'native', screen: 'diagnostics' }),
   'test-panel': () => openPanel(),
   guide: () => { state.guidePage = 0; push({ name: 'guide' }); },
   'guide-next': () => {

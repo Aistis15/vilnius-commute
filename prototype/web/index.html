@@ -6,12 +6,13 @@
   <meta name="color-scheme" content="light dark">
   <title>Vilnius Commute</title>
   <script>
-    /* Inside the Expo Go shell the page is the phone's whole screen, so the
-       drawn iPhone goes before the first paint. ?shell=expo tries it on a
-       desk with an iPhone 15's safe areas. See SHELL in app.js. */
+    /* Inside a shell (the iPhone app, or Expo Go) the page is the phone's
+       whole screen, so the drawn iPhone goes before the first paint.
+       ?shell=ios or ?shell=expo tries it on a desk with an iPhone 15's safe
+       areas. See SHELL in app.js. */
     (function () {
       var root = document.documentElement, shell = window.VC_SHELL;
-      if (!shell && new URLSearchParams(location.search).get('shell') !== 'expo') return;
+      if (!shell && ['expo', 'ios'].indexOf(new URLSearchParams(location.search).get('shell')) < 0) return;
       root.classList.add('in-shell');
       var insets = (shell && shell.insets) || { top: 59, bottom: 34 };
       if (!root.style.getPropertyValue('--shell-top')) root.style.setProperty('--shell-top', insets.top + 'px');

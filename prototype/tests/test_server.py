@@ -54,6 +54,16 @@ class Endpoints(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base}{path}?{urllib.parse.urlencode(params)}", timeout=5) as response:
             return json.loads(response.read())
 
+    def test_the_phone_is_told_where_to_load_from(self):
+        for name, value in (("lan", ["http://192.168.1.23:8765"]), ("tunnel", "https://a-b.trycloudflare.com")):
+            self.addCleanup(setattr, server.State, name, getattr(server.State, name))
+            setattr(server.State, name, value)
+        self.assertEqual(self.get("/api/connect"), {"lan": ["http://192.168.1.23:8765"], "tunnel": "https://a-b.trycloudflare.com", "port": server.PORT})
+        with urllib.request.urlopen(f"{self.base}/connect", timeout=5) as response:
+            self.assertIn("vilniuscommute://connect?url=", response.read().decode("utf-8"))
+        self.assertRegex("2026 INF | https://quiet-river-12.trycloudflare.com |", server.TUNNEL_URL)
+        self.assertTrue(all(a.startswith("http://") and a.endswith(f":{server.PORT}") for a in server.lan_addresses()))
+
     def test_text_goes_gzipped_and_is_not_sent_twice(self):
         request = urllib.request.Request(f"{self.base}/app.js", headers={"Accept-Encoding": "gzip"})
         with urllib.request.urlopen(request, timeout=5) as response:

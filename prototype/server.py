@@ -13,7 +13,11 @@ from __future__ import annotations
 import gzip
 import json
 import mimetypes
+import os
+import re
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -27,7 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from vc import crossings, data, departures, live, planner, search, shapes, speech_lt, walking  # noqa: E402
 
-PORT = 8765
+# VC_PORT runs a second copy beside the first, e.g. to try --lan.
+PORT = int(os.environ.get("VC_PORT", "8765"))
 WEB = Path(__file__).resolve().parent / "web"
 
 
@@ -39,6 +44,9 @@ class State:
     index = None
     manifest: dict = {}
     error: str | None = None
+    # How a phone reaches this computer (--lan, --tunnel): see /connect.
+    lan: list = []
+    tunnel: str | None = None
 
 
 def load_in_background() -> None:
@@ -171,6 +179,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(body)
             if url.path == "/api/stream":
                 return self.stream()
+            if url.path == "/api/connect":
+                # Where the iPhone app can load this computer from.
+                return self.send_json({"lan": State.lan, "tunnel": State.tunnel, "port": PORT})
+            if url.path == "/connect":
+                return self.serve_static("connect.html")
             if url.path.startswith("/api/") and State.timetable is None:
                 return self.send_json({"error": State.error or "Tvarkaraščiai dar kraunami…"}, 503)
             if url.path == "/api/search":
@@ -316,10 +329,71 @@ class ServerV6(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
+def lan_addresses() -> list[str]:
+    """This computer's address on the home network, as the phone would use
+    it: the interface the default route leaves by. A UDP "connect" sends
+    nothing; it only picks the route."""
+    found = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            found.append(probe.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = info[4][0]
+            if address not in found and not address.startswith("127."):
+                found.append(address)
+    except OSError:
+        pass
+    return [f"http://{a}:{PORT}" for a in found]
+
+
+TUNNEL_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+
+
+def start_tunnel() -> None:
+    """A Cloudflare quick tunnel (no account), so the phone reaches this
+    computer away from home too. Its address changes every start; it is
+    shown on /connect. Quick tunnels do not carry server-sent events, so the
+    phone polls through it (VC_SHELL.stream = false)."""
+    exe = shutil.which("cloudflared") or next((str(c) for c in (Path(__file__).parent / "cloudflared.exe", Path(__file__).parent / "cloudflared") if c.is_file()), None)
+    if not exe:
+        print("No cloudflared: the phone can reach this computer on the same Wi-Fi only.")
+        return
+    process = subprocess.Popen([exe, "tunnel", "--no-autoupdate", "--url", f"http://localhost:{PORT}"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+
+    def read():
+        for line in process.stderr:
+            found = TUNNEL_URL.search(line)
+            if found and not State.tunnel:
+                State.tunnel = found.group(0)
+                print(f"Tunnel: {State.tunnel}")
+
+    threading.Thread(target=read, daemon=True).start()
+
+
 def main():
     mimetypes.add_type("application/javascript", ".js")
     threading.Thread(target=load_in_background, daemon=True).start()
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    # --lan: the phone on the same Wi-Fi may connect (all of this computer's
+    # IPv4 addresses, not only 127.0.0.1). Windows asks once whether Python
+    # may accept connections. --tunnel: also through a quick tunnel.
+    lan = "--lan" in sys.argv or "--tunnel" in sys.argv
+    server = ThreadingHTTPServer(("0.0.0.0" if lan else "127.0.0.1", PORT), Handler)
+    if lan:
+        State.lan = lan_addresses()
+        for address in State.lan:
+            print(f"On the Wi-Fi: {address}")
+        print(f"For the iPhone app: open http://localhost:{PORT}/connect")
+    if "--tunnel" in sys.argv:
+        start_tunnel()
+    if "--open" in sys.argv:
+        # The launcher's page with the QR code, once the server answers.
+        import webbrowser
+        threading.Timer(1.0, webbrowser.open, (f"http://localhost:{PORT}/connect",)).start()
     server.daemon_threads = True
     # "localhost" is ::1 first in the browser: answer there too, so it does
     # not wait for the fallback to 127.0.0.1. Still only this computer.
