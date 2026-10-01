@@ -13,6 +13,16 @@ iOS never runs it (measured on the phone, see D12 in `docs/decisions.md`).
 Xcode, AltServer and Impactor would sign it correctly; the user chose to wait
 for a paid account instead.
 
+## Meanwhile — the shell and the Mac kit (2026-10-01)
+
+Until Step 3 is done the iPhone app is a shell around the prototype
+(`docs/ios-shell.md`): the page from the PC in a web view, with the Live
+Activity, GPS, the compass and storage native. It is installed without a
+paid account from a borrowed Mac: CI's `mac-kit` artifact (and the
+`mac-kit-latest` release) is an Xcode project that a free Apple ID signs,
+app and widget extension each with its own profile, for 7 days at a time.
+Steps 1–2 below still apply once there is a paid account.
+
 ## Step 1 — the account (user)
 
 - Apple Developer Program: **99 USD a year**, annual only, shown in euros

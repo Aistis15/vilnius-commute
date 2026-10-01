@@ -183,7 +183,8 @@ struct TripMomentsTests {
         t.nextPage()
         #expect(t.pageIndex == 0)
         t.nextPage()
-        #expect(t.advance(to: start.addingTimeInterval(700)))
+        let moved = t.advance(to: start.addingTimeInterval(700))
+        #expect(moved)
         #expect(t.momentIndex == 1)
         #expect(t.pageIndex == 0)
         let state = try #require(t.state)
@@ -194,11 +195,15 @@ struct TripMomentsTests {
     @Test("Dar ne moves on, and time does not move it back")
     func snoozeHolds() {
         var t = trip()
-        #expect(t.snooze())
+        let first = t.snooze()
+        #expect(first)
         #expect(t.momentIndex == 1)
-        #expect(!t.advance(to: start.addingTimeInterval(10)))
+        let movedBack = t.advance(to: start.addingTimeInterval(10))
+        #expect(!movedBack)
         #expect(t.momentIndex == 1)
-        #expect(t.snooze())
-        #expect(!t.snooze())        // nothing after the last moment
+        let second = t.snooze()
+        #expect(second)
+        let third = t.snooze()
+        #expect(!third)        // nothing after the last moment
     }
 }
