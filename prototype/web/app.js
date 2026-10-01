@@ -1110,19 +1110,18 @@ const guideMap = () => `<span class="g-map" aria-hidden="true"><svg viewBox="0 0
 // The banner as drawn in the guide. `slides` are its pages (the corner page
 // turns through them); `ring` marks what a finger taps.
 function guideBanner({ slides = [0], ring = '', mini = false } = {}) {
+  // The banner's three pages in the design's one template: caption, title
+  // and detail on the left, the number block on the right, a bottom line.
+  const hero = (caption) => `<div class="g-hero"><div class="g-cap">${caption}</div><div class="g-big">1<small>min</small></div></div>`;
   const pages = [
-    `<div class="g-row">${guideMap()}<div class="g-text"><div class="g-title">Išeik 19:37</div>
-       <div class="g-meta">${badge(GUIDE_ROUTE, true)}<span>Operos ir baleto teatras</span></div></div>
-       <div class="g-hero"><div class="g-cap">liko</div><div class="g-big">1<small>min</small></div></div></div>
-     <div class="g-foot">už 7 stotelių</div>`,
-    `<div class="g-row">${guideMap()}<div class="g-text"><div class="g-title">↰ Pasuk kairėn</div>
-       <div class="g-meta"><span>po 60 m · Vilniaus g.</span></div></div>
-       <div class="g-hero"><div class="g-cap">liko</div><div class="g-big">1<small>min</small></div></div></div>
-     <div class="g-foot"></div>`,
-    `<div class="g-legs"><div><b>19:37</b><span class="g-walk">${icon('walk')}</span>720 m · Operos ir baleto t.</div>
-       <div><b>19:49</b>${badge(GUIDE_ROUTE, true)}Žaliasis tiltas</div>
-       <div><b>20:13</b><span class="g-walk">${icon('pin')}</span>Akropolis</div></div>
-     <div class="g-foot"></div>`,
+    `<div class="g-row"><div class="g-text"><div class="g-cap">Išeik</div><div class="g-num">19:37</div></div>${hero('Liko')}</div>
+     <div class="g-foot">${badge(GUIDE_ROUTE, true)}<span class="g-end">Akropolis 20:13</span></div>`,
+    `<div class="g-row">${guideMap()}<div class="g-text"><div class="g-cap">Eik į stotelę</div><div class="g-title">Operos ir baleto teatras</div>
+       <div class="g-meta"><span>↰ Kairėn · po 60 m</span></div></div>${hero('46 atvyks')}</div>
+     <div class="g-foot"><span class="g-track"><i></i></span></div>`,
+    `<div class="g-row"><div class="g-legs"><div><b>19:37</b><span class="g-walk">${icon('walk')}</span>720 m · Operos ir baleto t.</div>
+       <div><b>19:49</b>${badge(GUIDE_ROUTE, true)}Žaliasis tiltas</div></div>${hero('Liko')}</div>
+     <div class="g-foot"><span class="g-walk">${icon('pin')}</span>20:13 · Akropolis</div>`,
   ];
   const cycle = slides.length > 1;
   return `<div class="g-banner${mini ? ' mini' : ''}${cycle ? ' cycle' : ''}" aria-hidden="true">
@@ -1135,10 +1134,10 @@ function guideBanner({ slides = [0], ring = '', mini = false } = {}) {
 function guideArt(key) {
   if (key === 'lock') {
     return `<div class="g-phone" aria-hidden="true"><div class="g-date">Rugsėjo 27 d., sekmadienis</div><div class="g-clock">19:36</div>
-      ${guideBanner({ mini: true })}<div class="g-controls"><span>${icon('bus')}</span><span>${icon('camera')}</span></div></div>`;
+      ${guideBanner({ mini: true })}<div class="g-controls"><span>${icon('mic')}</span><span>${icon('camera')}</span></div></div>`;
   }
   if (key === 'corner') return guideBanner({ slides: [0, 1, 2], ring: 'corner' });
-  if (key === 'map') return guideBanner({ ring: 'map' });
+  if (key === 'map') return guideBanner({ slides: [1], ring: 'map' });
   if (key === 'island') {
     return `<div class="g-island" aria-hidden="true"><span class="g-isl-compact">${badge(GUIDE_ROUTE, true)}<b>3 min</b></span>
       <span class="g-isl-open">${guideMap()}<span class="g-text"><span class="g-title">Išeik 19:37</span>
@@ -1146,7 +1145,7 @@ function guideArt(key) {
       <span class="g-ring g-ring-island"></span></div>`;
   }
   return `<div class="g-phone short" aria-hidden="true"><div class="g-clock small">19:36</div>
-    <div class="g-controls"><span class="ours">${icon('bus')}<span class="g-ring g-ring-control"></span></span><span>${icon('camera')}</span></div></div>`;
+    <div class="g-controls"><span class="ours">${icon('mic')}<span class="g-ring g-ring-control"></span></span><span>${icon('camera')}</span></div></div>`;
 }
 
 function guideView() {

@@ -1385,3 +1385,14 @@ button.ts-step { width: calc(100% + 16px); }
 .zebra { position: absolute; left: 0; top: 0; width: 14px; height: 18px; border-radius: 3px; background: repeating-linear-gradient(0deg, #8E8E93 0 2px, #fff 2px 4px);
   box-shadow: 0 0 0 1.5px #fff, 0 1px 4px rgba(0, 0, 0, 0.25); }
 .zebra.plain { background: #fff; box-shadow: 0 0 0 1.5px #8E8E93, 0 1px 4px rgba(0, 0, 0, 0.2); width: 6px; height: 14px; }
+/* The guide's banner in the design's template. */
+.g-num { font: 600 26px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.g-cap { text-transform: none; }
+.g-text .g-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-foot { display: flex; align-items: center; gap: 6px; }
+.g-end { flex: 1; text-align: right; }
+.g-track { flex: 1; height: 4px; border-radius: 2px; background: var(--act-track, rgba(255, 255, 255, 0.2)); position: relative; overflow: hidden; }
+.g-track i { position: absolute; left: 0; top: 0; bottom: 0; width: 35%; background: var(--act-ink, #fff); }
+.g-row .g-legs { flex: 1; min-width: 0; }
+.g-ring-map { left: 9px; top: 9px; }
+.g-map { background: #EEEEF0; }
