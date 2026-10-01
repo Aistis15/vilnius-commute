@@ -1901,6 +1901,14 @@ function drawTripMarks(group, o, { label = true } = {}) {
       L.polyline(points, { color: `#${leg.route.color}`, weight: 6, opacity: 1, interactive: false, lineJoin: 'round' }).addTo(group);
     } else {
       L.polyline(points, { color: ink, weight: 4, opacity: 0.9, dashArray: '0.1 8', lineCap: 'round', interactive: false }).addTo(group);
+      // Each street the walk crosses, where it crosses it: a zebra where
+      // there is a marked crossing, a plain bar where there is none.
+      const route = walkRoutes[walkKey(leg)];
+      for (const c of (route && route.crossings) || []) {
+        const at = pointAlong(route, c.at);
+        L.marker([at.lat, at.lon], { interactive: false, keyboard: false, zIndexOffset: 300, icon: L.divIcon({ className: 'zebra-icon', iconSize: null,
+          html: `<span class="zebra${c.kind === 'marked' ? '' : ' plain'}" style="transform:translate(-50%, -50%) rotate(${Math.round(at.heading)}deg)"></span>` }) }).addTo(group);
+      }
     }
   });
   const rides = o.legs.filter((l) => l.kind === 'ride');

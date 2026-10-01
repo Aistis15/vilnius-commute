@@ -1379,3 +1379,9 @@ button.ts-step { width: calc(100% + 16px); }
 .island .compact-row .c-right { font: 600 15px var(--font); font-variant-numeric: tabular-nums; }
 .island .activity.trip .act-body { height: auto; }
 .island .expanded-body:has(.isl-trip) { padding: 0; }
+/* A crossing on the walk, as the map spec draws it: white with grey bars
+   across the way you walk. */
+.zebra-icon { background: none; border: 0; }
+.zebra { position: absolute; left: 0; top: 0; width: 14px; height: 18px; border-radius: 3px; background: repeating-linear-gradient(0deg, #8E8E93 0 2px, #fff 2px 4px);
+  box-shadow: 0 0 0 1.5px #fff, 0 1px 4px rgba(0, 0, 0, 0.25); }
+.zebra.plain { background: #fff; box-shadow: 0 0 0 1.5px #8E8E93, 0 1px 4px rgba(0, 0, 0, 0.2); width: 6px; height: 14px; }
