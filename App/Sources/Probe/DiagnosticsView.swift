@@ -9,6 +9,9 @@ import UIKit
 /// travels in a single paste.
 struct DiagnosticsView: View {
 
+    /// Set when the shell has an address the rider may want to change.
+    var onChangeAddress: (() -> Void)? = nil
+
     @State private var report: Diagnostics?
     @State private var isRunning = false
     @State private var copied = false
@@ -48,6 +51,8 @@ struct DiagnosticsView: View {
                 }
                 .commuteCard()
             }
+
+            tools
         }
         .commuteListChrome()
         .navigationTitle("Diagnostika")
@@ -105,6 +110,37 @@ struct DiagnosticsView: View {
             .disabled(isRunning)
         } footer: {
             Text("Paspausk „Kopijuoti“ ir įklijuok pokalbyje — to užtenka, nuotraukų nereikia.")
+        }
+        .commuteCard()
+    }
+
+    /// The Phase 1 screens, kept reachable from here rather than the root.
+    private var tools: some View {
+        Section {
+            if let onChangeAddress {
+                Button {
+                    onChangeAddress()
+                } label: {
+                    Label("Keisti kompiuterio adresą", systemImage: "desktopcomputer")
+                }
+            }
+            NavigationLink {
+                LiveActivityDemoView()
+            } label: {
+                Label("Gyvoji veikla", systemImage: "bell.badge")
+            }
+            NavigationLink {
+                ProbeView()
+            } label: {
+                Label("Patikra", systemImage: "checklist")
+            }
+            NavigationLink {
+                WhisperTestView()
+            } label: {
+                Label("Balsas", systemImage: "mic")
+            }
+        } header: {
+            Text("Įrankiai")
         }
         .commuteCard()
     }

@@ -5,8 +5,8 @@ import WidgetKit
 @testable import Core
 @testable import VilniusCommute
 
-/// Renders every Phase 1 surface to PNG so the UI can be reviewed without a
-/// Mac. These are not assertions about pixels — nothing is compared against a
+/// Renders every surface to PNG so the UI can be reviewed without a Mac.
+/// These are not assertions about pixels — nothing is compared against a
 /// stored reference. Their job is to produce evidence a human looks at, which
 /// is the only visual QA available when the development machine is Windows.
 ///
@@ -15,38 +15,27 @@ import WidgetKit
 @Suite("Snapshots", .serialized)
 struct SnapshotTests {
 
-    /// Base time for the sample trips, relative to the real clock on purpose.
-    ///
-    /// A pinned epoch was tried first and was wrong: `Text(timerInterval:)`
-    /// renders against the actual current time, so a base in the past made
-    /// every countdown draw as `00:00`. Correct behaviour — the range clamps
-    /// rather than inverting — but a useless picture of it.
-    ///
-    /// These snapshots are reviewed by eye and never byte-compared, so a live
-    /// base that renders a real countdown beats a stable one that renders
-    /// zeros. The clock times shift between runs as a result.
-    private static let base = Date.now
-
-    private var sampleState: TripContentState {
-        TripContentState(
-            leaveAt: Self.base.addingTimeInterval(12 * 60),
-            arriveBy: Self.base.addingTimeInterval(36 * 60),
-            routes: [.previewExpress, .previewTrolley]
-        )
-    }
-
     // MARK: - App screens
 
     @Test("App screens")
     func appScreens() {
+        // No address saved on the simulator: the root is the setup screen.
         #expect(!SnapshotHarness.capture("screen-root") { RootView() }.isEmpty)
+
+        #expect(!SnapshotHarness.capture("screen-setup") {
+            ShellSetupView(initialAddress: "") { _ in true }
+        }.isEmpty)
+
+        #expect(!SnapshotHarness.capture("screen-failure") {
+            ShellFailureView(onRetry: {}, onChangeAddress: {})
+        }.isEmpty)
 
         #expect(!SnapshotHarness.capture("screen-probe") {
             NavigationStack { ProbeView() }
         }.isEmpty)
 
         #expect(!SnapshotHarness.capture("screen-diagnostics") {
-            NavigationStack { DiagnosticsView() }
+            NavigationStack { DiagnosticsView(onChangeAddress: {}) }
         }.isEmpty)
 
         #expect(!SnapshotHarness.capture("screen-live-activity") {
@@ -60,85 +49,102 @@ struct SnapshotTests {
 
     // MARK: - Live Activity
 
-    @Test("Live Activity lock screen, full colour")
-    func liveActivityLockScreen() {
-        let captured = SnapshotHarness.capture(
-            "liveactivity-countdown",
-            size: CGSize(width: 393, height: 140)
+    /// The banner on the boards' backdrop (#2B2D31, a 16 pt frame), so a
+    /// render can be laid next to its board.
+    private func banner(_ name: String, _ state: TripContentState) -> [URL] {
+        SnapshotHarness.capture(
+            name,
+            size: CGSize(width: 393, height: 172),
+            variants: SnapshotHarness.Variant.banner
         ) {
-            TripLockScreenView(attributes: .sample, state: sampleState)
-        }
-        #expect(!captured.isEmpty)
-    }
-
-    /// The lock screen strips colour. `WidgetRenderingMode` has exactly three
-    /// cases — `fullColor`, `vibrant` and `accented` — and both non-colour
-    /// modes have to stay legible, so both are rendered.
-    @Test("Live Activity lock screen, vibrant and accented rendering")
-    func liveActivityMonochrome() {
-        for (name, mode) in [("vibrant", WidgetRenderingMode.vibrant),
-                             ("accented", WidgetRenderingMode.accented)] {
-            let captured = SnapshotHarness.capture(
-                "liveactivity-countdown-\(name)",
-                size: CGSize(width: 393, height: 140),
-                renderer: .swiftUI      // contains knocked-out badges
-            ) {
-                TripLockScreenView(attributes: .sample, state: sampleState)
-                    .environment(\.widgetRenderingMode, mode)
-            }
-            #expect(!captured.isEmpty)
+            TripBannerView(state: state)
+                .frame(width: 361)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(hex: "2B2D31") ?? .gray)
         }
     }
 
-    @Test("Live Activity, single leg")
-    func liveActivitySingleLeg() {
-        let state = TripContentState(
-            leaveAt: Self.base.addingTimeInterval(5 * 60),
-            arriveBy: Self.base.addingTimeInterval(24 * 60),
-            routes: [.previewBus]
-        )
-        #expect(!SnapshotHarness.capture(
-            "liveactivity-countdown-single",
-            size: CGSize(width: 393, height: 140)
-        ) {
-            TripLockScreenView(attributes: .sample, state: state)
-        }.isEmpty)
+    @Test("Banner, every stage, Grafitas")
+    func bannerStages() {
+        for (name, page) in BannerSamples.stages {
+            #expect(!banner("banner-\(name)-grafitas", BannerSamples.state(page)).isEmpty)
+        }
+    }
+
+    @Test("Banner colourways")
+    func bannerColourways() {
+        #expect(!banner("banner-countdown-smelis",
+                        BannerSamples.state(BannerSamples.countdown, palette: .smelis)).isEmpty)
+        #expect(!banner("banner-countdown-balta",
+                        BannerSamples.state(BannerSamples.countdown, palette: .balta)).isEmpty)
+        // Lock-Trip.png: the walk in Smėlis.
+        #expect(!banner("banner-walk-smelis",
+                        BannerSamples.state(BannerSamples.walk, palette: .smelis)).isEmpty)
+    }
+
+    /// With `right.until` the number is `Text(timerInterval:)`, which keeps
+    /// counting while the app sleeps; this shows how that reads.
+    @Test("Banner with a live countdown")
+    func bannerLiveCountdown() {
+        var page = BannerSamples.countdown
+        page.right?.until = Date.now.addingTimeInterval(12 * 60).timeIntervalSince1970 * 1000
+        #expect(!banner("banner-countdown-timer", BannerSamples.state(page)).isEmpty)
     }
 
     // MARK: - Dynamic Island
 
-    @Test("Dynamic Island regions")
-    func dynamicIslandRegions() {
+    @Test("Dynamic Island")
+    func dynamicIsland() {
+        let state = BannerSamples.state(BannerSamples.countdown)
+        let backdrop = Color(hex: "2B2D31") ?? .gray
+
+        // Compact: 240 × 37, the badge and "12 min", padded 12 / 14.
         #expect(!SnapshotHarness.capture(
-            "island-compact", size: CGSize(width: 220, height: 44)
+            "island-compact", size: CGSize(width: 280, height: 60),
+            variants: SnapshotHarness.Variant.banner
         ) {
             HStack {
-                TripIslandCompactLeading(state: sampleState)
+                TripIslandCompactLeading(state: state)
                 Spacer()
-                TripIslandCompactTrailing(state: sampleState)
+                TripIslandCompactTrailing(state: state)
             }
-            .padding(.horizontal, 12)
+            .padding(.leading, 12)
+            .padding(.trailing, 14)
+            .frame(width: 240, height: 37)
+            .background(Capsule().fill(Color.black))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(backdrop)
         }.isEmpty)
 
+        // Minimal: the 37 pt circle beside the island; the walk has progress.
         #expect(!SnapshotHarness.capture(
-            "island-minimal", size: CGSize(width: 60, height: 44)
+            "island-minimal", size: CGSize(width: 120, height: 60),
+            variants: SnapshotHarness.Variant.banner
         ) {
-            TripIslandMinimal(state: sampleState)
+            HStack(spacing: 16) {
+                TripIslandMinimal(state: state)
+                    .frame(width: 37, height: 37)
+                    .background(Circle().fill(Color.black))
+                TripIslandMinimal(state: BannerSamples.state(BannerSamples.ride))
+                    .frame(width: 37, height: 37)
+                    .background(Circle().fill(Color.black))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(backdrop)
         }.isEmpty)
 
-        #expect(!SnapshotHarness.capture(
-            "island-expanded", size: CGSize(width: 370, height: 160)
-        ) {
-            VStack(spacing: 12) {
-                HStack(alignment: .top) {
-                    TripIslandExpandedLeading(state: sampleState)
-                    Spacer()
-                    TripIslandExpandedTrailing(attributes: .sample, state: sampleState)
-                }
-                TripIslandExpandedBottom(state: sampleState)
-            }
-            .padding(16)
-        }.isEmpty)
+        for (name, page) in [("countdown", BannerSamples.countdown),
+                             ("ride", BannerSamples.ride),
+                             ("arrive", BannerSamples.arrive)] {
+            #expect(!SnapshotHarness.capture(
+                "island-expanded-\(name)", size: CGSize(width: 403, height: 200),
+                variants: SnapshotHarness.Variant.banner
+            ) {
+                TripIslandExpandedView(state: BannerSamples.state(page))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(backdrop)
+            }.isEmpty)
+        }
     }
 
     // MARK: - Route badges
@@ -194,14 +200,6 @@ struct SnapshotTests {
         }.isEmpty)
     }
 
-    @Test("Route summary with a transfer")
-    func routeSummary() {
-        #expect(!SnapshotHarness.capture("route-summary", size: nil) {
-            RouteSummary(routes: [.previewExpress, .previewTrolley, .previewNight])
-                .padding(12)
-        }.isEmpty)
-    }
-
     // MARK: - Widgets
 
     /// Canvas sizes approximate the small home-screen widget and the
@@ -217,5 +215,58 @@ struct SnapshotTests {
         #expect(!SnapshotHarness.capture("widget-ask-rectangular", size: CGSize(width: 172, height: 76)) {
             AskWidgetView(family: .accessoryRectangular)
         }.isEmpty)
+    }
+}
+
+/// The shell's address rules, which decide whether the page loads at all.
+@Suite("Shell address")
+struct ShellAddressTests {
+
+    @Test("A bare address becomes http on port 8765")
+    func bareAddress() {
+        #expect(ShellAddress.parse("192.168.1.23")?.absoluteString == "http://192.168.1.23:8765")
+        #expect(ShellAddress.parse(" 192.168.1.23:8765 ")?.absoluteString == "http://192.168.1.23:8765")
+        #expect(ShellAddress.parse("http://192.168.1.23:8765/")?.absoluteString == "http://192.168.1.23:8765")
+        #expect(ShellAddress.parse("192.168.1.23:9000")?.absoluteString == "http://192.168.1.23:9000")
+    }
+
+    @Test("A tunnel keeps https and its own port, and does not stream")
+    func tunnel() throws {
+        let url = try #require(ShellAddress.parse("https://abc-def.trycloudflare.com"))
+        #expect(url.absoluteString == "https://abc-def.trycloudflare.com")
+        #expect(!ShellAddress.streams(url))
+        #expect(ShellAddress.streams(try #require(ShellAddress.parse("192.168.1.23"))))
+        #expect(ShellAddress.page(for: url)?.absoluteString == "https://abc-def.trycloudflare.com/?shell=ios")
+    }
+
+    @Test("Not an address")
+    func notAnAddress() {
+        #expect(ShellAddress.parse("") == nil)
+        #expect(ShellAddress.parse("ftp://x") == nil)
+        #expect(ShellAddress.parse("192.168 .1.23") == nil)
+    }
+
+    @Test("The connect link carries a percent-encoded address")
+    func connectLink() throws {
+        let link = try #require(URL(string: "vilniuscommute://connect?url=http%3A%2F%2F192.168.1.23%3A8765"))
+        #expect(ShellAddress.fromConnectLink(link)?.absoluteString == "http://192.168.1.23:8765")
+        #expect(ShellAddress.fromConnectLink(URL(string: "vilniuscommute://trip")!) == nil)
+    }
+
+    @Test("Origins compare with default ports spelled out")
+    func origins() {
+        #expect(ShellAddress.origin(of: URL(string: "https://a.example/x")!)
+                == ShellAddress.origin(of: URL(string: "https://A.example:443/")!))
+        #expect(ShellAddress.origin(of: URL(string: "http://192.168.1.23:8765/api")!)
+                != ShellAddress.origin(of: URL(string: "http://192.168.1.23:8766/")!))
+    }
+
+    @Test("The injected script carries the shell's kind and stream flag")
+    func script() {
+        let source = ShellScript.source(saved: ["a": "</script>"], insets: .zero, stream: false)
+        #expect(source.contains("kind: 'ios'"))
+        #expect(source.contains("stream: false"))
+        #expect(source.contains("window.webkit.messageHandlers.vc.postMessage"))
+        #expect(!source.contains("</script>"))
     }
 }

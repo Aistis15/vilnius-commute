@@ -132,6 +132,28 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIApplicationSupportsIndirectInputEvents: true
+        # UIKit scenes: the root view controller owns the status bar, which
+        # follows the page (see App/Sources/AppDelegate.swift).
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        # vilniuscommute://connect?url=… (the PC's QR code), …://trip and
+        # …://replan (taps on the banner). See docs/ios-shell.md.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.vilniuscommute.app
+            CFBundleURLSchemes: [vilniuscommute]
+        # The page comes over plain http from a LAN address. Apple's docs
+        # (NSAllowsLocalNetworking): since iOS 17 "ATS no longer allows
+        # connections to IP addresses by default"; this key is what allows
+        # them. NSAllowsArbitraryLoadsInWebContent exempts WKWebView only
+        # ("without affecting your URLSession connections"), so the page
+        # loads even if the IP rule turns out narrower than documented.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoadsInWebContent: true
         # Live Activities. Verified requirement for ActivityKit.
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true

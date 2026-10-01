@@ -158,3 +158,49 @@ activity message {
 - **Size.** One `BannerPage` plus the palette, well under ActivityKit's 4 KB.
   The moments live in the app's Application Support folder, where the
   intents (which run in the app's process) read them.
+
+## Implementation notes (branch `ios-shell`, 2026-10-01)
+
+Appended by the implementation; the contract above is unchanged.
+
+- **Where it lives.** `App/Sources/Shell/` (address, injected script,
+  location, model, web view, screens), `App/Sources/AppDelegate.swift`,
+  `Core/Sources/Model/BannerPage.swift` (the types above, decoded leniently:
+  an unknown `stage` or `titleKind` falls back, an unknown `metaIcon` is
+  dropped), `Core/Sources/LiveActivity/TripBanner.swift` (moments, page
+  turning, ActivityKit), `Core/Sources/LiveActivity/TripBannerViews.swift`
+  (the banner and the island), `Shared/Intents/BannerIntents.swift`.
+- **UIKit lifecycle.** The status bar follows `{type:'chrome'}` through the
+  root view controller's `preferredStatusBarStyle`. SwiftUI's
+  `preferredColorScheme` would have flipped the page's
+  `prefers-color-scheme` too.
+- **Added to the injected script**, beyond the Expo one:
+  `window.__vcShell.action(name)` dispatches a `vc-action` event
+  (`detail.name`) unless the page replaces the function;
+  `window.__vcShell.insets(insets)` updates `VC_SHELL.insets` and the CSS
+  properties and dispatches `vc-insets`. Banner taps made while no page is
+  loaded are queued and delivered after the next load.
+- **Moments on disk**: `Application Support/trip-banner.json`. The moment
+  shown is the last one whose `at` has come, or a later one "Dar ne" moved
+  to. A new moment starts on its first page. `staleDate` is the next
+  moment's `at`. The app re-checks every 15 s while open and on location
+  fixes (at most every 5 s) during a trip; GPS runs in the background only
+  while a banner is up.
+- **Heading accuracy**: iOS's degrees through expo-location's levels and back
+  (≤20 → 20, ≤35 → 35, ≤50 → 50, else -1), so both shells send the same.
+- **ATS**: `NSAllowsLocalNetworking` and also
+  `NSAllowsArbitraryLoadsInWebContent` (WKWebView only), because Apple's page
+  for the first says iOS 17 "no longer allows connections to IP addresses by
+  default" without being explicit that the key restores them.
+- **Not drawn natively**: the walk page's round minimap (a Live Activity
+  cannot host a map; it would need a snapshot image handed over through an
+  App Group, which Xcode's free signing allows but Sideloadly's did not:
+  later), and `listen` (whisper.cpp from the page). The `wait`
+  stage has no board; it uses the text template with the prototype's words.
+- **The island's expanded view** is the page in Island.png's layout: when the
+  bottom line ends in a clock time beside a clock title (`ISM 14:20` beside
+  `Išeik 13:52`), the two clocks sit side by side on top and the countdown
+  moves to the bottom line (`Liko 12 min`), as the board shows.
+- **Mac kit**: `Tools/ci/build_mac_kit.sh`, spec `Tools/ci/mac-kit/project-kit.yml`
+  (includes `project.yml`), steps in `Tools/ci/mac-kit/KAIP-ĮDIEGTI.txt`.
+  Artifact `mac-kit`; on pushes to `main` also the release `mac-kit-latest`.

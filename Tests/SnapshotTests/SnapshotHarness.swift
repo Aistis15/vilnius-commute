@@ -55,6 +55,12 @@ enum SnapshotHarness {
             Variant(suffix: "light-AX3", colorScheme: .light, dynamicType: .accessibility3),
             Variant(suffix: "dark-AX3",  colorScheme: .dark,  dynamicType: .accessibility3),
         ]
+
+        /// For the Live Activity: it draws its own colourway at fixed sizes,
+        /// so the system appearance and text size change nothing in it.
+        static let banner: [Variant] = [
+            Variant(suffix: "L", colorScheme: .dark, dynamicType: .large),
+        ]
     }
 
     /// Which renderer draws the view.

@@ -39,7 +39,7 @@ struct ProbeRecordingIntent: AppIntent, AudioRecordingIntent {
         // this probe did not, so it could only ever have failed. The banner
         // is left up afterwards: that is where the answer will appear.
         do {
-            try TripActivityLauncher.start()
+            try await TripActivityLauncher.start()
         } catch {
             LockScreenRecordingMarker.write(
                 succeeded: false,

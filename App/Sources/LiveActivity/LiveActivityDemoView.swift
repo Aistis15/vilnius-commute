@@ -1,18 +1,14 @@
 import Core
 import SwiftUI
 
-/// Starts a real countdown Live Activity so the lock screen and Dynamic
-/// Island can be inspected on a physical, free-signed device.
+/// Puts up the design's sample trip banner so the lock screen and Dynamic
+/// Island can be inspected on a physical, free-signed device without the PC.
 ///
-/// The preview shows the **live** Activity's content, not a fixed sample.
-/// That distinction turned out to matter: with a frozen sample, "add 5
-/// minutes" updated the real banner on the lock screen and changed nothing on
-/// this screen, which is indistinguishable from a button that does nothing.
+/// The preview shows the **live** Activity's content, not a fixed sample:
+/// with a frozen sample, a button that changed the real banner changed
+/// nothing here, which is indistinguishable from a button that does nothing.
 struct LiveActivityDemoView: View {
     @State private var controller = TripActivityController()
-
-    /// Only used before anything is running, to show what a banner looks like.
-    private let sampleAttributes = TripActivityAttributes.sample
 
     var body: some View {
         List {
@@ -25,7 +21,7 @@ struct LiveActivityDemoView: View {
         .navigationBarTitleDisplayMode(.inline)
         // A Live Activity outlives the app process, so on returning here there
         // may already be one running that this controller has never seen.
-        .task { controller.adoptRunningActivity() }
+        .task { controller.refresh() }
         .refreshable { controller.refresh() }
     }
 
@@ -36,16 +32,16 @@ struct LiveActivityDemoView: View {
             switch controller.status {
             case .idle:
                 Button {
-                    controller.start()
+                    Task { await controller.start() }
                 } label: {
                     Label("Paleisti", systemImage: "play.fill")
                 }
 
             case .running:
                 Button {
-                    Task { await controller.bumpCountdown() }
+                    Task { await controller.nextPage() }
                 } label: {
-                    Label("Pridėti 5 min", systemImage: "plus.circle")
+                    Label("Kitas puslapis", systemImage: "arrow.right.circle")
                 }
                 Button(role: .destructive) {
                     Task { await controller.end() }
@@ -57,7 +53,7 @@ struct LiveActivityDemoView: View {
                 Label(message, systemImage: "xmark.circle.fill")
                     .foregroundStyle(.red)
                     .font(.footnote)
-                Button("Bandyti dar kartą") { controller.start() }
+                Button("Bandyti dar kartą") { Task { await controller.start() } }
             }
 
             // Every action reports back, so nothing looks like a dead button.
@@ -82,16 +78,13 @@ struct LiveActivityDemoView: View {
 
     private var preview: some View {
         Section {
-            TripLockScreenView(
-                attributes: sampleAttributes,
-                state: controller.liveState ?? TripContentState.sample()
-            )
-            .listRowInsets(EdgeInsets())
+            TripBannerView(state: controller.liveState ?? BannerSamples.state(BannerSamples.countdown))
+                .listRowInsets(EdgeInsets())
         } header: {
             Text(controller.liveState == nil ? "Pavyzdys" : "Kas dabar rodoma")
         } footer: {
             if controller.liveState != nil {
-                Text("Tai tikras veikiančios veiklos turinys. Paspaudus „Pridėti 5 min“ laikas pasikeis ir čia.")
+                Text("Tai tikras veikiančios veiklos turinys. Kampas „Kitas puslapis“ keičia jį ir čia.")
             } else {
                 Text("Kol nieko neveikia — tik pavyzdys, kaip atrodys.")
             }
