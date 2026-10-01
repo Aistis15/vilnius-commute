@@ -142,6 +142,20 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
     `bannerRoute`) drawn by one template (`bannerHtml`): caption, title and
     detail on the left, the number block on the right, one line along the
     bottom clear of the corner. The iPhone app draws the same data.
+- **Buses glide** (2026-10-02): the shown bus follows its prediction like a
+  damped spring in metres along its street, with the prediction's speed
+  fed forward. It never jumps or runs backwards (live: 0 % of frames, from
+  0.5 % and 0.6 %), is drawn every frame, waits 8 s at a stop it reaches,
+  and slows rather than stops when it is shown ahead. On the 200 s
+  recording: 18.3 m median for a moving bus, shown standing 18 % of moving
+  time. The server asks stops.lt every second while anyone looks.
+- **Motion, everywhere it helps** (2026-10-02): the tab pill springs to its
+  tab while the bar stays put; things that open grow to their height; a
+  trip's line draws itself from where you board; buses fade in and out;
+  your dot breathes; a colourway eases over; light and dark cross-fade.
+  Both maps are made out of sight once the screen has been left alone for
+  2.5 s, so the first open is instant. A swipe from the left edge goes
+  back, followed by the finger; the trip sheet drags between three heights.
 - **The page button is the banner's corner**: a quarter circle in the
   accent colour with the dots inside, 56 pt. A Live Activity takes taps on
   buttons, not swipes.
