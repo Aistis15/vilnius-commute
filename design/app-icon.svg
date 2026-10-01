@@ -1,0 +1,20 @@
+<svg id="icon" width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  
+  <rect width="1024" height="1024" fill="#1C1C1E"/>
+  <g transform="translate(512 512) scale(1.22) translate(-511 -507)">
+  <!-- the walk: dots on the pavement, from the door to the stop -->
+  <g fill="#FFFFFF" opacity="0.55">
+    <circle cx="246" cy="778" r="17"/><circle cx="300" cy="736" r="17"/><circle cx="352" cy="692" r="17"/>
+  </g>
+  <!-- the ride: a route line in its own colour on a casing, as the map draws it -->
+  <path d="M 404 650 C 470 600, 470 520, 520 470 S 640 400, 700 330 S 760 250, 776 236"
+        fill="none" stroke="#1C1C1E" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 404 650 C 470 600, 470 520, 520 470 S 640 400, 700 330 S 760 250, 776 236"
+        fill="none" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- boarding: a ring of the route's colour -->
+  <circle cx="404" cy="650" r="62" fill="#FFFFFF" stroke="#008000" stroke-width="30"/>
+  <circle cx="404" cy="650" r="20" fill="#008000"/>
+  <!-- the destination: a black pill's dot, white ringed -->
+  <circle cx="776" cy="236" r="56" fill="#1C1C1E" stroke="#FFFFFF" stroke-width="26"/>
+  </g>
+</svg>

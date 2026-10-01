@@ -99,8 +99,9 @@ targets:
       # the app needs them because LiveActivityIntent and AudioRecordingIntent
       # are performed in the app's process.
       - path: Shared/Intents
-      # No App/Resources yet: Phase 1 ships no asset catalog, and an empty
-      # directory is not tracked by git, so listing one fails spec validation.
+      # The asset catalog: the app icon (design/app-icon.svg, rendered at
+      # 1024 px; iOS draws the corners and the smaller sizes itself).
+      - path: App/Resources
     dependencies:
       - target: Core
         embed: false
@@ -118,6 +119,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX)
         PRODUCT_NAME: VilniusCommute
         INFOPLIST_KEY_CFBundleDisplayName: Vilnius
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         OTHER_LDFLAGS: "$(inherited) -ObjC"
     info:
       path: App/Supporting/Info.plist

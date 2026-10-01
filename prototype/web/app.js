@@ -2243,6 +2243,21 @@ function drawMap() {
     drawVehicles();
   });
 }
+/* Where you are on the trip's map: the same dot and halo as on the city map,
+   gliding from fix to fix. */
+let tripMe = null;
+const meIcon = () => L.divIcon({ className: 'me-icon', iconSize: null, html: '<span class="me-dot"><i class="me-halo"></i></span>' });
+function drawTripMe() {
+  if (!map || !window.L || currentScreen().name !== 'detail') return;
+  const me = mePoint();
+  if (!me) return;
+  if (!tripMe || tripMe._map !== map) {
+    tripMe = L.marker([me.lat, me.lon], { interactive: false, keyboard: false, zIndexOffset: 900, icon: meIcon() }).addTo(map);
+    return;
+  }
+  glideTo(tripMe, me.lat, me.lon, 900);
+}
+setInterval(drawTripMe, 1000);
 function resetVehicles() {
   if (vehicleLayer) vehicleLayer.clearLayers();
   Object.keys(vehicleMarkers).forEach((k) => delete vehicleMarkers[k]);
@@ -2361,7 +2376,7 @@ function drawMe() {
   if (!meMarker) {
     meRing = L.circle([me.lat, me.lon], { radius: me.accuracy || 1, stroke: false, fillColor: '#1C1C1E', fillOpacity: 0.12, interactive: false }).addTo(bigLayers.me);
     meMarker = L.marker([me.lat, me.lon], { interactive: false, keyboard: false, zIndexOffset: 1000,
-      icon: L.divIcon({ className: 'me-icon', iconSize: null, html: '<span class="me-dot"><i class="me-halo"></i></span>' }) }).addTo(bigLayers.me);
+      icon: meIcon() }).addTo(bigLayers.me);
     return;
   }
   glideTo(meMarker, me.lat, me.lon, 900);
