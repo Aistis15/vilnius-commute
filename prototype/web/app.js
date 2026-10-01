@@ -3612,7 +3612,8 @@ function shellAction(name) {
 if (SHELL) {
   window.__vcShell = window.__vcShell || {};
   window.__vcShell.action = shellAction;
-  window.addEventListener('vc-action', (event) => shellAction(String(event.detail || '')));
+  // The iPhone shell's own action() sends { name } as an event when the page has not replaced it.
+  window.addEventListener('vc-action', (event) => shellAction(String((event.detail && event.detail.name) || event.detail || '')));
 }
 
 function renderLock() {
