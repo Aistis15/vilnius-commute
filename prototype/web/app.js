@@ -1269,9 +1269,24 @@ function homeView() {
     ${tabBar('home')}`;
 }
 
+/* Before anything is typed: where you went lately, newest first, and not
+   the saved places (they are one tap away on home already). */
+function recentPlaces() {
+  return Object.entries(state.visits)
+    .filter(([, v]) => !state.places.some((p) => Math.abs(p.lat - v.lat) < 0.0015 && Math.abs(p.lon - v.lon) < 0.0015))
+    .sort(([, a], [, b]) => (b.last || 0) - (a.last || 0) || b.count - a.count)
+    .slice(0, 6);
+}
 function dockResults() {
   if (state.query.trim().length >= 2) return searchResultsHtml('go');
-  return '<p class="footnote dock-hint">Įvesk adresą, vietą ar stotelę. Arba paliesk mikrofoną ir pasakyk, pvz., „Į Akropolį keturiolika dvidešimt“.</p>';
+  const recent = recentPlaces();
+  const hint = '<p class="footnote dock-hint">Įvesk adresą, vietą ar stotelę. Arba paliesk mikrofoną ir pasakyk, pvz., „Į Akropolį keturiolika dvidešimt“.</p>';
+  if (!recent.length) return hint;
+  return `<div class="section-label">Neseniai</div>
+    <div class="group stagger">${recent.map(([key, v]) => `<button class="row" data-action="go-recent" data-key-ref="${esc(key)}" data-key="recent-${esc(key)}">
+        <span class="lead">${icon('clock')}</span>
+        <span class="main"><div class="title">${esc(v.name)}</div><div class="sub">${esc(shortAddress(v.subtitle) || v.subtitle || '')}</div></span>
+      </button>`).join('')}</div>${hint}`;
 }
 
 /* A saved place is a circle with its answer under it: when to leave, worked
@@ -1318,7 +1333,7 @@ async function refreshPlaceTimes(force = false) {
   if (!force && state.placeTimesKey === key && Date.now() - placeTimesAt < 60_000) return;
   placeTimesAt = Date.now();
   state.placeTimesKey = key;
-  for (const p of state.places.slice(0, 6)) {
+  const one = async (p) => {
     try {
       const plan = await planTrip(p, 'now', null);
       const o = plan.options.map((x) => withLive(x)).find((x) => !x.walk_only && !x.missed) || plan.options[0];
@@ -1326,8 +1341,10 @@ async function refreshPlaceTimes(force = false) {
         ? { walk: true, minutes: o.duration_min }
         : { leave: t(o.leave), route: (o.legs.find((l) => l.kind === 'ride') || {}).route || null };
     } catch { state.placeTimes[p.id] = null; }
-  }
-  refreshDock();
+    refreshDock();
+  };
+  const queue = state.places.slice(0, 8);
+  await Promise.all([0, 1, 2].map(async () => { while (queue.length) await one(queue.shift()); }));
 }
 
 function refreshDock() {
@@ -2524,6 +2541,7 @@ function recordVisit(place) {
   const key = placeKey(place);
   const v = state.visits[key] || { count: 0, name: place.name, lat: place.lat, lon: place.lon, subtitle: place.subtitle || '' };
   v.count += 1;
+  v.last = Date.now();
   state.visits[key] = v;
   save();
 }
@@ -4486,6 +4504,7 @@ const actions = {
   },
 
   go: (el) => openDestination(currentItems()[Number(el.dataset.index)]),
+  'go-recent': (el) => { const v = state.visits[el.dataset.keyRef]; if (v) openDestination({ name: v.name, lat: v.lat, lon: v.lon, subtitle: v.subtitle }); },
   'go-place': (el) => openDestination(state.places.find((p) => p.id === el.dataset.id)),
   picked: (el) => {
     const item = currentItems()[Number(el.dataset.index)];
