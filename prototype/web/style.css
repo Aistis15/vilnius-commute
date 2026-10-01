@@ -1448,3 +1448,54 @@ button.ts-step { width: calc(100% + 16px); }
 @media (prefers-reduced-motion: reduce) {
   .me-halo, .skel, .bus-marker, .dest-pill, .dest-dot, .stop-pair, .line-badge .badge { animation: none !important; }
 }
+/* Liquid Glass: a lit top edge and a faint lower one, as the material
+   catches the light; the pill swells a little under the finger. */
+.tabbar, .glass-circle, .glass-pill, .map-card .map-me {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 0 rgba(0, 0, 0, 0.05), 0 8px 28px rgba(0, 0, 0, 0.12);
+}
+:root[data-theme="dark"] :is(.tabbar, .glass-circle, .glass-pill, .map-card .map-me) {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(.tabbar, .glass-circle, .glass-pill, .map-card .map-me) {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.4);
+  }
+}
+.tab-pill { transition: scale var(--t-release) var(--ease-spring); }
+.tabbar:has(.tab:active) .tab-pill { scale: 1.04 1.08; transition-duration: var(--t-press); }
+.tab .icon { transition: transform var(--t-release) var(--ease-spring); }
+.tab:active .icon { transform: scale(.9); }
+.glass-circle, .glass-pill { transition: transform var(--t-release) var(--ease-spring), background-color var(--t-release) var(--ease-out); }
+.glass-circle:active, .glass-pill:active { transform: scale(.92); transition-duration: var(--t-press); }
+/* The map's credit: small, grey, out of the way. */
+.leaflet-top.leaflet-right { top: calc(var(--safe-top) - 6px); }
+.leaflet-control-attribution { background: none !important; font-size: 9px; line-height: 1.2; color: var(--label3); padding: 0 8px !important; box-shadow: none; }
+.leaflet-control-attribution a { color: var(--label3) !important; text-decoration: none; }
+.leaflet-control-attribution .leaflet-attribution-flag { display: none !important; }
+.trip-screen .leaflet-top.leaflet-right, .map-screen .leaflet-top.leaflet-right { right: 64px; }
+
+/* ==== after the critic (2026-10-02) ========================================= */
+/* Rows with no icon: the divider starts at the text, as iOS draws it. */
+.row + .row:not(:has(> .lead))::before { left: 16px; }
+.group .trail .icon { color: var(--label3); }
+/* Crossings only close in. */
+.zebra { display: none; }
+.close-in .zebra { display: block; }
+/* The current step, a rounded row with its text inset. */
+.ts-step.now { border-radius: 12px; }
+/* The time sheet: one grabber, and its dimming keeps pace with it. */
+.time-sheet .grabber { display: none; }
+/* Under the tab bar the screen fades out, as iOS 26's scroll edge does. */
+.page:has(> .tabbar):has(> .content)::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--safe-bottom) + 96px);
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--page) 0%, transparent), var(--page) 62%); pointer-events: none; z-index: 5; }
+/* The start button waits, greyed, while the plan is found. */
+.prominent.cta[disabled] { opacity: .3; }
+/* The onboarding's footnote at caption size. */
+.onboard .footnote { font-size: 13px; }
+/* A colourway eases over quickly, so its mix never reads as mud. */
+.palette-card, .palette-card .bn-cap, .palette-card .bn-title, .palette-card .bn-foot, .palette-card .pager-dots, .palette-card .pdots i,
+.palette-card .big, .palette-card .chev { transition-duration: .2s; }
+/* Light and dark: the new theme opens out from the switch, no grey mix. */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+
+.bar-ghost { z-index: 20; pointer-events: none; }

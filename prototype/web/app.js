@@ -381,17 +381,11 @@ function applyPalette() {
    palette's base and ink, the one that stands out on the page fills the
    button, and the other writes on it, so it reads in light and dark alike.
    Grafitas leaves the system's own black and white. */
+/* The colourway is the lock screen's: the app keeps its black and white
+   (the design: "the colourway lives on the lock-screen banner only"). */
 function applyAppAccent() {
   const root = document.documentElement;
-  const p = paletteOf(state.palette);
-  if (p.id === 'grafitas' || p.id === 'balta') {
-    root.style.removeProperty('--prominent'); root.style.removeProperty('--on-prominent');
-    return;
-  }
-  const page = themeDark() ? '#1C1C1E' : '#F2F2F7';
-  const fill = contrastOf(p.base, page) >= contrastOf(p.ink, page) ? p.base : p.ink;
-  root.style.setProperty('--prominent', fill);
-  root.style.setProperty('--on-prominent', fill === p.base ? p.ink : p.base);
+  root.style.removeProperty('--prominent'); root.style.removeProperty('--on-prominent');
 }
 
 // ------------------------------------------------------------------- state
@@ -944,7 +938,7 @@ const inPage = (sel) => (pageEl ? pageEl.querySelector(sel) : null);
 function transitionPages(from, to, kind) {
   const app = $('#app');
   // A navigation during a slide finishes the old slide at once.
-  app.querySelectorAll('.page.leaving').forEach((p) => p.remove());
+  app.querySelectorAll('.page.leaving, .bar-ghost').forEach((p) => p.remove());
   if (kind === 'pop' && from) app.insertBefore(to, from); else app.appendChild(to);
   if (!from) return;
   from.classList.add('leaving');
@@ -959,20 +953,23 @@ function transitionPages(from, to, kind) {
     play(to, [...behind].reverse(), 'push');
     afterPlay(play(from, [{ transform: 'none' }, { transform: 'translateX(100%)' }], 'push', { fill: 'forwards' }), done);
   } else if (from.querySelector('.tabbar') && to.querySelector('.tabbar')) {
-    // From tab to tab: the bar stays where it is and its pill slides over;
-    // only what is above it cross-fades, the new screen rising a little.
-    const oldBar = from.querySelector('.tabbar');
-    const pill = to.querySelector('.tab-pill');
-    const was = Number(oldBar.querySelector('.tab-pill').style.getPropertyValue('--i')) || 0;
-    const now = Number(pill.style.getPropertyValue('--i')) || 0;
+    // From tab to tab: the old screen stays put underneath while the new one
+    // fades in over it (never a blank frame), and the bar stays where it is:
+    // the old bar's pill slides to the new tab, then the new bar takes over.
+    const oldBar = from.querySelector('.tabbar'), newBar = to.querySelector('.tabbar');
+    const oldPill = oldBar.querySelector('.tab-pill');
+    const was = Number(oldPill.style.getPropertyValue('--i')) || 0;
+    const now = Number(newBar.querySelector('.tab-pill').style.getPropertyValue('--i')) || 0;
+    newBar.style.visibility = 'hidden';
+    from.parentNode.appendChild(oldBar.cloneNode(true)).classList.add('bar-ghost');
+    const ghost = from.parentNode.querySelector('.bar-ghost');
     oldBar.style.visibility = 'hidden';
-    if (was !== now) {
-      const step = pill.offsetWidth + 4;
-      play(pill, [{ transform: `translateX(${was * step}px)` }, { transform: `translateX(${now * step}px)` }], 'pill');
-    }
-    const above = (page) => [...page.children].filter((el) => !el.classList.contains('tabbar'));
-    above(to).forEach((el) => play(el, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'content'));
-    afterPlay(play(from, [{ opacity: 1 }, { opacity: 0 }], 'exit', { fill: 'forwards' }), done);
+    oldBar.querySelectorAll('.tab').forEach((tab, i) => tab.classList.toggle('on', i === now));
+    ghost.querySelectorAll('.tab').forEach((tab, i) => tab.classList.toggle('on', i === now));
+    const step = oldPill.offsetWidth + 4;
+    play(ghost.querySelector('.tab-pill'), [{ transform: `translateX(${was * step}px)` }, { transform: `translateX(${now * step}px)` }], 'pill');
+    const finish = () => { newBar.style.visibility = ''; ghost.remove(); done(); };
+    afterPlay(play(to, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], 'fade'), finish);
   } else {
     play(to, [{ opacity: 0 }, { opacity: 1 }], 'content');
     afterPlay(play(from, [{ opacity: 1 }, { opacity: 0 }], 'exit', { fill: 'forwards' }), done);
@@ -1593,7 +1590,10 @@ function resultsView() {
   const plan = state.plan;
   const transit = plan && plan.options.some((o) => !o.walk_only);
   let body = '', cta = '';
-  if (state.planning) body = resultsSkeleton();
+  if (state.planning) {
+    body = resultsSkeleton();
+    cta = '<div class="sticky-bottom"><button class="prominent cta" data-action="go-option" disabled>Pradėti kelionę</button></div>';
+  }
   else if (state.planError) body = `<p class="footnote error-text">${esc(state.planError)}</p>`;
   else if (plan && plan.cross_city && !transit) body = crossCityNotice(plan);
   else if (plan && (!plan.from_city || !plan.to_city) && !transit) body = outOfAreaNotice(plan);
@@ -1639,16 +1639,16 @@ function routeRow(o) {
 }
 /* Every card says what it is for, as the design's do: the server's own tag
    when only this way has it, else what it gives over the recommended one. */
-function optionChip(o, all, best = null) {
-  const tags = o.missed ? [] : distinctTags(o, all);
-  let label = tags[0] || '';
-  if (!label && best && best !== o && !o.walk_only) {
-    if (o.transfers < best.transfers) label = o.transfers === 0 ? 'Be persėdimų' : 'Mažiau persėdimų';
-    else if (o.walk_m < best.walk_m - 100) label = 'Mažiau pėsčiomis';
-    else if (t(o.leave) > t(best.leave) + 60_000) label = 'Išeik vėliau';
-    else if (t(o.leave) < t(best.leave) - 60_000) label = 'Ankstesnis';
-  }
-  if (!label && o.walk_only) label = 'Pėsčiomis';
+function optionChip(o, all) {
+  if (o.walk_only) return '<span class="opt-chip">Pėsčiomis</span>';
+  const others = all.filter((x) => x !== o && !x.walk_only);
+  const label = !others.length ? ''
+    : others.every((x) => t(o.arrive) < t(x.arrive) - 30_000) ? 'Atvyksi anksčiausiai'
+      : o.transfers === 0 && others.every((x) => x.transfers > 0) ? 'Be persėdimų'
+        : others.every((x) => o.walk_m < x.walk_m - 100) ? 'Mažiausiai pėsčiomis'
+          : others.every((x) => t(o.leave) > t(x.leave) + 60_000) ? 'Išeik vėliausiai'
+            : others.every((x) => o.duration_min < x.duration_min) ? 'Trumpiausia kelionė'
+              : others.every((x) => o.transfers < x.transfers) ? 'Mažiau persėdimų' : '';
   return label ? `<span class="opt-chip">${esc(label)}</span>` : '<span></span>';
 }
 function optionProblem(o) {
@@ -1682,7 +1682,7 @@ function optionCard(o, all, best) {
     : rides.length === 1 ? { trolleybus: 'Vienas troleibusas', ferry: 'Vienas keltas' }[rides[0].route.category] || 'Vienas autobusas'
       : capital(transfersText(o.transfers));
   return `<button class="opt" data-action="open-option" data-index="${o.index}" data-key="${esc(o.id)}">
-      <div class="opt-head">${optionChip(o, all, best)}<span class="opt-dur">${o.duration_min} min</span></div>
+      <div class="opt-head">${optionChip(o, all)}<span class="opt-dur">${o.duration_min} min</span></div>
       <div class="opt-row"><span class="opt-clock small${isLate(o) ? ' problem-text' : ''}">${esc(o.leave.hm)} <span class="arrow">→</span> ${esc(o.arrive.hm)}</span>
         <span class="opt-badges">${o.walk_only ? icon('walk') : rides.map((l) => badge(l.route)).join('')}</span></div>
       <div class="opt-line">${what} · ${metresText(o.walk_m)} pėsčiomis</div>
@@ -1794,7 +1794,7 @@ function openDestination(place) {
    - Klaipėda (klaipeda.lt): 1,50 € from the driver, a ticket a ride; less
      with an e-ticket or a bank card at the reader. How much less is not
      said: two sources disagree (1,00 € from 2024, 0,70 € elsewhere). */
-const euro = (x) => `${x.toFixed(2).replace('.', ',')} €`;
+const euro = (x) => `${x.toFixed(2).replace('.', ',')}\u00A0€`;
 function ticketFor(o) {
   if (!o || o.walk_only) return null;
   const rides = o.legs.filter((l) => l.kind === 'ride');
@@ -1868,8 +1868,8 @@ function detailView() {
     if (leg.kind === 'ride') {
       const first = i === o.legs.findIndex((l) => l.kind === 'ride');
       glyph = badge(leg.route, true);
-      text = first ? `Į ${esc(leg.to.name)} · ${stopsText(leg.stop_count)} · ${leg.minutes || Math.round((t(leg.arrival) - t(leg.departure)) / 60_000)} min`
-        : `Persėsk · iki ${esc(leg.to.name)} · ${leg.minutes || Math.round((t(leg.arrival) - t(leg.departure)) / 60_000)} min`;
+      const minutes = leg.minutes || Math.round((t(leg.arrival) - t(leg.departure)) / 60_000);
+      text = `Išlipk: ${esc(leg.to.name)} · ${stopsText(leg.stop_count)} · ${minutes} min`;
       if (leg.cancelled) more = '<div class="ts-sub problem-text">Reisas atšauktas</div>';
       else if (leg.missed) more = '<div class="ts-sub problem-text">Gali nespėti: ankstesnis autobusas vėluoja</div>';
       else if (liveOf(leg) && first) more = `<div class="ts-sub">${liveHtml(leg)}</div>`;
@@ -1882,8 +1882,8 @@ function detailView() {
       const cross = crosses.length ? ` · pereik gatvę${marked ? ' per perėją' : ''}` : '';
       if (move === 'across' || (move && crosses.length && move !== 'same-side')) text = `Pereik gatvę į stotelę „${esc(leg.to.name)}“`;
       else if (move === 'same-side') text = `Eik į stotelę „${esc(leg.to.name)}“ toje pačioje pusėje`;
-      else if (leg.to.stop == null) text = `Eik į ${esc(state.destination ? state.destination.name : 'tikslą')} · ${leg.minutes} min${cross}`;
-      else text = `Eik į ${esc(leg.to.name)} · ${leg.minutes} min${cross}`;
+      else if (leg.to.stop == null) text = `Eik iki tikslo · ${leg.minutes} min${cross}`;
+      else text = `Eik iki stotelės „${esc(leg.to.name)}“ · ${leg.minutes} min${cross}`;
     }
     const tap = leg.kind === 'ride' && leg.stops.length > 2 ? ` data-action="toggle-stops" data-index="${i}" aria-expanded="${!!state.openStops[i]}"` : '';
     return `<${tap ? 'button' : 'div'} class="ts-step${cls}"${tap}><span class="t">${esc(leg.departure.hm)}</span><span class="glyph">${glyph}</span><span class="text">${text}</span></${tap ? 'button' : 'div'}>${more}`;
@@ -2078,7 +2078,8 @@ function mapStyle(dark) {
         layout: { 'text-field': ['coalesce', ['get', 'name:lt'], ['get', 'name']], 'text-font': ['Noto Sans Bold'], 'text-size': 10.5, 'symbol-placement': 'line', 'text-max-angle': 30 },
         paint: { 'text-color': c.street, 'text-halo-color': c.minor, 'text-halo-width': 1.5 } },
       { id: 'place-name', type: 'symbol', source: 'omt', 'source-layer': 'place',
-        filter: ['match', ['get', 'class'], ['city', 'town', 'suburb', 'quarter', 'neighbourhood', 'village'], true, false],
+        filter: ['any', ['match', ['get', 'class'], ['suburb', 'quarter', 'neighbourhood', 'village'], true, false],
+          ['all', ['match', ['get', 'class'], ['city', 'town'], true, false], ['<', ['zoom'], 12]]],
         layout: { 'text-field': ['coalesce', ['get', 'name:lt'], ['get', 'name']], 'text-font': ['Noto Sans Bold'], 'text-size': ['match', ['get', 'class'], ['city', 'town'], 14, 12], 'text-max-width': 8 },
         paint: { 'text-color': c.place, 'text-halo-color': c.halo, 'text-halo-width': 1.5 } },
     ],
@@ -2096,6 +2097,9 @@ function hasWebGL() {
 const baseLayers = new Set();
 function addBase(leafletMap) {
   leafletMap.attributionControl.setPrefix(false);
+  // The credit sits small and grey under the status bar, clear of the
+  // sheets and the tab bar at the bottom.
+  leafletMap.attributionControl.setPosition('topright');
   if (window.maplibregl && L.maplibreGL && hasWebGL()) {
     const layer = L.maplibreGL({ style: mapStyle(themeDark()), attribution: ATTRIBUTION, interactive: false });
     layer.addTo(leafletMap);
@@ -2183,6 +2187,7 @@ function prewarmMaps(which) {
   if (which === 'trip' && !map && currentScreen().name !== 'detail') {
     const from = origin() || { lat: 54.6872, lon: 25.2797 };
     map = L.map(offstage('map', 'trip-map'), { zoomControl: false, attributionControl: true }).setView([from.lat, from.lon], 15);
+    zoomClass(map);
     addBase(map);
     map.vcMarks = L.layerGroup().addTo(map);
     mapFor = null;
@@ -2201,6 +2206,14 @@ function fitTrip(animate = false) {
   const below = sheet ? sheet.offsetHeight : 0;
   map.fitBounds(map.vcBounds, { paddingTopLeft: [28, 110], paddingBottomRight: [28, below + 28], animate, maxZoom: 17 });
 }
+/* The map's container says how close it is: crossings show from zoom 16,
+   where they are a mark on a street and not a blot over a block. */
+function zoomClass(leafletMap) {
+  const set = () => { const z = leafletMap.getZoom(); leafletMap.getContainer().classList.toggle('close-in', z >= 16); };
+  leafletMap.on('zoomend', set);
+  leafletMap.whenReady(set);
+}
+
 /* The trip's map is made once and kept: a new trip moves the same living
    map (its WebGL ground already drawn) into the new screen and redraws
    only the marks. */
@@ -2235,6 +2248,7 @@ function drawMap() {
   afterSettle(() => {
     if (map || inPage('#map') !== el || state.selected !== o) { if (!map && inPage('#map')) drawMap(); return; }
     map = L.map(el, { zoomControl: false, attributionControl: true, fadeAnimation: true });
+  zoomClass(map);
     mapFor = o;
     addBase(map);
     map.vcMarks = L.layerGroup().addTo(map);
@@ -2409,7 +2423,9 @@ function drawTripOnMap(fit = false) {
   drawTripMarks(bigLayers.trip, trip.option, { label: false });
   if (!w) return;
   L.circleMarker([w.lat, w.lon], { radius: 11, color: w.color ? `#${w.color}` : '#1C1C1E', weight: 4, fillColor: '#fff', fillOpacity: 1, interactive: false })
-    .bindTooltip(esc(w.label), { permanent: true, direction: 'top', offset: [0, -12], className: 'waypoint-tip' }).addTo(bigLayers.trip);
+    .addTo(bigLayers.trip);
+  L.marker([w.lat, w.lon], { interactive: false, keyboard: false, zIndexOffset: 600, icon: L.divIcon({ className: 'dest-icon', iconSize: null,
+    html: `<span class="dest-pill">${esc(w.label)}</span>` }) }).addTo(bigLayers.trip);
   if (fit) {
     const me = mePoint();
     const box = L.latLngBounds([[w.lat, w.lon], ...(me ? [[me.lat, me.lon]] : [])]);
@@ -2436,7 +2452,8 @@ function drawBigMap() {
 }
 function makeBigMap(el) {
   const from = origin() || { lat: 54.6872, lon: 25.2797 };
-  bigmap = L.map(el, { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([from.lat, from.lon], 16);
+  bigmap = L.map(el, { zoomControl: false, attributionControl: true, preferCanvas: true, renderer: L.canvas({ tolerance: 12 }) }).setView([from.lat, from.lon], 16);
+  zoomClass(bigmap);
   addBase(bigmap);
   bigLayers = { trip: L.layerGroup().addTo(bigmap), stops: L.layerGroup().addTo(bigmap), buses: L.layerGroup().addTo(bigmap), marks: L.layerGroup().addTo(bigmap), me: L.layerGroup().addTo(bigmap) };
   busMarkers = {};
@@ -2467,8 +2484,13 @@ function drawStops(stops) {
   bigLayers.stops.clearLayers();
   for (const stop of stops) {
     const chosen = state.mapSel && state.mapSel.kind === 'stop' && state.mapSel.stop.id === stop.id;
+    // Quiet marks, so the map reads as streets first: a small grey ring, the
+    // chosen one a bigger black one. Finger-sized all the same (the canvas
+    // renderer takes taps within its tolerance around the ring).
+    const dark = themeDark();
     L.circleMarker([stop.lat, stop.lon], {
-      radius: chosen ? 8 : 5, color: '#3A3A3C', weight: chosen ? 3 : 2, fillColor: '#fff', fillOpacity: 1,
+      radius: chosen ? 8 : 4, color: chosen ? (dark ? '#F2F2F7' : '#1C1C1E') : (dark ? '#8E8E93' : '#8E8E93'), weight: chosen ? 3 : 1.6,
+      fillColor: dark ? '#2C2C2E' : '#fff', fillOpacity: 1,
     }).on('click', () => { lastLayerClick = Date.now(); selectStop(stop); }).addTo(bigLayers.stops);
   }
 }
@@ -3738,7 +3760,7 @@ function islandTripHtml(trip, phase, at) {
       </div>
       ${progressHtml(done)}
       <div class="isl-foot"><span class="bn-routes">${footRoutes(rides)}</span>
-        <span class="isl-left">${esc(right.caption)} ${roll(right.value)}${right.unit ? ` ${esc(right.unit)}` : ''}</span></div>
+        <span class="isl-left">${esc(/ atvyks$/.test(right.caption) ? 'Atvyks po' : right.caption)} ${roll(right.value)}${right.unit ? ` ${esc(right.unit)}` : ''}</span></div>
     </div>`;
 }
 
@@ -3791,7 +3813,7 @@ function renderActivity(host, where, { fresh = false } = {}) {
       card.setAttribute('aria-label', 'Kelionės baneris');
     }
     card.innerHTML = '<div class="act-body"></div><div class="act-pager"></div>';
-    card.classList.toggle('trip', key.startsWith('trip:'));
+    card.classList.toggle('trip', key.startsWith('trip:') || key.startsWith('arrived:'));
     card.firstChild.innerHTML = body;
     card.lastChild.innerHTML = pager;
     card.dataset.key = key;
@@ -3812,7 +3834,7 @@ function renderActivity(host, where, { fresh = false } = {}) {
     // A trip keeps one height on every stage and page, so the banner's top
     // edge stays put; only questions and answers around it change size.
     crossfade(card, bodyEl, () => {
-      card.classList.toggle('trip', key.startsWith('trip:'));
+      card.classList.toggle('trip', key.startsWith('trip:') || key.startsWith('arrived:'));
       bodyEl.innerHTML = body; morph(pagerEl, pager);
     }, { dx, animateHeight: where === 'lock' });
     return card;
@@ -4012,7 +4034,7 @@ function renderOverlay() {
     overlay.insertAdjacentHTML('afterbegin', state.sheet);
     sheet = overlay.querySelector('.sheet-backdrop');
     sheet.dataset.html = state.sheet;
-    play(sheet, [{ backgroundColor: 'rgba(0,0,0,0)' }, { backgroundColor: 'rgba(0,0,0,0.35)' }], 'fade');
+    play(sheet, [{ backgroundColor: 'rgba(0,0,0,0)' }, { backgroundColor: 'rgba(0,0,0,0.35)' }], 'sheet');
     play(sheet.firstElementChild, [{ transform: 'translateY(100%)' }, { transform: 'none' }], 'sheet');
   } else if (state.sheet && sheet.dataset.html !== state.sheet) {
     sheet.dataset.html = state.sheet;
@@ -5045,7 +5067,16 @@ $('#toggle-lock').addEventListener('click', () => (state.locked ? actions.unlock
 $('#toggle-theme').addEventListener('click', () => {
   const root = document.documentElement;
   const flip = () => { root.dataset.theme = themeDark() ? 'light' : 'dark'; };
-  if (document.startViewTransition && !reducedMotion.matches) document.startViewTransition(flip); else flip();
+  if (!document.startViewTransition || reducedMotion.matches) { flip(); }
+  else {
+    const box = $('#screen').getBoundingClientRect();
+    const x = box.right - 40, y = box.top + 60;
+    const r = Math.hypot(Math.max(x - box.left, box.right - x), Math.max(y - box.top, box.bottom - y));
+    document.startViewTransition(flip).ready.then(() => {
+      document.documentElement.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
+        { duration: 520, easing: 'cubic-bezier(.32, .72, 0, 1)', pseudoElement: '::view-transition-new(root)' });
+    }).catch(() => {});
+  }
   store.set('theme', root.dataset.theme);
   restyleMaps();
   applyAppAccent();
