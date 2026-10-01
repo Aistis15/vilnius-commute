@@ -1,0 +1,54 @@
+VILNIUS COMMUTE: KAIP ĮDIEGTI Į iPHONE IŠ MAC
+=============================================
+
+Reikia: Mac kompiuterio, iPhone, USB laido ir tavo Apple ID (nemokamo užtenka).
+
+1. Xcode
+   - Mac su Apple procesoriumi (M1 ir naujesni): Xcode 27, jam reikia
+     macOS Tahoe 26.6 arba naujesnės.
+   - Mac su Intel procesoriumi (macOS Tahoe): Xcode 26.6.
+   Xcode nemokamas, App Store. Pirmą kartą paleidus, leisk jam įdiegti
+   papildomus komponentus ir iOS platformą.
+
+2. Paskyra
+   Xcode › Settings › Apple Accounts › „+“ › Apple ID. Prisijunk savo
+   Apple ID. Atsiras „Personal Team“.
+
+3. Projektas
+   Išarchyvuok šį ZIP ir dukart spustelėk VilniusCommute.xcodeproj.
+
+4. Pasirašymas, ABIEM taikiniams
+   Kairėje spustelėk mėlyną „VilniusCommute“ projektą.
+   - TARGETS › VilniusCommute › Signing & Capabilities › Team: tavo
+     „(Personal Team)“.
+   - TARGETS › VilniusCommuteWidgets › Signing & Capabilities › Team: tas
+     pats „(Personal Team)“.
+   Be antrojo baneris užrakto ekrane nesirodys.
+   Jei Xcode rašo, kad identifikatorius „com.vilniuscommute.app“ užimtas:
+   projekto (ne taikinio) Build Settings › BUNDLE_ID_PREFIX pakeisk į
+   pvz. com.tavovardas.vilnius ir vėl pasirink Team abiem taikiniams.
+
+5. iPhone
+   - Prijunk laidu, atrakink, paspausk „Pasitikėti“ (Trust).
+   - Nustatymai › Privatumas ir sauga (Settings › Privacy & Security) ›
+     Developer Mode › įjunk, telefonas
+     persikraus, patvirtink. (Šis jungiklis atsiranda tik prijungus prie
+     Xcode.)
+
+6. Paleisk
+   Xcode viršuje pasirink savo iPhone ir spausk Run (trikampis, ⌘R).
+   Pirmą kartą iPhone gali sakyti, kad kūrėju nepasitikima:
+   Nustatymai › Bendrieji › VPN ir įrenginių valdymas (Settings › General ›
+   VPN & Device Management) › tavo Apple ID ›
+   Pasitikėti. Tada paleisk dar kartą.
+
+7. Prijunk prie kompiuterio
+   PC paleisk „Paleisti-iPhone.bat“ ir nuskenuok QR kodą iPhone kamera
+   (arba programėlėje įvesk adresą, pvz. 192.168.1.23:8765).
+
+SVARBU
+   - Nemokama paskyra: programėlė veikia 7 dienas. Po to ji nebeatsidaro:
+     prijunk iPhone prie Mac ir dar kartą spausk Run. Tavo išsaugotos vietos
+     lieka.
+   - Ne daugiau 3 tokių programėlių viename telefone; ne daugiau 10 naujų
+     App ID per 7 dienas (ši programėlė naudoja 2).

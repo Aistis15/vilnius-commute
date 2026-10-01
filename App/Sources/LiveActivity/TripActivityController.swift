@@ -3,12 +3,10 @@ import Core
 import Foundation
 import Observation
 
-/// Starts, updates and ends the trip Live Activity.
+/// Starts, turns and ends the sample trip banner for the demo screen.
 ///
-/// Phase 1 exists to answer one question: does ActivityKit work at all on a
-/// build signed with a free Apple ID and installed with Sideloadly? So every
-/// failure is captured and surfaced verbatim rather than swallowed — an error
-/// string here is the probe result.
+/// Every failure is surfaced verbatim rather than swallowed: on a
+/// free-signed build an error string here is the probe result.
 ///
 /// ## Why only the id is stored
 ///
@@ -34,13 +32,9 @@ final class TripActivityController {
     }
 
     private(set) var status: Status = .idle
-    private(set) var activityID: String?
 
-    /// The live Activity's current content, re-read after every change.
-    ///
-    /// Without this the demo screen showed a fixed sample, so "add 5 minutes"
-    /// updated the real banner on the lock screen and changed nothing in the
-    /// app — indistinguishable from a button that does nothing.
+    /// The live Activity's current content, re-read after every change, so
+    /// the screen shows what the lock screen shows.
     private(set) var liveState: TripContentState?
 
     /// Short confirmation of the last action, because an update that only
@@ -48,108 +42,48 @@ final class TripActivityController {
     private(set) var lastAction: String?
 
     /// Whether the system currently permits Live Activities for this app.
-    /// Flips to `false` if the user turns them off in Settings.
     var activitiesEnabled: Bool {
         ActivityAuthorizationInfo().areActivitiesEnabled
     }
 
-    /// Requests a countdown Live Activity with sample data.
-    func start(destination: String = "ISM") {
-        guard activityID == nil else { return }
-
+    func start() async {
         guard activitiesEnabled else {
             status = .failed("Gyvosios veiklos išjungtos sistemoje.")
             return
         }
-
         do {
-            // The same launcher the lock-screen control uses, so both put up
-            // the same banner and neither stacks a second one.
-            let id = try TripActivityLauncher.start(destination: destination)
-            activityID = id
-            liveState = Self.state(of: id)
-            status = .running
+            try await TripActivityLauncher.start()
+            refresh()
             lastAction = "Paleista \(TimeFormat.clock(.now))"
         } catch {
-            // Surfaced in the UI on purpose: this is the go/no-go signal.
             status = .failed(String(describing: error))
         }
     }
 
-    /// Pushes a fresh countdown without tearing the Activity down, to prove
-    /// local updates reach the lock screen.
-    func bumpCountdown(byMinutes minutes: Int = 5) async {
-        guard let activityID else { return }
-        await Self.bump(activityID: activityID, byMinutes: minutes)
+    /// What the banner's corner does.
+    func nextPage() async {
+        await TripBanner.shared.nextPage()
         refresh()
-        lastAction = "Pridėta \(minutes) min · \(TimeFormat.clock(.now))"
+        lastAction = "Kitas puslapis · \(TimeFormat.clock(.now))"
     }
 
     func end() async {
-        guard let activityID else { return }
-        await Self.end(activityID: activityID)
-        self.activityID = nil
+        await TripBanner.shared.endTrip()
         liveState = nil
         status = .idle
         lastAction = "Sustabdyta \(TimeFormat.clock(.now))"
     }
 
-    /// Re-reads the live Activity so the UI reflects what is on the lock
-    /// screen rather than what the app last remembered.
+    /// Re-reads the live Activity, which may have changed or ended outside
+    /// the app.
     func refresh() {
-        guard let activityID else {
-            liveState = nil
-            return
-        }
-        liveState = Self.state(of: activityID)
-        if Self.find(activityID) == nil {
-            // It ended or was dismissed from outside the app.
-            self.activityID = nil
-            status = .idle
-        }
+        liveState = Self.runningState()
+        status = liveState == nil ? (status == .running ? .idle : status) : .running
     }
 
-    /// Re-attaches to an Activity that outlived a previous launch.
-    func adoptRunningActivity() {
-        if activityID == nil, let existing = Self.runningActivityID() {
-            activityID = existing
-            status = .running
-        }
-        refresh()
-    }
-
-    // MARK: - Nonisolated work
-    //
-    // These run outside the main actor so the non-Sendable `Activity` never
-    // has to cross an isolation boundary. See the note on the type.
-
-    private nonisolated static func find(_ id: String) -> Activity<TripActivityAttributes>? {
-        Activity<TripActivityAttributes>.activities.first { $0.id == id }
-    }
-
-    private nonisolated static func state(of id: String) -> TripContentState? {
-        find(id)?.content.state
-    }
-
-    private nonisolated static func runningActivityID() -> String? {
-        Activity<TripActivityAttributes>.activities.first?.id
-    }
-
-    private nonisolated static func bump(activityID: String, byMinutes minutes: Int) async {
-        guard let activity = find(activityID) else { return }
-
-        var state = activity.content.state
-        let shift = Double(minutes) * 60
-        state.leaveAt = state.leaveAt.addingTimeInterval(shift)
-        state.arriveBy = state.arriveBy.addingTimeInterval(shift)
-
-        await activity.update(
-            ActivityContent(state: state, staleDate: state.leaveAt.addingTimeInterval(60))
-        )
-    }
-
-    private nonisolated static func end(activityID: String) async {
-        guard let activity = find(activityID) else { return }
-        await activity.end(nil, dismissalPolicy: .immediate)
+    private nonisolated static func runningState() -> TripContentState? {
+        Activity<TripActivityAttributes>.activities
+            .first { $0.activityState == .active }?
+            .content.state
     }
 }

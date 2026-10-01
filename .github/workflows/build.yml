@@ -24,6 +24,8 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 90
+    permissions:
+      contents: write        # the mac-kit-latest release, on pushes to main
 
     steps:
       - uses: actions/checkout@v5
@@ -117,6 +119,30 @@ jobs:
 
       - name: Build unsigned .ipa (App Groups probe)
         run: ./Tools/ci/build_ipa.sh appgroups
+
+      # The project a free Apple ID signs in Xcode on a borrowed Mac, with the
+      # app and its widget extension each provisioned (docs/ios-shell.md).
+      - name: Build the Mac kit
+        run: |
+          chmod +x Tools/ci/build_mac_kit.sh
+          ./Tools/ci/build_mac_kit.sh "${SIMULATOR}"
+
+      - name: Upload the Mac kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-kit
+          path: artifacts/VilniusCommute-Mac.zip
+          if-no-files-found: error
+
+      - name: Publish the Mac kit
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view mac-kit-latest >/dev/null 2>&1; then
+            gh release create mac-kit-latest               --title "Vilnius Commute: Mac kit"               --notes "Xcode project for installing the app from a Mac with a free Apple ID. Steps inside: KAIP-ĮDIEGTI.txt."
+          fi
+          gh release upload mac-kit-latest artifacts/VilniusCommute-Mac.zip --clobber
 
       - name: Upload .ipa
         uses: actions/upload-artifact@v4

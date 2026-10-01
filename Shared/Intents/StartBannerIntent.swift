@@ -24,7 +24,7 @@ struct StartBannerIntent: LiveActivityIntent {
     static let supportedModes: IntentModes = .background
 
     func perform() async throws -> some IntentResult {
-        try TripActivityLauncher.start()
+        try await TripActivityLauncher.start()
         return .result()
     }
 }
