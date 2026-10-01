@@ -1496,6 +1496,18 @@ button.ts-step { width: calc(100% + 16px); }
 .palette-card, .palette-card .bn-cap, .palette-card .bn-title, .palette-card .bn-foot, .palette-card .pager-dots, .palette-card .pdots i,
 .palette-card .big, .palette-card .chev { transition-duration: .2s; }
 /* Light and dark: the new theme opens out from the switch, no grey mix. */
-::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+:root[data-vt="theme"]::view-transition-old(root), :root[data-vt="theme"]::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+/* The card-to-sheet zoom: the card's box becomes the sheet's on the screens'
+   own curve; its clock glides; the rest cross-fades, the new screen a touch
+   quicker so the map is there as the sheet lands. */
+:root[data-vt="zoom"]::view-transition-group(trip-card) {
+  animation-duration: .5s; animation-timing-function: cubic-bezier(.32, .72, 0, 1); }
+:root[data-vt="zoom"]::view-transition-old(trip-card), :root[data-vt="zoom"]::view-transition-new(trip-card) { height: 100%; object-fit: none; object-position: top; }
+:root[data-vt="zoom"]::view-transition-old(trip-card) { animation: vt-fade-out .16s var(--ease-in) both; }
+:root[data-vt="zoom"]::view-transition-new(trip-card) { animation: vt-fade-in .26s var(--ease-out) .14s both; }
+:root[data-vt="zoom"]::view-transition-old(root) { animation: vt-fade-out .3s var(--ease-in) both; }
+:root[data-vt="zoom"]::view-transition-new(root) { animation: vt-fade-in .35s var(--ease-out) both; }
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-fade-in { from { opacity: 0; } }
 
 .bar-ghost { z-index: 20; pointer-events: none; }

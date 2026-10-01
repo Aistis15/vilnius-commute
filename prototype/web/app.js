@@ -935,12 +935,15 @@ function renderApp() {
 // Queries scoped to the screen on top: during a slide two pages exist.
 const inPage = (sel) => (pageEl ? pageEl.querySelector(sel) : null);
 
+let swapInstantly = false;
 function transitionPages(from, to, kind) {
   const app = $('#app');
+  if (swapInstantly) kind = 'none';
   // A navigation during a slide finishes the old slide at once.
   app.querySelectorAll('.page.leaving, .bar-ghost').forEach((p) => p.remove());
   if (kind === 'pop' && from) app.insertBefore(to, from); else app.appendChild(to);
   if (!from) return;
+  if (kind === 'none') { from.remove(); return; }
   from.classList.add('leaving');
   from.inert = true;
   pagesMoveUntil = performance.now() + (kind === 'push' || kind === 'pop' ? 460 : 320);
@@ -1905,6 +1908,45 @@ function detailView() {
           : `<button class="prominent" data-action="start-trip"${isLate(o) ? ' disabled' : ''}>Pradėti kelionę</button>`}</div>
       </div>
     </div>`;
+}
+
+/* The card-to-sheet "zoom": with View Transitions, the tapped card and the
+   trip sheet share a name, so the one becomes the other; everything else
+   cross-fades. Back, the sheet shrinks
+   into its card again. Without View Transitions, the usual slide. */
+const canZoom = () => !!document.startViewTransition && !reducedMotion.matches;
+function zoomInto(card, navigate) {
+  if (!canZoom() || !card) { navigate(); return; }
+  card.style.viewTransitionName = 'trip-card';
+  document.documentElement.dataset.vt = 'zoom';
+  const vt = document.startViewTransition(() => {
+    swapInstantly = true;
+    try { navigate(); } finally { swapInstantly = false; }
+    const sheet = inPage('.trip-sheet');
+    if (sheet) sheet.style.viewTransitionName = 'trip-card';
+    pagesMoveUntil = performance.now() + 460;
+  });
+  vt.finished.finally(() => {
+    delete document.documentElement.dataset.vt;
+    document.querySelectorAll('[style*="view-transition-name"]').forEach((el) => { el.style.viewTransitionName = ''; });
+  });
+}
+function zoomBack(navigate) {
+  const sheet = inPage('.trip-sheet');
+  if (!canZoom() || !sheet || !state.selected) { navigate(); return; }
+  sheet.style.viewTransitionName = 'trip-card';
+  document.documentElement.dataset.vt = 'zoom';
+  const key = state.selected.id;
+  const vt = document.startViewTransition(() => {
+    swapInstantly = true;
+    try { navigate(); } finally { swapInstantly = false; }
+    const card = [...document.querySelectorAll('#app .page .opt')].find((el) => el.dataset.key === key);
+    if (card) card.style.viewTransitionName = 'trip-card';
+  });
+  vt.finished.finally(() => {
+    delete document.documentElement.dataset.vt;
+    document.querySelectorAll('[style*="view-transition-name"]').forEach((el) => { el.style.viewTransitionName = ''; });
+  });
 }
 
 /* The trip sheet rests at one of three heights, like Maps': its top only,
@@ -4616,6 +4658,8 @@ const actions = {
     if (!state.prefs && state.draft) { state.draft.step = Math.max(0, state.draft.step - 1); renderApp(); return; }
     // The pick screen's search is its own: home must not come back showing it.
     if (currentScreen().name === 'pick') { state.query = ''; state.results = []; }
+    const under = state.stack[state.stack.length - 2];
+    if (currentScreen().name === 'detail' && under && under.name === 'results') { zoomBack(pop); return; }
     pop();
   },
   settings: () => actions.tab({ dataset: { tab: 'settings' } }),
@@ -4749,7 +4793,9 @@ const actions = {
   'open-option': (el) => {
     const option = state.plan.options[Number(el.dataset.index)];
     state.selected = option; state.openStops = {};
-    push({ name: 'detail' });
+    // The card opens into the trip: it grows into the sheet, its times glide
+    // to the sheet's top, the map comes up behind (iOS's zoom transition).
+    zoomInto(el, () => push({ name: 'detail' }));
     fetchWalks(option).then(() => { if (state.selected === option && currentScreen().name === 'detail') drawMap(); });
   },
   'toggle-stops': (el) => { const i = el.dataset.index; state.openStops[i] = !state.openStops[i]; renderApp(); },
@@ -5072,7 +5118,10 @@ $('#toggle-theme').addEventListener('click', () => {
     const box = $('#screen').getBoundingClientRect();
     const x = box.right - 40, y = box.top + 60;
     const r = Math.hypot(Math.max(x - box.left, box.right - x), Math.max(y - box.top, box.bottom - y));
-    document.startViewTransition(flip).ready.then(() => {
+    document.documentElement.dataset.vt = 'theme';
+    const vt = document.startViewTransition(flip);
+    vt.finished.finally(() => { delete document.documentElement.dataset.vt; });
+    vt.ready.then(() => {
       document.documentElement.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
         { duration: 520, easing: 'cubic-bezier(.32, .72, 0, 1)', pseudoElement: '::view-transition-new(root)' });
     }).catch(() => {});
