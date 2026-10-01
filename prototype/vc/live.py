@@ -65,7 +65,7 @@ RT_FEEDS = {
 # Trip ids in the database are namespaced by feed ('vilnius:A1-01-...').
 SLUGS = {"Vilnius": "vilnius", "Kaunas": "kaunas", "Klaipėda": "klaipeda"}
 
-POLL_S = 2          # while anyone looks, each city's file is asked for this often
+POLL_S = 1          # while anyone looks, each city's file is asked for this often (304 when unchanged)
 ACTIVE_S = 90       # a city nobody has asked about for this long is not polled
 CANCEL_POLL_S = 30  # cancellations change seldom
 STALE_S = 120       # older than this, a snapshot is not "live" any more

@@ -759,12 +759,12 @@ async function pollLive() {
 let liveStream = null, liveSoon = null, lastLiveAsk = 0, lastMapAsk = 0;
 function onLiveNews() {
   if (liveSoon) return;
-  // One round of asking per 700 ms, however many cities changed at once.
+  // One round of asking per 250 ms, however many cities changed at once.
   liveSoon = setTimeout(() => {
     liveSoon = null;
     pollLive();
     if (currentScreen().name === 'map' && !state.locked) { lastMapAsk = Date.now(); loadMapData(); }
-  }, Math.max(0, 700 - (Date.now() - lastLiveAsk)));
+  }, Math.max(0, 250 - (Date.now() - lastLiveAsk)));
 }
 function openLiveStream() {
   if (!window.EventSource || liveStream) return;
@@ -2877,15 +2877,24 @@ function crossingsLine(leg) {
   return `Pereisi ${n === 1 ? 'gatvę' : `${n} ${plural(n, 'gatvę', 'gatves', 'gatvių')}`}${marked ? (n === 1 ? ' per perėją' : ' per perėjas') : ''}${roads.length ? `: ${roads.join(', ')}` : ''}`;
 }
 
-/* Where a bus is now, not where it was when it last reported. A position
-   is ~8 s old when it arrives (stops.lt's own delay); moved on along its
-   heading at its reported speed for that long (at most AHEAD_MAX_S), a
-   moving bus is drawn a median 20 m from where it really is, against 67 m
-   left where it was reported, and 110 m as the app used to show it
-   (measured on Vilnius' feed, 2026-09-27; see vc/live.py). A new fix eases
-   the drawn position over CORRECT_MS instead of jumping; a jump of more
-   than 600 m (a vehicle back from nowhere) is taken at once. */
-const AHEAD_MAX_S = 30, CORRECT_MS = 900;
+/* ---- how a bus moves on the map
+   The truth arrives about every 5 s and is ~8 s old when it does (stops.lt).
+   Where the bus is now is predicted along its line's street (ahead():
+   moved on by its speed for its age, held at its next stop), a median 17 m
+   off for a moving bus. The shown bus follows that prediction like a damped
+   spring, in metres along its street, with the prediction's own speed fed
+   forward, so it tracks a steady bus with no lag and only smooths the
+   corrections: it never runs backwards, never jumps, slows into a stop and
+   sets off again, and lands a new fix within about a second and a half.
+   Drawn every frame while it moves, only where the map can show it. */
+const AHEAD_MAX_S = 30;
+const FOLLOW_W = 2.6;        // the spring (rad/s): a correction settles in ~1.5 s
+const FOLLOW_FAST_W = 6;     // far behind (a long gap in the data): catch up in well under a second
+const FOLLOW_FAR_M = 120, FOLLOW_SNAP_M = 600;
+// Shown ahead of its prediction, a bus slows to this share of its speed
+// rather than stopping: it never reverses, and is seen standing only about
+// as often as the prediction itself stands (18 % of moving time, not 35 %).
+const FOLLOW_CREEP = 0.4;
 function ahead(fix, at = Date.now()) {
   const age = fix.measured_ms ? Math.min(Math.max(0, (at - fix.measured_ms) / 1000), AHEAD_MAX_S) : 0;
   const go = fix.speed > 0.5 ? fix.speed * age : 0;
@@ -2894,15 +2903,34 @@ function ahead(fix, at = Date.now()) {
   // road, never through a building (same recording; 91% of fixes lie within
   // 40 m of their street, the rest go straight along their heading).
   const street = fix.pattern != null && fix.along != null ? streetOf(fix.pattern) : null;
-  if (street) {
-    const next = street.stops.find((m) => m > fix.along + 3) ?? street.length;
-    return pointOnStreet(street, Math.min(fix.along + go, next));
-  }
+  if (street) return pointOnStreet(street, aheadAlong(fix, street, at).x);
   if (!go || fix.bearing == null) return { lat: fix.lat, lon: fix.lon };
   const b = rad(fix.bearing);
   return { lat: fix.lat + (go * Math.cos(b)) / 111_320, lon: fix.lon + (go * Math.sin(b)) / (111_320 * Math.cos(rad(fix.lat))) };
 }
-/* Each line's street, asked for once when a bus of it first shows. */
+/* The prediction as a place along the street, with the speed it moves at
+   there: on at its speed, a short wait at each stop it reaches (STOP_DWELL_S),
+   on again; 0 while it waits or once the data is too old. On the recording
+   (Vilnius, 200 s) this and "held at the next stop" are equally close to
+   the truth (16.9 m median for a moving bus), but a followed bus waits
+   half as often where it should be moving (research/analyze_motion.py). */
+const STOP_DWELL_S = 8;
+function aheadAlong(fix, street, at = Date.now()) {
+  const age = fix.measured_ms ? Math.min(Math.max(0, (at - fix.measured_ms) / 1000), AHEAD_MAX_S) : 0;
+  if (!(fix.speed > 0.5)) return { x: fix.along, v: 0 };
+  const stale = fix.measured_ms && at - fix.measured_ms > AHEAD_MAX_S * 1000;
+  let x = fix.along, t = age;
+  for (const stop of street.stops.filter((m) => m > fix.along + 3).concat(street.length)) {
+    const need = (stop - x) / fix.speed;
+    if (t <= need) return { x: x + fix.speed * t, v: stale ? 0 : fix.speed };
+    t -= need; x = stop;
+    if (t <= STOP_DWELL_S) return { x, v: 0 };
+    t -= STOP_DWELL_S;
+  }
+  return { x: street.length, v: 0 };
+}
+/* Each line's street, asked for once when a bus of it first shows. Buses
+   already drawn move onto it at their next frame (stepMotion). */
 const streets = new Map();
 function streetOf(pattern) {
   const known = streets.get(pattern);
@@ -2911,13 +2939,7 @@ function streetOf(pattern) {
   api('/api/shape', { pattern }).then((street) => {
     street.length = street.along[street.along.length - 1];
     streets.set(pattern, street);
-    // Buses of the line already drawn ease onto the street.
-    for (const [marker, m] of movers) {
-      if (m.fix.pattern === pattern) { const p = marker.getLatLng(); movers.set(marker, nextMotion({ lat: p.lat, lon: p.lng }, m.fix)); }
-    }
-    for (const [key, m] of Object.entries(dotMotion)) {
-      if (m.fix.pattern === pattern) dotMotion[key] = nextMotion(motionAt(m), m.fix);
-    }
+    if (!moving && movers.size) { moving = true; requestAnimationFrame(moveFrame); }
   }).catch(() => streets.delete(pattern));
   return null;
 }
@@ -2926,21 +2948,64 @@ function pointOnStreet(street, m) {
   let lo = 0, hi = along.length - 1;
   while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (along[mid] <= m) lo = mid; else hi = mid; }
   const f = clamp01((m - along[lo]) / Math.max(0.01, along[hi] - along[lo]));
-  return { lat: coords[lo][0] + (coords[hi][0] - coords[lo][0]) * f, lon: coords[lo][1] + (coords[hi][1] - coords[lo][1]) * f };
+  const a = { lat: coords[lo][0], lon: coords[lo][1] }, b = { lat: coords[hi][0], lon: coords[hi][1] };
+  return { lat: a.lat + (b.lat - a.lat) * f, lon: a.lon + (b.lon - a.lon) * f, heading: bearing(a, b) };
 }
-const easeOut3 = (x) => 1 - (1 - x) ** 3;
-function nextMotion(shown, fix) {
-  const target = ahead(fix);
-  const off = shown && straightMetres(shown, target) <= 600 ? [shown.lat - target.lat, shown.lon - target.lon] : [0, 0];
-  return { fix, off, t0: performance.now() };
+
+/* One bus's motion: the fix it follows, and where it is shown and how fast,
+   along its street (x, v) or, off any street, on the ground (p, vx, vy). */
+function newMotion(fix, shown = null) {
+  return { fix, street: null, x: null, v: 0, p: shown || ahead(fix), vx: 0, vy: 0, t: performance.now() };
 }
-function motionAt(m, ts = performance.now()) {
-  const p = ahead(m.fix);
-  const k = 1 - easeOut3(Math.min(1, (ts - m.t0) / CORRECT_MS));
-  return { lat: p.lat + m.off[0] * k, lon: p.lon + m.off[1] * k };
+function stepMotion(m, ts = performance.now()) {
+  let left = Math.min(2, Math.max(0, (ts - m.t) / 1000));
+  m.t = ts;
+  const street = m.fix.pattern != null && m.fix.along != null ? streetOf(m.fix.pattern) : null;
+  if (street && m.street !== street) {
+    // Onto the street: start where the prediction is, at its speed.
+    const target = aheadAlong(m.fix, street);
+    m.street = street; m.x = target.x; m.v = target.v;
+  }
+  if (!street) m.street = null;
+  const now = Date.now();
+  while (left > 0) {
+    const dt = Math.min(0.05, left);
+    left -= dt;
+    if (m.street) {
+      const target = aheadAlong(m.fix, m.street, now);
+      const e = target.x - m.x;
+      if (Math.abs(e) > FOLLOW_SNAP_M) { m.x = target.x; m.v = target.v; continue; }
+      const w = e > FOLLOW_FAR_M ? FOLLOW_FAST_W : FOLLOW_W;
+      m.v += (w * w * e + 2 * w * (target.v - m.v)) * dt;
+      // A bus never reverses: shown ahead of its prediction, it slows down.
+      m.v = Math.min(Math.max(FOLLOW_CREEP * target.v, m.v), Math.max(30, target.v * 2));
+      m.x += m.v * dt;
+    } else {
+      const target = ahead(m.fix, now);
+      const ky = 111_320, kx = 111_320 * Math.cos(rad(target.lat));
+      const ex = (target.lon - m.p.lon) * kx, ey = (target.lat - m.p.lat) * ky;
+      if (Math.hypot(ex, ey) > FOLLOW_SNAP_M) { m.p = { lat: target.lat, lon: target.lon }; m.vx = m.vy = 0; continue; }
+      const moving = m.fix.speed > 0.5 && m.fix.bearing != null;
+      const tvx = moving ? m.fix.speed * Math.sin(rad(m.fix.bearing)) : 0, tvy = moving ? m.fix.speed * Math.cos(rad(m.fix.bearing)) : 0;
+      m.vx += (FOLLOW_W * FOLLOW_W * ex + 2 * FOLLOW_W * (tvx - m.vx)) * dt;
+      m.vy += (FOLLOW_W * FOLLOW_W * ey + 2 * FOLLOW_W * (tvy - m.vy)) * dt;
+      m.p = { lat: m.p.lat + (m.vy * dt) / ky, lon: m.p.lon + (m.vx * dt) / kx };
+    }
+  }
+  if (m.street) {
+    const at = pointOnStreet(m.street, m.x);
+    m.p = { lat: at.lat, lon: at.lon };
+    m.heading = at.heading;
+  } else if (Math.hypot(m.vx, m.vy) > 0.5) {
+    m.heading = (Math.atan2(m.vx, m.vy) * 180 / Math.PI + 360) % 360;
+  }
+  return m.p;
 }
+// Still settling: moving, or not yet where its prediction is.
+const settling = (m) => m.v > 0.05 || Math.hypot(m.vx, m.vy) > 0.05 || (m.street ? Math.abs(aheadAlong(m.fix, m.street).x - m.x) > 0.3 : straightMetres(m.p, ahead(m.fix)) > 0.3);
+
 const movers = new Map();
-let moving = false, lastMove = 0;
+let moving = false;
 /* A bus on the map: its badge, with a small point on the side it is
    heading (the map spec's "bus" mark). */
 function busMarkerHtml(name, color, text, bearing) {
@@ -2948,35 +3013,43 @@ function busMarkerHtml(name, color, text, bearing) {
   return `<span class="bus-marker" style="background:#${esc(color)};color:#${esc(text)};--bus:#${esc(color)}">${esc(name)}${dir}</span>`;
 }
 function follow(marker, fix) {
-  const el = marker.getElement && marker.getElement();
-  const dir = el && el.querySelector('.bus-dir');
-  if (dir && Number.isFinite(fix.bearing)) dir.style.transform = `rotate(${Math.round(fix.bearing)}deg)`;
   const was = movers.get(marker);
   if (was && was.fix.measured_ms === fix.measured_ms && was.fix.lat === fix.lat && was.fix.lon === fix.lon) return;
-  const shown = marker.getLatLng();
-  movers.set(marker, nextMotion(was ? { lat: shown.lat, lon: shown.lng } : null, fix));
+  if (was && was.fix.pattern === fix.pattern) was.fix = fix;           // the same trip: follow the new fix
+  else {
+    const shown = marker.getLatLng();
+    movers.set(marker, newMotion(fix, was ? { lat: shown.lat, lon: shown.lng } : null));
+  }
   if (!moving) { moving = true; requestAnimationFrame(moveFrame); }
 }
 function moveFrame(ts) {
-  // About 30 frames a second: smooth for something moving a few pixels a second.
-  if (ts - lastMove >= 33) {
-    lastMove = ts;
-    for (const [marker, m] of movers) {
-      if (!marker._map) { movers.delete(marker); continue; }
-      const p = motionAt(m, ts);
-      marker.setLatLng([p.lat, p.lon]);
+  const views = new Map();
+  let busy = false;
+  for (const [marker, m] of movers) {
+    const owner = marker._map;
+    if (!owner) { movers.delete(marker); continue; }
+    if (!views.has(owner)) views.set(owner, owner.getBounds().pad(0.25));
+    const p = stepMotion(m, ts);
+    if (settling(m)) busy = true;
+    // Off screen it still moves, but is not drawn.
+    if (!views.get(owner).contains([p.lat, p.lon])) continue;
+    const shown = marker.getLatLng();
+    if (Math.abs(shown.lat - p.lat) > 2e-7 || Math.abs(shown.lng - p.lon) > 2e-7) marker.setLatLng([p.lat, p.lon]);
+    if (m.heading != null && Math.abs(((m.heading - (m.drawnHeading ?? -999)) + 540) % 360 - 180) > 2) {
+      const dir = marker.getElement && marker.getElement() && marker.getElement().querySelector('.bus-dir');
+      if (dir) { dir.style.transform = `rotate(${Math.round(m.heading)}deg)`; m.drawnHeading = m.heading; }
     }
   }
-  if (movers.size) requestAnimationFrame(moveFrame); else moving = false;
+  if (busy) requestAnimationFrame(moveFrame);
+  else { moving = false; setTimeout(() => { if (!moving && movers.size) { moving = true; requestAnimationFrame(moveFrame); } }, 1000); }
 }
 // The same for a dot drawn by hand (the banner's minimap redraws 4x a second).
 const dotMotion = {};
 function fixPoint(key, fix) {
   const m = dotMotion[key];
-  if (!m || m.fix.measured_ms !== fix.measured_ms || m.fix.lat !== fix.lat || m.fix.lon !== fix.lon) {
-    dotMotion[key] = nextMotion(m ? motionAt(m) : null, fix);
-  }
-  return motionAt(dotMotion[key]);
+  if (!m || m.fix.pattern !== fix.pattern) dotMotion[key] = newMotion(fix, m ? m.p : null);
+  else m.fix = fix;
+  return stepMotion(dotMotion[key]);
 }
 
 /* The rider's own dot glides from one fix to the next instead of jumping. */
