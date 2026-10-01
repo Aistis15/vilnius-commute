@@ -1786,7 +1786,8 @@ function detailView() {
   const running = !!planned && planned.id === state.selected.id && planned.leave.iso === state.selected.leave.iso;
   const at = now().getTime();
   const phase = running ? phaseOf(state.trip, at) : null;
-  const current = !phase || phase.kind === 'before' ? -1 : phase.kind === 'arrived' ? o.legs.length : phase.i;
+  // Before leaving, the first step is the one in hand.
+  const current = !phase ? -1 : phase.kind === 'before' ? 0 : phase.kind === 'arrived' ? o.legs.length : phase.i;
 
   let head;
   if (running && phase.kind !== 'arrived') {

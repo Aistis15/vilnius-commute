@@ -25,6 +25,16 @@ The first start downloads the timetables of all five cities in one file
 (~6.7 MB) from the `data-latest` release; after that routing works offline.
 Place search and speech need the internet.
 
+### On the iPhone
+
+The iPhone app (`App/`, installed from a Mac with Xcode: the `mac-kit`
+build, see `docs/ios-shell.md`) shows this prototype full screen and draws
+the banner as a real Live Activity. Double-click **`Paleisti-iPhone.bat`**:
+it runs `server.py --lan` (or `--tunnel` when `cloudflared` is installed) and
+opens <http://localhost:8765/connect>, a QR code the iPhone camera opens in
+the app. The PC stays on while the phone uses it. `?shell=ios` tries the
+phone layout on the desk.
+
 ## What is real and what is simulated
 
 | Real | Simulated |
@@ -121,6 +131,17 @@ tests/             python -m unittest discover -s prototype/tests -t prototype
   operators publish them: Vilnius's time tickets, Kaunas's Žiogas e-ticket
   with one change in 30 min, Klaipėda's ticket a ride. A price is shown
   only where the operator's own page confirms it.
+- **The design is the Design canvas's** ("Vilnius Commute Design", made
+  2026-09-29 to Apple's iOS 27 resources), installed 2026-10-01:
+  - Home leads with the voice card; a Liquid Glass tab bar holds Kelionė,
+    Žemėlapis and Nustatymai; screens pushed on top hide it.
+  - The map's own look is the canvas's map theme, drawn from OpenFreeMap's
+    vector tiles by MapLibre inside Leaflet (`mapStyle()` in `web/app.js`),
+    light and dark; without WebGL the OSM tiles are shown greyed.
+  - The banner is data first (`bannerNow`, `bannerDirection`,
+    `bannerRoute`) drawn by one template (`bannerHtml`): caption, title and
+    detail on the left, the number block on the right, one line along the
+    bottom clear of the corner. The iPhone app draws the same data.
 - **The page button is the banner's corner**: a quarter circle in the
   accent colour with the dots inside, 56 pt. A Live Activity takes taps on
   buttons, not swipes.
