@@ -49,8 +49,9 @@ final class ShellModel {
 
     private init() {
         mirror = UserDefaults.standard.dictionary(forKey: Self.storeKey) as? [String: String] ?? [:]
-        server = ShellAddress.saved
-        phase = server == nil ? .setup : .loading
+        let saved = ShellAddress.saved
+        server = saved
+        phase = saved == nil ? .setup : .loading
 
         location.onFix = { [weak self] fix in
             self?.call("window.__vcShell.fix(\(ShellScript.literal(fix)))")

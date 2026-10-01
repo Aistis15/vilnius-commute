@@ -217,11 +217,11 @@ final class ShellLocation: NSObject {
         if tripRunning { onTripFix?() }
     }
 
-    fileprivate func received(_ heading: CLHeading) {
+    fileprivate func received(trueHeading: Double, magneticHeading: Double, headingAccuracy: Double) {
         // True heading, magnetic when true is unknown.
-        let deg = heading.trueHeading >= 0 ? heading.trueHeading : heading.magneticHeading
+        let deg = trueHeading >= 0 ? trueHeading : magneticHeading
         guard deg >= 0 else { return }
-        let accuracy = Self.compassDegrees(heading.headingAccuracy)
+        let accuracy = Self.compassDegrees(headingAccuracy)
         latestHeading = (deg, accuracy)
         if let last = lastSentHeading {
             if Date().timeIntervalSince(last.at) < Self.headingMinSeconds { return }
@@ -297,7 +297,13 @@ extension ShellLocation: CLLocationManagerDelegate {
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
-        MainActor.assumeIsolated { received(newHeading) }
+        // CLHeading is not Sendable: take its numbers before crossing over.
+        let trueHeading = newHeading.trueHeading
+        let magneticHeading = newHeading.magneticHeading
+        let headingAccuracy = newHeading.headingAccuracy
+        MainActor.assumeIsolated {
+            received(trueHeading: trueHeading, magneticHeading: magneticHeading, headingAccuracy: headingAccuracy)
+        }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: any Error) {
