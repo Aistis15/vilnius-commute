@@ -1,0 +1,6 @@
+{
+  "_about": "replica-brand's config for sweep.py, listing.py and replica-deploy. The name step did not run: the app already has its name and is personal.",
+  "avoid": ["Trafi"],
+  "domains": ["trafi.com"],
+  "colors": []
+}

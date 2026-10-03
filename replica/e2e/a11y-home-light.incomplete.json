@@ -1,0 +1,78 @@
+[
+  {
+    "target": ".home-from > span",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".large",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".voice-title",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".voice-sub",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "#search",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".pill-button > span",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".heading:nth-child(1) > h2",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".heading-side",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".ptile-name",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".heading:nth-child(3) > h2",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".stop-name",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".stop-dist",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".stop-dep:nth-child(1) > .badge",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".stop-dep:nth-child(1) > .stop-min",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".stop-dep:nth-child(2) > .badge",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".stop-dep:nth-child(2) > .stop-min",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".on > span",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-tab=\"map\"] > span",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-tab=\"settings\"] > span",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  }
+]

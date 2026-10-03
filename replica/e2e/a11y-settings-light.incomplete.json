@@ -1,0 +1,94 @@
+[
+  {
+    "target": ".large",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".section-label",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".bn-left > .bn-cap",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".clip",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".bn-right > .bn-cap",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".roll",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "small",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".badge.small:nth-child(1)",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".badge.small:nth-child(3)",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".bn-foot-text",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": ".footnote:nth-child(5)",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-action=\"places\"] > .main > .title",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-action=\"places\"] > .trail",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-action=\"trip-prefs\"] > .main > .title",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-action=\"trip-prefs\"] > .trail",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-action=\"guide\"] > .main > .title",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-action=\"pick-origin\"] > .main > .title",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-action=\"pick-origin\"] > .trail",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-action=\"tips-reset\"] > .main > .title",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "#data-info",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-tab=\"home\"] > span",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-tab=\"map\"] > span",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  },
+  {
+    "target": "button[data-tab=\"settings\"] > span",
+    "why": "Element's background color could not be determined due to a pseudo element"
+  }
+]

@@ -1,0 +1,26 @@
+  AAA   18.82:1  light-label              on light-page           
+  AAA   21.00:1  light-label              on light-card           
+  AA     5.99:1  light-label2             on light-card           
+  AA     5.37:1  light-label2             on light-page           
+  AAA   11.35:1  light-meta               on light-card           
+  FAIL   2.21:1  light-label3             on light-card           
+  AAA   21.00:1  light-on-prominent       on light-prominent      
+  FAIL   3.55:1  light-red                on light-card           
+  FAIL   3.18:1  light-red                on light-page           
+  AAA   17.01:1  dark-label               on dark-page            
+  AAA   13.94:1  dark-label               on dark-card            
+  AA     5.42:1  dark-label2              on dark-card            
+  FAIL   4.41:1  dark-label2              on dark-elevated        
+  AAA    8.12:1  dark-meta                on dark-card            
+  FAIL   2.33:1  dark-label3              on dark-card            
+  AAA   21.00:1  dark-on-prominent        on dark-prominent       
+  FAIL   3.93:1  dark-red                 on dark-card            
+  AA     4.80:1  dark-red                 on dark-page            
+  AA     5.19:1  route-text               on route-bus-vilnius    
+  AA     4.64:1  route-text               on route-red-bus-trolleybus 
+  AA     5.14:1  route-text               on route-green-express-trolleybus 
+  AAA   21.00:1  route-text               on route-night          
+  FAIL   2.94:1  route-text               on route-orange-klaipeda 
+  FAIL   3.06:1  route-text               on route-ferry-l1       
+
+  24 pairs, 8 failing AA

@@ -1,0 +1,102 @@
+[
+  {
+    "target": ".glass-pill > span",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".large",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".from-line",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".chosen > .opt-head > .opt-chip",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".chosen > .opt-head > .opt-dur",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".cap",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".chosen > div:nth-child(2) > .opt-clock",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".chosen > div:nth-child(2) > .opt-clock > .arrow",
+    "why": "Element content contains only non-text characters"
+  },
+  {
+    "target": ".opt-clock > span:nth-child(2)",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".walk-leg",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".opt-route > .badge",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".chosen > .opt-line",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".opt-ticket > span",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"1\"] > .opt-head > .opt-chip",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"1\"] > .opt-head > .opt-dur",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"1\"] > .opt-row > .small.opt-clock",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"1\"] > .opt-row > .small.opt-clock > .arrow",
+    "why": "Element content contains only non-text characters"
+  },
+  {
+    "target": "button[data-index=\"1\"] > .opt-line",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"2\"] > .opt-head > .opt-chip",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"2\"] > .opt-head > .opt-dur",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"2\"] > .opt-row > .small.opt-clock",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"2\"] > .opt-row > .small.opt-clock > .arrow",
+    "why": "Element content contains only non-text characters"
+  },
+  {
+    "target": ".opt-badges > .badge",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": "button[data-index=\"2\"] > .opt-line",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  },
+  {
+    "target": ".prominent",
+    "why": "Element's background color could not be determined because it is overlapped by another element"
+  }
+]

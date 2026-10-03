@@ -1,0 +1,12 @@
+[
+  {
+    "id": "aria-allowed-role",
+    "impact": "minor",
+    "help": "ARIA role should be appropriate for the element",
+    "count": 1,
+    "targets": [
+      ".ptile"
+    ],
+    "sample": "Fix any of the following:   ARIA role listitem is not allowed for given element"
+  }
+]

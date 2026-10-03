@@ -1,0 +1,15 @@
+{
+  "name": "replica-e2e",
+  "private": true,
+  "description": "replica-test's Playwright specs for the prototype. Test tooling only: the prototype itself has no npm dependencies.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@maplibre/maplibre-gl-leaflet": "^0.1.4",
+    "@playwright/test": "^1.56.1",
+    "leaflet": "^1.9.4",
+    "maplibre-gl": "^5.24.0"
+  }
+}

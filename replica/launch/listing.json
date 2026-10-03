@@ -1,0 +1,14 @@
+{
+  "_about": "Hypothetical: the app is sideloaded and not going to the App Store (README). Written only to try listing.py on Lithuanian text. 'Geriau nei Trafi.' is planted on purpose to test the avoid check.",
+  "avoid": [
+    "Trafi"
+  ],
+  "app_store": {
+    "name": "Vilnius Commute: kada išeiti",
+    "subtitle": "Pasakyk, kur važiuoji",
+    "promotional_text": "Atšaukti reisai pažymėti, gyvi laikai atskirti nuo tvarkaraščio. Be paskyros, be reklamų.",
+    "description": "Pasakyk, kur ir kada turi būti, ir telefonas pasakys, kada išeiti.\n\nRealūs tvarkaraščiai Vilniuje, Kaune, Klaipėdoje, Šiauliuose ir Panevėžyje. Atšaukti reisai nesiūlomi. Gyvi laikai pažymėti.\n\nBe paskyros: vietos lieka telefone. Geriau nei Trafi.",
+    "keywords": "autobusas,troleibusas,stotelė,tvarkaraštis,maršrutas,viešasis transportas,Vilnius,Kaunas",
+    "whats_new": "Atšaukti reisai pažymėti."
+  }
+}

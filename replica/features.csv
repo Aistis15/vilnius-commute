@@ -1,0 +1,31 @@
+feature,area,priority,original,clone,notes
+Plan a trip from A to B,planner,must,yes,yes,RAPTOR in prototype/vc/router.py
+Arrive by a given time,planner,must,yes,yes,mode=arrive; says how late when no trip fits
+Next departures at a stop,departures,must,yes,yes,stop board via /api/stop; next hour only
+Live departure times,departures,must,yes,yes,stops.lt delays; live times marked apart from timetable
+Live vehicles on a map,map,must,yes,yes,all live buses in line colours
+Stops on a map with their earliest departures,map,must,yes,yes,stop card from /api/stop
+Search places and addresses,planner,must,yes,yes,stop names + Photon geocoder (needs internet)
+Tap a vehicle to see its track and stops,map,should,yes,no,bus markers are interactive: false
+Five Lithuanian cities,coverage,should,yes,yes,Vilnius Kaunas Klaipeda Siauliai Panevezys
+City follows where you are,coverage,should,yes,yes,no city switch; reviews say Trafi opens in the wrong city
+Walking directions inside a trip,planner,should,yes,yes,OSRM foot router with turns; straight line offline
+Full timetable of a line,departures,should,yes,no,Trafi FAQ: check public transport schedules; prototype shows next hour per stop only
+Route preferences (fewer changes / less walking),planner,should,yes,yes,asked once in onboarding
+Holiday and calendar exceptions,fixes,should,no,yes,riders say Trafi does not show holiday timetables (8% of 1-3 star reviews); feeds rebuilt daily with calendar_dates
+Screen reader support,accessibility,could,yes,partial,40 aria-labels; not yet tried with VoiceOver (your analysis)
+Offline use,platforms,could,no,partial,routes offline once timetables are downloaded; search and live need network
+Buy tickets in the app,tickets,must,yes,skip,no public ticket API; needs an operator agreement
+Activate a ticket before boarding,tickets,must,yes,skip,same as above
+Pay by card or bank-link,tickets,should,yes,skip,same as above
+Account and login,account,should,yes,skip,accounts only hold tickets; places stay on the phone by design
+Car-sharing scooters and taxis in the planner,planner,could,yes,skip,partner integrations: their network
+Cancelled trips marked and left out of plans,fixes,must,no,yes,docs/trafi-analysis.md: ghost buses 21% of 1-3 star reviews; GTFS-RT CANCELED
+Live times marked apart from timetable times,fixes,must,no,yes,docs/trafi-analysis.md: wrong times theme
+Which ticket the trip needs and its price,fixes,should,no,yes,"Važiuosi 2 min: užteks 30 min bilieto · 1,00 €" seen in F01-H1
+Spėsi? live pace against the bus,fixes,should,no,no,docs/trafi-analysis.md exclusive 1: build next
+Ghost-trip guard (trip due but no vehicle),fixes,could,no,no,exclusive 2: held back; wrong 1 in 12 in Kaunas
+Weather-aware walking,fixes,could,no,no,exclusive 3: Open-Meteo
+Holiday timetable notice,fixes,could,no,no,exclusive 6
+Low-floor vehicle on a departure,fixes,could,no,no,exclusive 7: GTFS-RT WHEELCHAIR_ACCESSIBLE
+Share arrival time,fixes,could,no,no,exclusive 8
