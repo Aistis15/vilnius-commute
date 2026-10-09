@@ -4449,11 +4449,20 @@ let recognition = null;
 function stopListening() {
   if (recognition) { try { recognition.abort(); } catch { /* already stopped */ } }
   recognition = null;
+  if (recording) recording.cancel();
+  recording = null;
   state.listening = null;
 }
 
 function listen(surface, onText) {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // An iPhone has no Lithuanian recogniser: inside the phone shells (and
+  // wherever the browser has none) the words are recorded and heard by the
+  // computer's Whisper instead.
+  if ((SHELL || !Recognition) && state.whisper && navigator.mediaDevices && window.MediaRecorder) {
+    listenRecorded(surface, onText);
+    return;
+  }
   stopListening();
   state.interim = '';
   // Inside the phone the words are the phone's: no "browser". The panel's
@@ -4501,6 +4510,88 @@ function listen(surface, onText) {
   state.pendingVoice = onText;
   try { r.start(); } catch { recognition = null; failVoice(surface, 'Balso atpažinimas nepasiekiamas.', true); }
   renderAll();
+}
+
+/* Recorded listening: the microphone until the speaker stops (a second of
+   quiet after speech, 8 s at most), then the computer's Whisper
+   (/api/transcribe, vc/transcribe.py). Tapping the microphone again, or
+   anything that stops listening, cancels it. */
+let recording = null;
+function listenRecorded(surface, onText) {
+  stopListening();
+  state.interim = '';
+  state.listening = surface;
+  state.pendingVoice = onText;
+  // Made inside the tap: iOS lets audio start only from a gesture.
+  const Context = window.AudioContext || window.webkitAudioContext;
+  const audio = Context ? new Context() : null;
+  let cancelled = false, timer = null, stream = null, recorder = null;
+  const release = () => {
+    clearInterval(timer);
+    if (stream) stream.getTracks().forEach((track) => track.stop());
+    if (audio) audio.close().catch(() => {});
+  };
+  const self = { cancel() { cancelled = true; release(); if (recorder && recorder.state !== 'inactive') recorder.stop(); } };
+  recording = self;
+  const fail = (message, retry) => {
+    if (recording !== self) return;
+    recording = null;
+    state.listening = null;
+    failVoice(surface, message, !retry);
+  };
+  renderAll();
+  navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then((got) => {
+    stream = got;
+    if (cancelled) { release(); return; }
+    const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
+    recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    const chunks = [];
+    recorder.ondataavailable = (event) => { if (event.data && event.data.size) chunks.push(event.data); };
+    recorder.onstop = async () => {
+      release();
+      if (cancelled || recording !== self) return;
+      const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/mp4' });
+      state.interim = 'Atpažįstu…';
+      renderAll();
+      try {
+        const response = await fetch('api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
+        const data = await response.json().catch(() => ({}));
+        if (recording !== self) return;
+        if (!response.ok) { fail(data.error || 'Balso atpažinimas nepasiekiamas.', false); return; }
+        const text = (data.text || '').trim();
+        if (!text) { fail('Nieko neišgirdau.', true); return; }
+        recording = null;
+        state.listening = null;
+        state.interim = text;
+        renderAll();
+        onText(text);
+      } catch { fail('Kompiuteris neatsako.', true); }
+    };
+    recorder.start(250);
+    // When to stop: speech is what stands out of the room's own noise.
+    const analyser = audio ? audio.createAnalyser() : null;
+    if (analyser) { audio.createMediaStreamSource(stream).connect(analyser); analyser.fftSize = 1024; audio.resume().catch(() => {}); }
+    const samples = new Float32Array(1024);
+    const started = performance.now();
+    let floor = null, heard = false, quietSince = null;
+    timer = setInterval(() => {
+      const elapsed = performance.now() - started;
+      let loud = false;
+      if (analyser) {
+        analyser.getFloatTimeDomainData(samples);
+        let sum = 0;
+        for (const v of samples) sum += v * v;
+        const rms = Math.sqrt(sum / samples.length);
+        floor = floor == null ? rms : Math.min(floor * 1.002 + 0.0001, Math.max(floor * 0.98, rms));
+        loud = rms > Math.max(0.015, floor * 3);
+      }
+      if (loud) { heard = true; quietSince = null; } else if (heard && quietSince == null) quietSince = performance.now();
+      const done = elapsed > 8000 || (heard && quietSince != null && performance.now() - quietSince > 1100)
+        || (!analyser && elapsed > 5000);
+      if (!heard && analyser && elapsed > 6000) { self.cancel(); fail('Nieko neišgirdau.', true); return; }
+      if (done) { clearInterval(timer); if (recorder.state !== 'inactive') recorder.stop(); }
+    }, 60);
+  }).catch(() => { release(); fail('Mikrofonas nepasiekiamas. Leisk jį telefono nustatymuose.', false); });
 }
 
 /* On the lock screen the question stays up with the reason under it, and
@@ -5269,6 +5360,7 @@ function fillOrigins() {
         status.textContent = `Tvarkaraščiai: ${state.dataInfo}`;
         state.serverReady = true;
         if (s.demo) startDemo(s.demo);
+        state.whisper = !!s.whisper;
         api('/api/cities').then((data) => { state.cities = data.cities || []; fillOrigins(); renderAll(); refreshNearby(true); refreshPlaceTimes(true); }).catch(() => {});
         return;
       }

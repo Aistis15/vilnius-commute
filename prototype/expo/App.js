@@ -378,6 +378,10 @@ function Shell() {
           javaScriptEnabled
           domStorageEnabled
           allowsInlineMediaPlayback
+          // The page records the words itself (iPhone has no Lithuanian
+          // recogniser; the computer's Whisper hears them): no second prompt
+          // on top of iOS's own microphone permission.
+          mediaCapturePermissionGrantType="grant"
           keyboardDisplayRequiresUserAction={false}
           webviewDebuggingEnabled={__DEV__}
         />

@@ -29,7 +29,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vc import crossings, data, demo, departures, live, planner, search, shapes, speech_lt, walking  # noqa: E402
+from vc import crossings, data, demo, departures, live, planner, search, shapes, speech_lt, transcribe, walking  # noqa: E402
 
 # VC_PORT runs a second copy beside the first, e.g. to try --lan.
 PORT = int(os.environ.get("VC_PORT", "8765"))
@@ -174,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
                     # The wall-clock time, for the app to set its own clock to
                     # (an offset would be wrong across time zones).
                     "demo": {"now": server_now().isoformat(timespec="milliseconds")} if State.demo else None,
+                    # Lithuanian speech heard here, for phones that cannot (vc/transcribe.py).
+                    "whisper": transcribe.available(),
                 })
             if url.path == "/api/parse":
                 return self.send_json(speech_lt.parse(query.get("text", ""), minutes_of(query.get("now"))).as_json())
@@ -307,6 +309,27 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             return self.send_json({"error": str(error)}, 500)
 
+    def do_POST(self):
+        url = urlparse(self.path)
+        if url.path != "/api/transcribe":
+            return self.send_json({"error": "unknown endpoint"}, 404)
+        length = int(self.headers.get("Content-Length") or 0)
+        if not 0 < length <= 10_000_000:
+            return self.send_json({"error": "Įrašas tuščias arba per ilgas."}, 400)
+        audio = self.rfile.read(length)
+        kind = self.headers.get("Content-Type", "")
+        suffix = ".webm" if "webm" in kind else ".wav" if "wav" in kind else ".ogg" if "ogg" in kind else ".mp4"
+        if not transcribe.available():
+            return self.send_json({"error": "Balso atpažinimui kompiuteryje: pip3 install faster-whisper"}, 503)
+        try:
+            started = time.monotonic()
+            text = transcribe.transcribe(audio, suffix)
+            print(f"Heard ({time.monotonic() - started:.1f} s): {text}")
+            return self.send_json({"text": text})
+        except Exception as error:  # noqa: BLE001
+            traceback.print_exc()
+            return self.send_json({"error": str(error)}, 500)
+
     def stream(self):
         """Server-sent events: "live" the moment new positions (or called-off
         trips) have come in, for the app to ask for what it shows; a comment
@@ -418,6 +441,9 @@ def main():
             State.offset_s = State.start_offset_s = (start - datetime.now()).total_seconds()
         print(f"Demo: buses from the timetable, clock at {server_now():%H:%M}.")
     threading.Thread(target=load_in_background, daemon=True).start()
+    transcribe.preload()
+    print("Speech: Whisper " + ("loading in the background." if transcribe.available()
+                                else "not installed (pip3 install faster-whisper): no voice on the iPhone."))
     # --lan: the phone on the same Wi-Fi may connect (all of this computer's
     # IPv4 addresses, not only 127.0.0.1). Windows asks once whether Python
     # may accept connections. --tunnel: also through a quick tunnel.
