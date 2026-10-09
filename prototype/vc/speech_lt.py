@@ -73,7 +73,7 @@ FILLER = {fold(w) for w in """
     į i iki prie pas link ligi nuo kaip dabar šiandien rytoj
     valandą valanda valandai valandos val minutę minučių min ir kad galėčiau
     ryto rytą ryte dienos popiet vakaro vakare vakarą nakties naktį
-    pusę pusė pusei be po to pietų
+    pusę pusė pusei pusės be po to pietų
     prašau gal nuvesk parodyk
 """.split()}
 
@@ -291,8 +291,8 @@ def _find_time(folded: list[str]) -> tuple[tuple[int, int, str | None], set[int]
         if match and int(match[1]) < 24 and int(match[2]) < 60:
             return (int(match[1]), int(match[2]), part), with_part({i})
 
-        # pusę trijų -> 2:30
-        if word in ("puse", "pusei") and (n := _number_at(folded, i + 1)):
+        # pusę trijų, iki pusės trečios -> 2:30
+        if word in ("puse", "pusei", "puses") and (n := _number_at(folded, i + 1)):
             value, used = n
             if 1 <= value <= 12:
                 return (value - 1, 30, part), with_part({i, *range(i + 1, i + 1 + used)})

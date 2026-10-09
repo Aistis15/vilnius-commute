@@ -212,6 +212,10 @@ class HourSaidAlone(unittest.TestCase):
         self.check("Man reikia į Akropolį devynios nulis nulis", "09:00")
         self.check("Man reikia į Akropolį devynios nulis penki", "09:05")
 
+    def test_by_half_past(self):
+        r = parse("Man reikia į OZĄ iki pusės trečios", 13 * 60 + 25)
+        self.assertEqual((r.candidates[0], r.time, r.mode), ("OZas", "14:30", "arrive"))
+
     def test_number_inside_a_name_is_not_a_time(self):
         r = parse("Man reikia į Trys kryžiai", 8 * 60 + 10)
         self.assertEqual(r.destination, "Trys kryžiai")
