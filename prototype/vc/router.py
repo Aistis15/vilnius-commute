@@ -219,7 +219,15 @@ class Router:
             # First running trip that leaves this stop no earlier than `ready`.
             # Trips are sorted by departure, and Vilnius vehicles do not
             # overtake one another on a pattern, so a binary search holds.
-            position = bisect_left(trips, ready, key=lambda s: table[s][2][index] + shift)
+            # (By hand: bisect's key= needs Python 3.10, a Mac has 3.9.)
+            lo, hi = 0, len(trips)
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if table[trips[mid]][2][index] + shift < ready:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            position = lo
             if position < len(trips) and position != current:
                 if current < 0 or position < current:
                     current = position
