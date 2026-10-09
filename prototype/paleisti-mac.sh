@@ -1,12 +1,14 @@
 #!/bin/bash
-# Vilnius Commute demo on a Mac, in one go: the server in demo mode with
-# Whisper (voice on the iPhone), then Expo through a tunnel for Expo Go.
+# Vilnius Commute on the iPhone from a Mac, no app to install: the server in
+# demo mode with Whisper (voice), reached over https through a Cloudflare
+# quick tunnel (the microphone needs https). The QR code opens it in Safari;
+# "Pridėti prie pradžios ekrano" makes it full screen like an app.
 #   bash prototype/paleisti-mac.sh          the real clock
 #   bash prototype/paleisti-mac.sh 13:00    the clock from 13:00 today
+# (Expo Go instead: paleisti-mac-expo.sh)
 cd "$(dirname "$0")"
 
 command -v python3 >/dev/null || { echo "Nėra python3. Įdiek: xcode-select --install"; exit 1; }
-command -v node >/dev/null || { echo "Nėra Node.js. Įdiek LTS iš https://nodejs.org"; exit 1; }
 
 if ! python3 -c "import faster_whisper" 2>/dev/null; then
   echo "Diegiamas Whisper (balsui telefone)..."
@@ -15,30 +17,63 @@ if ! python3 -c "import faster_whisper" 2>/dev/null; then
     || echo "Whisper įdiegti nepavyko: viskas veiks, išskyrus balsą."
 fi
 
+# cloudflared, beside this script (server.py finds it there).
+if ! command -v cloudflared >/dev/null && [ ! -x ./cloudflared ]; then
+  echo "Atsisiunčiamas cloudflared (https adresui)..."
+  ARCH=$([ "$(uname -m)" = "arm64" ] && echo arm64 || echo amd64)
+  curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-$ARCH.tgz" | tar xz \
+    || { echo "cloudflared atsisiųsti nepavyko. Bandyk: brew install cloudflared"; exit 1; }
+  chmod +x ./cloudflared
+  xattr -d com.apple.quarantine ./cloudflared 2>/dev/null
+fi
+
 # An old server on the port would answer instead of this one.
 lsof -ti tcp:8765 | xargs kill 2>/dev/null
 sleep 1
 
 LOG=/tmp/vilnius-commute-server.log
-python3 -u server.py --demo "$@" > "$LOG" 2>&1 &
+python3 -u server.py --demo "$@" --tunnel > "$LOG" 2>&1 &
 SERVER=$!
-tail -n +1 -f "$LOG" | grep --line-buffered -E "Demo:|Speech:|Ready|Heard|Error|rror:" &
-TAIL=$!
-trap 'kill $SERVER $TAIL 2>/dev/null' EXIT
+trap 'kill $SERVER 2>/dev/null; pkill -f "cloudflared tunnel --no-autoupdate" 2>/dev/null' EXIT
 
-echo "Laukiama serverio..."
+echo "Laukiama serverio ir https adreso (iki minutės)..."
+URL=""
 for _ in $(seq 1 90); do
-  curl -s localhost:8765/api/status | grep -q '"ready": true' && break
+  URL=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" "$LOG" | head -1)
+  READY=$(curl -s localhost:8765/api/status | grep -c '"ready": true')
+  [ -n "$URL" ] && [ "$READY" = "1" ] && break
   sleep 1
 done
+grep -E "Demo:|Speech:" "$LOG"
 
-cd expo
-[ -d node_modules/expo-audio ] || npm install --no-audit --no-fund
-npx expo whoami >/dev/null 2>&1 || npx expo login
+if [ -z "$URL" ]; then
+  echo
+  echo "https adreso gauti nepavyko (tinklas blokuoja Cloudflare?). Žurnalas: $LOG"
+  echo "Bandyk kitą tinklą, pvz. telefono asmeninį prieigos tašką (Hotspot)."
+  exit 1
+fi
+
+PAGE="$URL/?shell=expo"
+echo
+echo "=============================================================="
+echo " iPhone: nuskenuok šį QR kodą kamera (arba Safari įvesk adresą):"
+echo " $PAGE"
+echo "=============================================================="
+python3 -c "import qrcode" 2>/dev/null || python3 -m pip install --user -q qrcode 2>/dev/null \
+  || python3 -m pip install --user --break-system-packages -q qrcode 2>/dev/null
+python3 - "$PAGE" <<'PY' || echo "(QR kodas atidarytas naršyklėje)"
+import sys, qrcode
+q = qrcode.QRCode(border=2)
+q.add_data(sys.argv[1])
+q.print_ascii(invert=True)
+PY
+# The same code, bigger, in the Mac's browser.
+open "http://localhost:8765/connect" 2>/dev/null
 
 echo
-echo " iPhone: Expo Go -> ta pati paskyra -> nuskenuok QR kamera -> leisk vietą ir mikrofoną."
-echo " Užrakto ekrane: mikrofonas -> \"Man reikia į OZĄ iki antros\"."
-echo " Čia matysi \"Heard: ...\" - ką Whisper išgirdo. Sustabdyti: Ctrl+C."
+echo " 1. Atsidarys Safari. Spausk Bendrinti (kvadratas su rodykle) -> Pridėti prie pradžios ekrano."
+echo " 2. Atidaryk \"Vilnius\" nuo pradžios ekrano. Leisk vietą ir mikrofoną."
+echo " 3. Užrakto ekrane: mikrofonas -> \"Man reikia į OZĄ iki antros\"."
+echo " Žemiau matysi \"Heard: ...\" - ką Whisper išgirdo. Sustabdyti: Ctrl+C."
 echo
-npx expo start --tunnel
+tail -n 0 -f "$LOG" | grep --line-buffered -E "Heard|Error|rror:"

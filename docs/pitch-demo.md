@@ -4,6 +4,11 @@ The demo, step by step. Written in Lithuanian, like the app.
 
 ## Prieš pristatymą (pitchas ~13:00, scenarijus ISM → OZAS)
 
+**Mac'e, be jokios programėlės:** `cd ~/vilnius-commute && git pull && bash prototype/paleisti-mac.sh`.
+Terminale atsiranda QR kodas. Nuskenuok jį iPhone kamera, Safari spausk Bendrinti →
+**Pridėti prie pradžios ekrano** ir atidaryk „Vilnius“ nuo pradžios ekrano.
+Vietas (OZAS) išsaugok jau ten: pradžios ekrano programėlė turi savo atmintį.
+
 1. Kompiuteryje: `git fetch`, `git checkout claude/dreamy-wright-qx3kbl`,
    tada du kartus spustelėk **`prototype/Paleisti-demo.bat`**. Laikas lieka
    tikras, todėl sutampa su telefono laikrodžiu. Atsidaro serveris ir Expo QR kodas.

@@ -56,8 +56,8 @@
     code.make();
     return code.createSvgTag({ cellSize: 6, margin: 0, scalable: true });
   }
-  const card = (title, sub, url) => `<div class="way"><h2>${title}</h2><div class="sub">${sub}</div>
-      <div class="qr">${qr(deep(url))}</div><div class="address">${url.replace(/^https?:\/\//, '')}</div></div>`;
+  const card = (title, sub, url, link = deep(url)) => `<div class="way"><h2>${title}</h2><div class="sub">${sub}</div>
+      <div class="qr">${qr(link)}</div><div class="address">${url.replace(/^https?:\/\//, '')}</div></div>`;
   let shown = '';
   async function refresh() {
     let data;
@@ -66,6 +66,9 @@
     if (key === shown) return;
     shown = key;
     const parts = [];
+    // No app at all: Safari opens the page over https (the microphone needs
+    // it), and "Pridėti prie pradžios ekrano" makes it full screen.
+    if (data.tunnel) parts.push(card('iPhone Safari', 'Be jokios programėlės: nuskenuok kamera, tada Bendrinti → Pridėti prie pradžios ekrano.', data.tunnel, `${data.tunnel}/?shell=expo`));
     if (data.lan && data.lan.length) parts.push(card('Tame pačiame Wi-Fi', 'Greičiausia: tiesiai iš kompiuterio.', data.lan[0]));
     if (data.tunnel) parts.push(card('Bet kur', 'Per internetą, ir ne namuose. Adresas keičiasi kas paleidimą.', data.tunnel));
     document.getElementById('ways').innerHTML = parts.join('')
