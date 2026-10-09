@@ -4463,6 +4463,14 @@ function listen(surface, onText) {
     listenRecorded(surface, onText);
     return;
   }
+  // Inside the phone the browser's recogniser has no Lithuanian: say what is
+  // missing rather than trying it.
+  if (SHELL) {
+    stopListening();
+    failVoice(surface, !state.whisper ? 'Kompiuteryje įdiek Whisper: pip3 install faster-whisper'
+      : 'Mikrofonui reikia https: paleisk npx expo start --tunnel', true);
+    return;
+  }
   stopListening();
   state.interim = '';
   // Inside the phone the words are the phone's: no "browser". The panel's
@@ -4540,6 +4548,7 @@ function listenRecorded(surface, onText) {
     failVoice(surface, message, !retry);
   };
   renderAll();
+  if (SHELL && window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mic' }));
   navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then((got) => {
     stream = got;
     if (cancelled) { release(); return; }

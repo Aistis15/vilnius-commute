@@ -11,6 +11,7 @@ import { SafeAreaProvider, initialWindowMetrics, useSafeAreaInsets } from 'react
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
+import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebView } from 'react-native-webview';
 import { shellScript } from './shellScript';
@@ -257,6 +258,21 @@ function Shell() {
     }
   }, [askPermission, failPage, sendFix]);
 
+  // The microphone, asked for when the app opens: the page records the
+  // words for the computer's Whisper (iOS has no Lithuanian recogniser), and
+  // a web view can only record once the app itself may. Recording on in the
+  // audio session, or iOS gives the web view silence.
+  const askMicrophone = useCallback(async () => {
+    try {
+      const { granted } = await requestRecordingPermissionsAsync();
+      if (granted) await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      return granted;
+    } catch {
+      return false;
+    }
+  }, []);
+  useEffect(() => { askMicrophone(); }, [askMicrophone]);
+
   // No GPS or compass in the background; back on screen, carry on if asked.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
@@ -308,10 +324,14 @@ function Shell() {
       case 'chrome':
         setBarStyle(msg.dark ? 'light' : 'dark');
         break;
+      case 'mic':
+        // The page is about to record: ask again if it was not allowed yet.
+        askMicrophone();
+        break;
       default:
         break;
     }
-  }, [answerOnce, keep, sendFix, startWatching, stopWatching]);
+  }, [answerOnce, askMicrophone, keep, sendFix, startWatching, stopWatching]);
 
   // Links to other sites open in Safari; the app itself stays in the view.
   const onShouldStart = useCallback((request) => {

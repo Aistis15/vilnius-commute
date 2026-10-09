@@ -8,7 +8,8 @@
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Vieta reikalinga, kad programėlė parodytų artimiausias stoteles ir vestų tave maršrutu."
+        "NSLocationWhenInUseUsageDescription": "Vieta reikalinga, kad programėlė parodytų artimiausias stoteles ir vestų tave maršrutu.",
+        "NSMicrophoneUsageDescription": "Mikrofonas reikalingas, kad galėtum pasakyti, kur keliauji."
       }
     }
   }
