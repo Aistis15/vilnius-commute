@@ -60,6 +60,17 @@
       <div class="status">Pagreitink laiką, kad matytum, kaip baneris keičiasi kelionės metu.</div>
     </div>
 
+    <div class="box" id="demo-box" hidden>
+      <h2>Demo</h2>
+      <div class="status">Autobusai rodomi ten, kur juos dabar deda tvarkaraštis, ne pagal GPS. Vėlavimą įjunk ranka, kai kelionė jau pradėta.</div>
+      <div class="buttons" id="demo-buttons">
+        <button data-late="240">Vėluoja 4 min</button>
+        <button data-late="720">Vėluoja 12 min</button>
+        <button data-late="0">Laiku</button>
+      </div>
+      <div class="status" id="demo-status"></div>
+    </div>
+
     <div class="box" id="heading-box">
       <h2>Kur atsisukęs</h2>
       <input type="range" id="heading-offset" min="-180" max="180" step="5" value="0" aria-label="Kur atsisukęs">

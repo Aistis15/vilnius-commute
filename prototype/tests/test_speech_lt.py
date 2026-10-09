@@ -187,3 +187,32 @@ class SaidLikePeople(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HourSaidAlone(unittest.TestCase):
+    """The hour on its own, the way people say it: "devynios", "iki
+    devynių", "devintai valandai". A number in a place's name stays."""
+
+    def check(self, text, time):
+        r = parse(text, 8 * 60 + 10)
+        self.assertEqual((r.destination, r.time, r.mode), ("Akropolį", time, "arrive"), text)
+
+    def test_nominative_last(self):
+        self.check("Man reikia į Akropolį devynios", "09:00")
+        self.check("Man reikia į Akropolį devynios valandos", "09:00")
+
+    def test_by_genitive(self):
+        self.check("Man reikia į Akropolį iki devynių", "09:00")
+
+    def test_dative_ordinal(self):
+        self.check("Man reikia į Akropolį devintai valandai", "09:00")
+        self.check("Man reikia į Akropolį devintai", "09:00")
+
+    def test_zero_minutes_said_digit_by_digit(self):
+        self.check("Man reikia į Akropolį devynios nulis nulis", "09:00")
+        self.check("Man reikia į Akropolį devynios nulis penki", "09:05")
+
+    def test_number_inside_a_name_is_not_a_time(self):
+        r = parse("Man reikia į Trys kryžiai", 8 * 60 + 10)
+        self.assertEqual(r.destination, "Trys kryžiai")
+        self.assertIsNone(r.time)

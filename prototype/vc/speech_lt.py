@@ -21,22 +21,22 @@ def fold(text: str) -> str:
 
 
 # Every form a number takes when telling the time: nominative (keturiolika
-# dvidešimt), ordinal accusative (aštuntą vakaro), genitive (pusę trijų, be
-# penkiolikos).
+# dvidešimt), ordinal accusative (aštuntą vakaro), ordinal dative (devintai
+# valandai), genitive (pusę trijų, be penkiolikos).
 _NUMBER_FORMS = {
     0: "nulis nuline nulinę",
-    1: "vienas viena pirma pirmą pirmos vienos vieno",
-    2: "du dvi antra antrą antros dvieju dviejų",
-    3: "trys trečia trečią trečios triju trijų",
-    4: "keturi keturios ketvirta ketvirtą ketvirtos keturiu keturių",
-    5: "penki penkios penkta penktą penktos penkiu penkių",
-    6: "šeši šešios šešta šeštą šeštos šešiu šešių",
-    7: "septyni septynios septinta septintą septintos septyniu septynių",
-    8: "aštuoni aštuonios aštunta aštuntą aštuntos aštuoniu aštuonių",
-    9: "devyni devynios devinta devintą devintos devyniu devynių",
-    10: "dešimt dešimta dešimtą dešimtos dešimties",
-    11: "vienuolika vienuolikta vienuoliktą vienuoliktos vienuolikos",
-    12: "dvylika dvylikta dvyliktą dvyliktos dvylikos",
+    1: "vienas viena pirma pirmą pirmos vienos vieno pirmai",
+    2: "du dvi antra antrą antros dvieju dviejų antrai",
+    3: "trys trečia trečią trečios triju trijų trečiai",
+    4: "keturi keturios ketvirta ketvirtą ketvirtos keturiu keturių ketvirtai",
+    5: "penki penkios penkta penktą penktos penkiu penkių penktai",
+    6: "šeši šešios šešta šeštą šeštos šešiu šešių šeštai",
+    7: "septyni septynios septinta septintą septintos septyniu septynių septintai",
+    8: "aštuoni aštuonios aštunta aštuntą aštuntos aštuoniu aštuonių aštuntai",
+    9: "devyni devynios devinta devintą devintos devyniu devynių devintai",
+    10: "dešimt dešimta dešimtą dešimtos dešimties dešimtai",
+    11: "vienuolika vienuolikta vienuoliktą vienuoliktos vienuolikos vienuoliktai",
+    12: "dvylika dvylikta dvyliktą dvyliktos dvylikos dvyliktai",
     13: "trylika trylikta tryliktą tryliktos trylikos",
     14: "keturiolika keturiolikta keturioliktą keturioliktos keturiolikos",
     15: "penkiolika penkiolikta penkioliktą penkioliktos penkiolikos",
@@ -71,7 +71,7 @@ FILLER = {fold(w) for w in """
     būti būt buti nuvykti nuvažiuoti važiuoti važiuoju vaziuoti keliauti
     keliausime eiti nueiti atvykti atvažiuoti nukakti išvykti išvažiuoti išeiti
     į i iki prie pas link ligi nuo kaip dabar šiandien rytoj
-    valandą valanda valandai val minutę minučių min ir kad galėčiau
+    valandą valanda valandai valandos val minutę minučių min ir kad galėčiau
     ryto rytą ryte dienos popiet vakaro vakare vakarą nakties naktį
     pusę pusė pusei be po to pietų
     prašau gal nuvesk parodyk
@@ -272,6 +272,9 @@ def _number_at(folded: list[str], i: int) -> tuple[int, int] | None:
     return value, 1
 
 
+HOUR_WORDS = ("val", "valanda", "valandai", "valandos")
+
+
 def _find_time(folded: list[str]) -> tuple[tuple[int, int, str | None], set[int]] | tuple[None, set[int]]:
     part = None
     part_index = None
@@ -312,9 +315,12 @@ def _find_time(folded: list[str]) -> tuple[tuple[int, int, str | None], set[int]
         if not 0 <= hour <= 24:
             continue
         j = i + used_h
-        if j < len(folded) and folded[j] in ("val", "valanda", "valandai"):
+        if j < len(folded) and folded[j] in HOUR_WORDS:
             j += 1
         m = _number_at(folded, j)
+        # "devynios nulis penki" is 09:05, "devynios nulis nulis" 09:00.
+        if m and m[0] == 0 and folded[j] == "nulis" and (unit := _number_at(folded, j + 1)) and unit[0] <= 9:
+            m = (unit[0], 2)
         # Hour and minutes in the same form, both digits or both words:
         # "Gedimino 9 keturiolika dvidešimt" is 14:20 at number 9, not 9:14.
         same_kind = m is not None and folded[i].isdigit() == folded[j].isdigit()
@@ -323,8 +329,13 @@ def _find_time(folded: list[str]) -> tuple[tuple[int, int, str | None], set[int]
         # A lone number is only a time when something says so: an ordinal
         # form ("aštuntą"), a part of day, or "valandą".
         word = folded[i]
-        is_ordinal = word.endswith("a") and not word.isdigit() and hour <= 24
-        if part is not None or j > i + used_h or is_ordinal:
+        is_ordinal = word.endswith(("a", "ai")) and not word.isdigit() and hour <= 24
+        # "iki devynių" (by nine), or a number said last, after the place:
+        # "į Akropolį devynios" is how the hour is said, never an address,
+        # which a recogniser writes in digits.
+        by = i > 0 and folded[i - 1] == "iki" and not word.isdigit()
+        last = i > 0 and j == len(folded) and not word.isdigit() and 1 <= hour <= 24
+        if part is not None or j > i + used_h or is_ordinal or by or last:
             return (hour % 24, 0, part), with_part(set(range(i, j)))
     return None, set()
 

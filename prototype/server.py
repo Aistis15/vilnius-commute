@@ -22,14 +22,14 @@ import sys
 import threading
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vc import crossings, data, departures, live, planner, search, shapes, speech_lt, walking  # noqa: E402
+from vc import crossings, data, demo, departures, live, planner, search, shapes, speech_lt, walking  # noqa: E402
 
 # VC_PORT runs a second copy beside the first, e.g. to try --lan.
 PORT = int(os.environ.get("VC_PORT", "8765"))
@@ -47,6 +47,16 @@ class State:
     # How a phone reaches this computer (--lan, --tunnel): see /connect.
     lan: list = []
     tunnel: str | None = None
+    # --demo: buses from the timetable (vc/demo.py), and with a time given,
+    # a clock this many seconds off the real one.
+    demo: bool = False
+    offset_s: float = 0.0
+    start_offset_s: float = 0.0     # where "Dabar" takes the demo back to
+
+
+def server_now() -> datetime:
+    """Now, as the app should see it: the real clock, moved in --demo HH:MM."""
+    return datetime.now() + timedelta(seconds=State.offset_s)
 
 
 def load_in_background() -> None:
@@ -55,7 +65,8 @@ def load_in_background() -> None:
         State.timetable = data.load_timetable()
         State.index = search.StopIndex(State.timetable)
         State.cities = planner.city_summaries(State.timetable)
-        State.live = live.Live(State.timetable)
+        State.live = (demo.ScheduledLive(State.timetable, clock=server_now) if State.demo
+                      else live.Live(State.timetable))
         State.live.start()
         State.crossings = crossings.load()
         print(f"Ready: {len(State.timetable.stop_names)} stops. Open http://localhost:{PORT}")
@@ -95,7 +106,7 @@ def live_now(query: dict) -> datetime | None:
     """The real now, when the app's clock is at it; else None (no live data)."""
     if State.live is None:
         return None
-    real = datetime.now()
+    real = server_now()
     if query.get("now"):
         claimed = local_time(query["now"])
         if abs((claimed - real).total_seconds()) > LIVE_TOLERANCE_S:
@@ -159,6 +170,10 @@ class Handler(BaseHTTPRequestHandler):
                     "error": State.error,
                     "built_at": State.manifest.get("built_at"),
                     "stops": State.manifest.get("stops"),
+                    # The app runs its clock this far off the real one.
+                    # The wall-clock time, for the app to set its own clock to
+                    # (an offset would be wrong across time zones).
+                    "demo": {"now": server_now().isoformat(timespec="milliseconds")} if State.demo else None,
                 })
             if url.path == "/api/parse":
                 return self.send_json(speech_lt.parse(query.get("text", ""), minutes_of(query.get("now"))).as_json())
@@ -222,7 +237,7 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/nearby":
                 # The stops a short walk away and what leaves them in the next
                 # hour, live where the vehicle is on the road.
-                when = local_time(query["now"]) if query.get("now") else datetime.now()
+                when = local_time(query["now"]) if query.get("now") else server_now()
                 real = live_now(query)
                 return self.send_json(departures.nearby(
                     State.timetable, float(query["lat"]), float(query["lon"]), when,
@@ -233,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(departures.in_box(State.timetable, south, west, north, east))
             if url.path == "/api/stop":
                 # One platform's board, for the map's stop card.
-                when = local_time(query["now"]) if query.get("now") else datetime.now()
+                when = local_time(query["now"]) if query.get("now") else server_now()
                 real = live_now(query)
                 return self.send_json(departures.at_stop(State.timetable, int(query["id"]), when,
                                                          State.live if real is not None else None))
@@ -267,6 +282,22 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     states[ref] = State.live.ride_state([*map(int, parts[:5]), parts[5]], real)
                 return self.send_json({"legs": states, "live_available": real is not None})
+            if url.path == "/api/demo/late" and State.demo:
+                # Makes the bus of one ride late, on cue ("ref" as /api/live
+                # takes it, "s" seconds; 0 puts it back on time).
+                pattern, trip = (int(x) for x in query["ref"].split(".")[:2])
+                State.live.set_delay(pattern, trip, int(query.get("s", "0")))
+                return self.send_json({"ok": True})
+            if url.path == "/api/demo/clock" and State.demo:
+                # The app jumped its clock ("+5 min", "Kitas etapas"): the
+                # buses jump with it, so they stay live.
+                # "reset" goes back to the time the demo started at, every
+                # bus on time again.
+                if query.get("reset"):
+                    State.live.clear_delays()
+                State.offset_s = (State.start_offset_s if query.get("reset")
+                                  else (local_time(query["now"]) - datetime.now()).total_seconds())
+                return self.send_json({"now": server_now().isoformat(timespec="milliseconds")})
             if url.path.startswith("/api/"):
                 return self.send_json({"error": "unknown endpoint"}, 404)
             return self.serve_static(url.path)
@@ -377,6 +408,15 @@ def start_tunnel() -> None:
 
 def main():
     mimetypes.add_type("application/javascript", ".js")
+    # --demo: the buses where their timetable puts them, no stops.lt needed;
+    # --demo 08:15 also runs the clock from 08:15 today (vc/demo.py).
+    if "--demo" in sys.argv:
+        State.demo = True
+        after = sys.argv[sys.argv.index("--demo") + 1:]
+        if after and re.fullmatch(r"\d{1,2}:\d{2}", after[0]):
+            start = demo.parse_clock(after[0], datetime.now())
+            State.offset_s = State.start_offset_s = (start - datetime.now()).total_seconds()
+        print(f"Demo: buses from the timetable, clock at {server_now():%H:%M}.")
     threading.Thread(target=load_in_background, daemon=True).start()
     # --lan: the phone on the same Wi-Fi may connect (all of this computer's
     # IPv4 addresses, not only 127.0.0.1). Windows asks once whether Python

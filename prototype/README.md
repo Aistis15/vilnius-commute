@@ -25,6 +25,28 @@ The first start downloads the timetables of all five cities in one file
 (~6.7 MB) from the `data-latest` release; after that routing works offline.
 Place search and speech need the internet.
 
+### Demo mode (for a pitch)
+
+Double-click **`Paleisti-demo.bat`** (or `python server.py --demo 08:10`).
+The buses come from the timetable instead of stops.lt: each one is drawn
+on the trip the operator scheduled, between the two stops the timetable
+puts it between, gliding along its street (`vc/demo.py`). Nothing else
+changes, so the map, the boards, "už 3 stotelių" and the approaching bus in
+the banner all work without stops.lt and look the same every rehearsal.
+
+- `--demo 08:10` runs the clock from 08:10 today, at normal speed, for the
+  morning rush in the evening. Without a time, the real clock.
+- The panel's "+5 min" and "Kitas etapas" move the buses too, so they stay
+  live; 10× and 60× do not (as without demo mode). "Dabar" goes back to
+  the demo's start, every bus on time.
+- The panel gets a **Demo** box: "Vėluoja 4 min" / "Vėluoja 12 min" make
+  the bus the rider is on or waiting for late, to show the plan moving
+  with it and "Nespėsi persėsti".
+- Every bus runs exactly on time unless made late, and nothing is called
+  off. It is a timetable, not GPS: say so if asked.
+
+`docs/pitch-demo.md` is the run sheet.
+
 ### On the iPhone
 
 The iPhone app (`App/`, installed from a Mac with Xcode: the `mac-kit`
@@ -44,6 +66,7 @@ phone layout on the desk.
 | Address and place search: Photon (OpenStreetMap), Lithuania-wide | "Balsas be mikrofono" stands in for a microphone when there is none |
 | Lithuanian speech: the browser's recogniser + `vc/speech_lt.py` | Your location comes from the browser, or a place you pick |
 | Live buses: stops.lt's positions and delays for Vilnius, Kaunas, Klaipėda (Panevėžys: positions only; Šiauliai publishes none), matched to timetable trips (`vc/live.py`) | Live data is used only while the clock panel is at the real time |
+| | `--demo`: buses where the timetable puts them, not GPS; delays only by hand |
 
 Saved places and preferences live in the browser's `localStorage`, never in
 this repository.

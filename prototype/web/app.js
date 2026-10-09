@@ -305,10 +305,23 @@ function crossfade(card, body, mutate, { dx = 0, animateHeight = true } = {}) {
 //
 // The prototype's own clock, so a 30-minute trip can be watched in 30 seconds.
 
+// The server's demo mode (server.py --demo 08:15) runs "now" this far off
+// the real clock; its buses are where the timetable puts them at that time.
+let clockOffset = 0;
+const realNow = () => Date.now() + clockOffset;
 const clock = { base: Date.now(), sim: Date.now(), speed: 1 };
 const now = () => new Date(clock.sim + (Date.now() - clock.base) * clock.speed);
 function setSpeed(speed) { clock.sim = now().getTime(); clock.base = Date.now(); clock.speed = speed; }
 function jumpTo(ms) { clock.sim = ms; clock.base = Date.now(); }
+/* The panel's jumps. In demo mode the server's clock jumps too, so the
+   buses are where they would be then and stay live. */
+let demoMode = false;
+function travelTo(ms) {
+  jumpTo(ms);
+  if (!demoMode) return;
+  clockOffset = ms - Date.now();
+  api('/api/demo/clock', { now: localIsoSec(new Date(ms)) }).then(() => pollLive()).catch(() => {});
+}
 
 // ---------------------------------------------------------------- palettes
 //
@@ -602,7 +615,7 @@ function wholeMinutes(option) {
 // by the server. They describe the real now, so they are used only while the
 // prototype's clock is at it (not at "+5 min" or 10x).
 
-const liveClock = () => Math.abs(now().getTime() - Date.now()) < 90_000;
+const liveClock = () => Math.abs(now().getTime() - realNow()) < 90_000;
 const refOf = (leg) => (leg && leg.kind === 'ride' && leg.trip ? leg.trip.join('.') : null);
 function liveOf(leg) {
   const ref = refOf(leg);
@@ -5089,24 +5102,28 @@ $('#speed-buttons').addEventListener('click', (event) => {
     document.querySelectorAll('[data-speed]').forEach((b) => b.setAttribute('aria-pressed', String(b === button)));
   }
 });
-$('#jump-5').addEventListener('click', () => { jumpTo(now().getTime() + 5 * 60_000); renderAll(); });
+$('#jump-5').addEventListener('click', () => { travelTo(now().getTime() + 5 * 60_000); renderAll(); });
 $('#heading-offset').addEventListener('input', (event) => {
   state.headingOffset = Number(event.target.value);
   $('#heading-value').textContent = state.headingOffset === 0 ? 'žiūri, kur eini' : `pasisukęs ${Math.abs(state.headingOffset)}° ${state.headingOffset < 0 ? 'kairėn' : 'dešinėn'}`;
   renderLock(); renderIsland();
 });
-$('#reset-clock').addEventListener('click', () => {
-  jumpTo(Date.now()); setSpeed(1);
+$('#reset-clock').addEventListener('click', async () => {
+  // In demo mode "Dabar" is the time the demo started at, buses and all.
+  if (demoMode) {
+    try { const back = await api('/api/demo/clock', { reset: 1 }); clockOffset = new Date(back.now).getTime() - Date.now(); } catch { /* stays */ }
+  }
+  jumpTo(realNow()); setSpeed(1);
   document.querySelectorAll('[data-speed]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.speed === '1')));
   renderAll();
 });
 $('#jump-stage').addEventListener('click', () => {
   const at = now().getTime();
-  if (!state.trip) { jumpTo(at + 5 * 60_000); renderAll(); return; }
+  if (!state.trip) { travelTo(at + 5 * 60_000); renderAll(); return; }
   const marks = [];
   state.trip.option.legs.forEach((leg) => { marks.push(t(leg.departure), t(leg.arrival)); });
   const next = marks.filter((m) => m > at + 1000).sort((a, b) => a - b)[0];
-  jumpTo((next || at + 5 * 60_000) + 1000);
+  travelTo((next || at + 5 * 60_000) + 1000);
   renderAll();
 });
 $('#toggle-lock').addEventListener('click', () => (state.locked ? actions.unlock() : actions.lock()));
@@ -5167,6 +5184,38 @@ $('#origin-select').addEventListener('change', (event) => {
 });
 $('#locate').addEventListener('click', () => locate(true));
 
+/* Demo mode: the clock at the server's demo time, and the panel's buttons
+   that make the rider's bus late on cue. */
+function startDemo(demo) {
+  // The server's wall-clock time, read as this device's local time.
+  clockOffset = new Date(demo.now).getTime() - Date.now();
+  demoMode = true;
+  jumpTo(realNow()); setSpeed(1);
+  document.querySelectorAll('[data-speed]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.speed === '1')));
+  $('#demo-box').hidden = false;
+  renderAll();
+}
+/* The ride a delay should hit: the one the rider is on or waiting for. */
+function demoRide() {
+  const trip = state.trip;
+  if (!trip) return null;
+  const at = now().getTime();
+  const rides = (trip.planned || trip.option).legs.filter((l) => l.kind === 'ride' && refOf(l));
+  return rides.find((l) => t(l.arrival) > at) || rides[rides.length - 1] || null;
+}
+$('#demo-buttons').addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-late]');
+  if (!button) return;
+  const ride = demoRide();
+  if (!ride) { $('#demo-status').textContent = 'Pirma pradėk kelionę.'; return; }
+  const late = Number(button.dataset.late);
+  try {
+    await api('/api/demo/late', { ref: refOf(ride), s: late });
+    $('#demo-status').textContent = late ? `${ride.route.name} vėluoja ${Math.round(late / 60)} min.` : `${ride.route.name} važiuoja laiku.`;
+  } catch { $('#demo-status').textContent = 'Serveris neatsakė.'; }
+  pollLive();
+});
+
 function fillOrigins() {
   if (state.serverReady) setTimeout(() => { refreshNearby(); refreshPlaceTimes(); }, 0);
   const select = $('#origin-select');
@@ -5219,6 +5268,7 @@ function fillOrigins() {
         state.dataInfo = `${stopsText(s.stops)} · atnaujinta ${built ? built.toLocaleDateString('lt-LT') : '—'}`;
         status.textContent = `Tvarkaraščiai: ${state.dataInfo}`;
         state.serverReady = true;
+        if (s.demo) startDemo(s.demo);
         api('/api/cities').then((data) => { state.cities = data.cities || []; fillOrigins(); renderAll(); refreshNearby(true); refreshPlaceTimes(true); }).catch(() => {});
         return;
       }
